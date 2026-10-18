@@ -1,0 +1,27 @@
+name: UG-01 CI & Pre-Publish Verification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    name: Type-Check & Pre-Publish Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Static Type-Check
+        run: deno task check
+
+      - name: Run Pre-Publish Test Suite
+        run: deno task test

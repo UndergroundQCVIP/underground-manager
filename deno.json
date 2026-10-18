@@ -6,7 +6,8 @@
     "start": "deno run --allow-net --allow-env --unstable-kv --unstable-cron src/main.ts",
     "dev": "BOT_MODE=polling deno run --watch --allow-net --allow-env --unstable-kv --unstable-cron src/main.ts",
     "test": "deno test --allow-net --allow-env --unstable-kv --unstable-cron tests/",
-    "check": "deno check src/main.ts tests/*_test.ts"
+    "check": "deno check src/main.ts tests/*_test.ts",
+    "verify": "deno run --allow-net --allow-env --unstable-kv scripts/verify_setup.ts"
   },
   "unstable": ["kv", "cron"],
   "imports": {
