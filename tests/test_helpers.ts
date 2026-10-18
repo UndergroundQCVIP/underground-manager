@@ -26,6 +26,10 @@ export const MOCK_CONFIG: AppConfig = {
   VOTING_PERIOD_DAYS: 5,
   VOTING_SHORTLIST_SIZE: 5,
   DIGEST_ENABLED: false,
+  BASE_CURRENCY: "CAD",
+  DEFAULT_STARS_REWARD_VALUATION_USD: 0.013,
+  TREASURY_REPORT_CHANNEL_ID: -1001002,
+  EXCHANGE_RATE_API_URL: "https://open.er-api.com/v6/latest/USD",
 };
 
 export async function setupTestEnvironment(): Promise<Deno.Kv> {

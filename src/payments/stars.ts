@@ -18,6 +18,7 @@ import {
   SPACE_IDS,
 } from "../types.ts";
 import { PaymentProcessResult, PaymentProvider } from "./provider.ts";
+import { trackSuccessfulPaymentStarsTx } from "../treasury/stars_tracking.ts";
 
 export interface TelegramPreCheckoutQuery {
   id: string;
@@ -261,6 +262,13 @@ export class TelegramStarsProvider implements PaymentProvider {
       0,
       payment.userId
     );
+
+    // 5. Track Telegram Stars revenue for treasury (21-day holding period)
+    try {
+      await trackSuccessfulPaymentStarsTx(payment, payment.amount);
+    } catch (err) {
+      console.error("[Treasury Warning] Failed to track Star transaction:", err);
+    }
 
     return {
       success: true,

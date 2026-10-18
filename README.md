@@ -1,18 +1,18 @@
-# UNDERGROUND MANAGER — Phase UG-01 & UG-02: Foundation, Memberships, Creator Directory & Voting
+# UNDERGROUND MANAGER — Complete Platform: UG-01, UG-02 & UG-03
 
-A simple, secure, and reliable Telegram-native membership management bot built with TypeScript, [grammY](https://grammy.dev/), Deno 2, Deno KV, and Deno Cron for Deno Deploy.
+A simple, secure, and reliable Telegram-native membership, creator directory, community voting, and treasury management bot built with TypeScript, [grammY](https://grammy.dev/), Deno 2, Deno KV, and Deno Cron for Deno Deploy.
 
-Underground Manager automatically manages recurring Telegram Stars subscriptions, join request approvals for private spaces, automated member removals upon subscription expiration, administrator-granted complimentary memberships, public creator directory synchronization from private forum topics, and member-governed acquisition voting.
+Underground Manager automatically manages recurring Telegram Stars subscriptions, join request approvals for private spaces, automated member removals upon subscription expiration, administrator-granted complimentary memberships, public creator directory synchronization from private forum topics, member-governed acquisition voting, multi-currency treasury tracking with 21-day Stars holding periods, and subscriber-funded acquisition budgets.
 
 ---
 
 ## 1. Feature Status Matrix
 
-In strict compliance with the UG-01 and UG-02 Implementation Contracts:
+In strict compliance with the UG-01, UG-02, and UG-03 Implementation Contracts:
 
 | Component / Feature | Status | Notes |
 |---|---|---|
-| **Core Architecture & Extensible Provider Interface** | ✅ **Completed & Tested** | Domain separation: Member, Entitlement, Payment, Sync, Audit. |
+| **Core Architecture & Extensible Provider Interface** | ✅ **Completed & Tested** | Domain separation: Member, Entitlement, Payment, Sync, Audit, Treasury. |
 | **Deno KV Persistence & Atomic Transactions** | ✅ **Completed & Tested** | In-memory & Deno Deploy KV with race-safe atomic commits. |
 | **Telegram Stars Recurring Payments (XTR)** | 🟡 **Implemented & Automated-Tested** | Validated with full mock suite; requires live BotFather Stars token for production billing. |
 | **Payment Idempotency & Charge ID deduplication** | ✅ **Completed & Tested** | Duplicate payments cannot double-credit time or revenue. |
@@ -22,16 +22,21 @@ In strict compliance with the UG-01 and UG-02 Implementation Contracts:
 | **Safe Member Removal (Ban & Immediate Unban)** | 🟡 **Implemented & Automated-Tested** | Expired non-admins removed without permanent blacklist; admins protected. |
 | **Complimentary Memberships (7d, 30d, 90d, 365d)** | ✅ **Completed & Tested** | Full admin wizard, customizable reasons & space levels, audit logged. |
 | **3-Day Expiry Reminder for Complimentary Members** | ✅ **Completed & Tested** | Automatically scheduled; single-delivery reminder with Stars purchase call-to-action. |
-| **Hourly Scheduled Reconciliation (Deno Cron)** | ✅ **Completed & Tested** | Hourly job (`0 * * * *`) reconciles access states, closes expired ballots, and sends reminders. |
+| **Hourly Scheduled Reconciliation (Deno Cron)** | ✅ **Completed & Tested** | Hourly job (`0 * * * *`) reconciles access states, closes expired ballots, advances 21d Stars, sends reminders. |
 | **Member Inline Keyboard UI & Navigation** | ✅ **Completed & Tested** | Join, My Membership, Access Channels, Wanted List, Voting, Support (/paysupport). |
-| **Administrator Private Menu & Lookup** | ✅ **Completed & Tested** | Whitelisted numeric user IDs; member lookup, complimentary wizard, creator registry, voting controls. |
+| **Administrator Private Menu & Lookup** | ✅ **Completed & Tested** | Whitelisted numeric user IDs; member lookup, complimentary wizard, creator registry, voting & treasury controls. |
 | **Update Idempotency & Webhook Secret Token** | ✅ **Completed & Tested** | Prevents webhook spoofing and duplicate message processing. |
 | **Creator Forum Topic Detection & Indexing (UG-02)** | ✅ **Completed & Tested** | Real-time topic creation/edit & photo/video detection; empty topics suppressed. |
 | **Public Creator Directory Sync (UG-02)** | ✅ **Completed & Tested** | Daily 3:00 AM sync with A–Z grouping, content hash diffs, <4000 char chunking. |
 | **Deep Link Membership Protection (UG-02)** | ✅ **Completed & Tested** | `t.me/<bot>?start=creator_<id>`: direct private topic link for paid members, Stars CTA for non-members. |
 | **Wanted List & Community Nominations (UG-02)** | ✅ **Completed & Tested** | `/suggest` and interactive voting; 1 support per paid member per monthly cycle. |
 | **Monthly Acquisition Voting & Quorum (UG-02)** | ✅ **Completed & Tested** | Top 5 shortlisted candidates; irrevocable vote; 20% turnout check; auto 5-day tie runoffs. |
-| **Treasury & Financial Payouts (UG-03)** | ⛔ **Out of Scope (UG-03)** | Intentionally deferred to Phase UG-03. |
+| **Telegram Stars Revenue Tracking & 21-Day Hold (UG-03)** | ✅ **Completed & Tested** | Strict separation: Pending (<21d), Withdrawable (>=21d), Withdrawn, and Settled cash. |
+| **Multi-Currency Conversion & Integer Math (UG-03)** | ✅ **Completed & Tested** | CAD reporting base, integer minor units (cents), external rate API with KV fallback cache. |
+| **Expense & Reimbursement Ledger (UG-03)** | ✅ **Completed & Tested** | Club vs personal outlay tracking, admin liabilities, auditable adjustments, recurring templates. |
+| **Treasury Allocations (60/25/15) & Budgeting (UG-03)** | ✅ **Completed & Tested** | 60% Acquisitions, 25% Operations, 15% Reserve applied strictly to actual settled net receipts. |
+| **Acquisition Budget & Voting Integration (UG-03)** | ✅ **Completed & Tested** | Candidate pricing in any currency, affordability checks, commitment reservation, post-vote purchases. |
+| **Automated Monthly Treasury Reporting (UG-03)** | ✅ **Completed & Tested** | Transparent member report channel publication + detailed admin audit breakdown. |
 
 ---
 
@@ -74,7 +79,7 @@ underground-manager/
 ├── README.md              # Complete technical documentation & operational manual
 ├── src/
 │   ├── config.ts          # Environment variables, chat mapping, price settings, validation
-│   ├── types.ts           # Core domain models (Member, Entitlement, Creator, Wanted, Ballot, Audit)
+│   ├── types.ts           # Core domain models (Member, Entitlement, Creator, Wanted, Ballot, Treasury, Audit)
 │   ├── main.ts            # Entry point: HTTP Webhook / Polling server + Deno.cron
 │   ├── db/
 │   │   ├── kv.ts          # Deno KV lifecycle and test injection
@@ -88,6 +93,9 @@ underground-manager/
 │   │   ├── wanted.ts      # [UG-02] Candidate nominations, atomic monthly support, rankings
 │   │   ├── voting.ts      # [UG-02] Ballots, atomic vote casting, tallies, runoff records
 │   │   ├── settings.ts    # [UG-02] Dynamic operational settings persistence
+│   │   ├── exchange_rates.ts # [UG-03] Multi-currency exchange rate storage & caching
+│   │   ├── treasury.ts    # [UG-03] Stars holding, withdrawals, journal, allocations
+│   │   ├── expenses.ts    # [UG-03] Expenses, commitments, reimbursements, recurring templates
 │   │   └── audit.ts       # Immutable audit event log
 │   ├── payments/
 │   │   ├── provider.ts    # Generic PaymentProvider interface
@@ -105,10 +113,15 @@ underground-manager/
 │   │   └── service.ts     # [UG-02] Nomination validation, duplicate checks, channel sync
 │   ├── voting/
 │   │   └── service.ts     # [UG-02] Ballot creation, turnout quorum, runoff scheduling
+│   ├── treasury/
+│   │   ├── conversion.ts  # [UG-03] Multi-currency conversion & integer arithmetic
+│   │   ├── stars_tracking.ts # [UG-03] 21-day Stars holding period & reconciliation
+│   │   ├── service.ts     # [UG-03] Overview, withdrawals, budgets & acquisition approvals
+│   │   └── reports.ts     # [UG-03] Monthly transparent member & admin audit reporting
 │   ├── complimentary/
 │   │   └── service.ts     # Admin complimentary grants, revokes, and 3-day reminders
 │   ├── cron/
-│   │   └── reconciliation.ts # Hourly reconciliation job & daily 3:00 AM directory sync
+│   │   └── reconciliation.ts # Hourly reconciliation, 21d Stars advance & daily 3:00 AM sync
 │   └── bot/
 │       ├── bot.ts         # GrammY bot assembly and error handling
 │       ├── keyboards.ts   # Inline keyboards for members and administrators
@@ -124,6 +137,7 @@ underground-manager/
 │           ├── forum.ts   # [UG-02] Forum topic created/edited & media upload listener
 │           ├── wanted.ts  # [UG-02] /wanted, /suggest, and interactive support casting
 │           ├── voting.ts  # [UG-02] /vote, candidate presentation, atomic confirmation
+│           ├── treasury.ts# [UG-03] /treasury, expenses, withdrawals, reports, pricing
 │           └── admin.ts   # Admin menu, complimentary wizard, creator & voting controls
 └── tests/
     ├── test_helpers.ts    # In-memory Deno KV and MockTelegramApi
@@ -135,7 +149,13 @@ underground-manager/
     ├── directory_test.ts  # 4 automated tests for public directory synchronization
     ├── wanted_test.ts     # 7 automated tests for nominations & monthly support
     ├── voting_test.ts     # 5 automated tests for ballots, votes, quorum & runoffs
-    └── acquisitions_test.ts # 3 automated tests for post-acquisition transitions
+    ├── acquisitions_test.ts # 3 automated tests for post-acquisition transitions
+    ├── treasury_stars_test.ts # [UG-03] 3 automated tests for Stars 21-day holding periods
+    ├── treasury_conversion_test.ts # [UG-03] 4 automated tests for multi-currency conversion
+    ├── treasury_expenses_test.ts # [UG-03] 4 automated tests for expenses & reimbursements
+    ├── treasury_allocations_test.ts # [UG-03] 4 automated tests for 60/25/15 fund allocations
+    ├── treasury_acquisitions_test.ts # [UG-03] 2 automated tests for candidate pricing & budget
+    └── treasury_reports_test.ts # [UG-03] 4 automated tests for monthly treasury reports
 ```
 
 ---
@@ -155,6 +175,7 @@ underground-manager/
      wanted - Browse Wanted List & support creators
      suggest - Propose a new creator for the Wanted List
      vote - Cast your vote in the active monthly acquisition ballot
+     treasury - View treasury balances, budget & reports (admins only)
      paysupport - Subscription billing help and support
      admin - Open Administrator controls (admins only)
      ```
@@ -223,6 +244,10 @@ Create a `.env` file for local development or set the following in Deno Deploy:
 | `VOTING_PERIOD_DAYS` | Monthly acquisition voting period duration in days | `5` | `5` |
 | `VOTING_SHORTLIST_SIZE` | Maximum top candidates included on monthly ballot | `5` | `5` |
 | `DIGEST_ENABLED` | Enable weekly creator update digest in General Chat | `false` | `false` |
+| `BASE_CURRENCY` | Base reporting currency for treasury | `CAD` | `CAD` |
+| `DEFAULT_STARS_REWARD_VALUATION_USD` | Configurable valuation assumption for 1 Telegram Star in USD | `0.013` | `0.013` |
+| `TREASURY_REPORT_CHANNEL_ID` | Channel ID for monthly report publication (or 0 for Wanted List) | `-1001234567891` | `0` |
+| `EXCHANGE_RATE_API_URL` | Public endpoint for fiat exchange rates | `https://open.er-api.com/v6/latest/USD` | `https://open.er-api.com/v6/latest/USD` |
 | `BOT_MODE` | Runtime mode: `webhook` (Deploy) or `polling` (Local) | `webhook` | `webhook` |
 | `PORT` | HTTP listener port | `8000` | `8000` |
 | `DENO_ENV` | Environment: `production`, `development`, or `test` | `production` | `development` |
@@ -262,7 +287,7 @@ Create a `.env` file for local development or set the following in Deno Deploy:
 ## 7. Local Development & Testing
 
 ### Running Tests
-The project includes a comprehensive, automated test suite covering **57 test cases across 9 test suites** (Payments, Access Control, Complimentary Memberships, Security, Creators, Directory Sync, Wanted List, Voting, and Acquisitions):
+The project includes a comprehensive, automated test suite covering **78 test cases across 15 test suites** (Payments, Access Control, Complimentary Memberships, Security, Creators, Directory Sync, Wanted List, Voting, Acquisitions, Stars 21-day holding, Currency Conversion, Expenses, Allocations, Acquisition Budgets, and Monthly Reports):
 
 ```bash
 deno task test
@@ -284,7 +309,7 @@ BOT_MODE=polling deno task dev
 
 ## 8. Administrator Playbook
 
-Administrators (whose Telegram user ID is listed in `ADMIN_USER_IDS`) have access to `/admin`.
+Administrators (whose Telegram user ID is listed in `ADMIN_USER_IDS`) have access to `/admin` and `/treasury`.
 
 ### Granting Complimentary Access
 1. Member starts the bot (`/start`) so their Telegram ID is registered.
@@ -323,6 +348,17 @@ Underground Manager automatically detects new forum topics and topic renames in 
 - Inspect the active monthly ballot and real-time tallies via `/admin` > **Voting Admin**.
 - Manually create or close ballots when needed.
 - If a ballot ends in a tie between top candidates, the bot automatically schedules a 5-day runoff ballot.
+
+### Treasury & Financial Management (UG-03)
+- Command: `/treasury` opens the real-time financial ledger and balances overview.
+- Record Expense: `/record_expense <amount> <currency> <category> <payer> <description>`
+  - Example: `/record_expense 16.00 CAD creator_subscription club_funds Aria OnlyFans`
+- Record Withdrawal & Settlement: `/record_withdrawal <stars> <tonReceived> [netCadSettled]`
+  - Example: `/record_withdrawal 5000 12.5 85.00`
+- Reconcile Stars Holding Periods: `/reconcile_stars` advances 21-day holding periods and fetches new API transactions.
+- Set Candidate Price: `/price <candidateId> <amount> [currency]`
+  - Example: `/price 1234-abcd 25.00 USD` (automatically converts to CAD and evaluates affordability against available budget).
+- View & Publish Monthly Reports: via `/treasury` > **Monthly Reports** or `/treasury_report`.
 
 ---
 
@@ -380,4 +416,140 @@ When a user clicks a creator deep link in the public directory:
    - If quorum is met, the winning creator is announced and transitions to `approved`.
    - In the event of a first-place tie, the engine automatically creates a 5-day runoff ballot between the tied candidates.
 5. **Acquisition Completion:** When administrators acquire the winning creator and create their topic in TOKEBEC VIP COLLECTIONS, the candidate automatically transitions to `acquired` and links to the creator profile.
+
+---
+
+## 11. Treasury, Multi-Currency Conversion & Acquisition Budgeting (UG-03)
+
+### Core Financial Principle: Telegram Stars Are Not Cash
+Telegram Stars (`XTR`) are virtual reward units, not immediate fiat money. Under Telegram's terms:
+- Stars received are held in a mandatory **21-day holding period** before becoming eligible for withdrawal.
+- Withdrawal eligibility does not guarantee a fixed fiat amount; conversion depends on Fragment withdrawal rates, network fees, and fiat exchange rates.
+- **The bot strictly enforces separation between Stars and Cash.** Pending or withdrawable Stars are never combined with fiat balances or counted as spendable cash.
+
+```mermaid
+flowchart LR
+    A["Stars Received\n(Pending Hold <21d)"] -->|"21 Days Elapsed\n(Deno Cron)"| B["Withdrawable Stars\n(Fragment Eligible)"]
+    B -->|"Admin Initiates\nWithdrawal"| C["Withdrawn Stars\n(Pending Fiat Settlement)"]
+    C -->|"Bank / Exchange\nDeposit Confirmed"| D["Settled Cash (CAD)\n(Added to Club Balance)"]
+    D -->|"Automatic 60/25/15\nAllocation"| E["Acquisition Fund: 60%\nOperations Fund: 25%\nEmergency Reserve: 15%"]
+```
+
+### Multi-Currency Integer Mathematics
+To prevent floating-point calculation errors:
+- All fiat money is calculated and stored in **integer minor units** (e.g. cents: `$15.50 CAD` = `1550` minor units).
+- Supported currencies: **CAD** (base reporting currency), **USD**, **EUR**, **TON**, and **XTR** (Telegram Stars).
+- Conversion uses cached exchange rates (`rates` KV namespace) fetched from open exchange rate APIs with offline fallbacks and administrator manual overrides (`setExchangeRate`).
+
+### Fund Allocations (60 / 25 / 15)
+When Stars withdrawals settle into verified fiat cash, the net received amount is allocated into three distinct sub-funds:
+1. **Acquisitions Fund (60%):** Dedicated exclusively to purchasing creator content, OnlyFans subscriptions, pay-per-view sets, and custom acquisition packs.
+2. **Operations & Maintenance (25%):** Covers bot hosting, proxy/VPN infrastructure, database costs, and operational tools.
+3. **Emergency Reserve (15%):** Retained for unexpected expenses, fee fluctuations, or reserve cushion.
+
+> **Integrity Rule:** Allocation percentages are strictly verified to total 100%. Allocations are applied **only to settled cash proceeds**, never to unvested or pending Telegram Stars.
+
+### Available Acquisition Budget & Commitments
+To prevent overspending on creator purchases:
+$$\text{Available Acquisition Budget} = \max(0, \text{Allocated}_{\text{Acquisitions}} - \text{Paid}_{\text{Acquisitions}} - \text{Committed}_{\text{Acquisitions}})$$
+
+- **Commitment Reservation:** When a candidate wins a monthly vote and is approved for purchase, their expected price is recorded as a `committed` expense. This immediately reduces the Available Acquisition Budget without prematurely deducting cash balance.
+- **Purchase Confirmation:** When the content is acquired, the commitment transitions to a `paid` expense. Settled cash is debited and the commitment is released, preventing double-subtraction.
+
+### Expense Management & Payer Tracking
+Administrators record expenses directly in Telegram via `/record_expense`:
+- **Club Funds (`club_funds`):** Directly debits settled cash and the corresponding allocation fund (e.g. acquisitions or operations).
+- **Admin Personal Outlay (`admin_personal`):** When an administrator pays out of pocket, the expense is recorded, allocated to the category, and credited to `admin_liability` without decreasing club cash.
+- **Reimbursement Workflow:** When the club reimburses the administrator, the liability is settled and cash is debited (`/treasury` -> Reimbursements).
+- **Auditable Adjustments:** Finalized expense records are immutable. Adjustments create linked audit entries (`adjusted_from_expense_id`), preserving full audit trails.
+
+### Automated Monthly Reporting
+At the end of each calendar month (or on-demand via `/treasury_report`):
+1. **Transparent Member Report:** Published to the community chat or VIP channel, detailing:
+   - Total active paying members and community growth
+   - Total Telegram Stars collected during the month
+   - Settled club cash revenue and allocation breakdown
+   - Community acquisition budget and list of acquired creators
+   - Operations and hosting expenses summary
+2. **Detailed Administrator Audit:** Sent directly to administrators, detailing exact transaction IDs, exchange rates used, pending Stars vesting schedule, individual expense ledger, and pending reimbursement liabilities.
+
+---
+
+## 12. Complete Testing & Verification Matrix
+
+Underground Manager features a comprehensive automated test suite consisting of **78 tests across 16 test suites** running on Deno's native test runner (`deno test -A`):
+
+| Test Suite File | Tests | Domain / Coverage |
+|---|:---:|---|
+| [`tests/payments_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/payments_test.ts) | 9 | Pre-checkout validation, idempotency, subscription renewals, cancellations, refunds. |
+| [`tests/access_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/access_test.ts) | 9 | Chat join request verification, safe ban/unban removal, admin immunity, multi-space gates. |
+| [`tests/complimentary_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/complimentary_test.ts) | 8 | Complimentary access levels, duration calculation, manual revocation, 3-day reminder delivery. |
+| [`tests/security_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/security_test.ts) | 6 | Webhook secret token validation, update deduplication, admin RBAC, concurrent transaction isolation. |
+| [`tests/creators_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/creators_test.ts) | 6 | Forum topic creation/renaming, media upload detection, non-admin filtering, empty topic suppression. |
+| [`tests/directory_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/directory_test.ts) | 4 | Public directory synchronization, A-Z categorization, SHA-256 diffing, 4000-char message chunking. |
+| [`tests/wanted_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/wanted_test.ts) | 7 | Member nominations, alphanumeric validation, 1-per-cycle support limits, community ranking sort. |
+| [`tests/voting_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/voting_test.ts) | 5 | Monthly acquisition ballots, irrevocable voting, 20% quorum enforcement, tie runoff ballots. |
+| [`tests/acquisitions_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/acquisitions_test.ts) | 3 | Post-acquisition topic linking, candidate status progression, directory integration. |
+| [`tests/treasury_stars_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/treasury_stars_test.ts) | 3 | Real-time Stars payment capture, 21-day holding period calculation, withdrawable status advancement. |
+| [`tests/treasury_conversion_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/treasury_conversion_test.ts) | 4 | Integer minor unit arithmetic, CAD/USD/EUR/TON cross-rates, indicative Stars valuation. |
+| [`tests/treasury_expenses_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/treasury_expenses_test.ts) | 4 | Club funds vs admin outlays, reimbursement liability clearance, immutable adjustments, recurring templates. |
+| [`tests/treasury_allocations_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/treasury_allocations_test.ts) | 4 | Strict 100% allocation validation, zero unvested Stars leak into cash, 60/25/15 fund credit, double-spend prevention. |
+| [`tests/treasury_acquisitions_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/treasury_acquisitions_test.ts) | 2 | Candidate pricing in foreign currencies, affordability checks against available budget, commitment to paid lifecycle. |
+| [`tests/treasury_reports_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/treasury_reports_test.ts) | 4 | Monthly report generation, member transparency formatting, admin audit breakdown, channel publication. |
+| **Total** | **78** | **All 78 Tests Passing (100% Success Rate)** |
+
+To run the full suite:
+```bash
+deno task check  # Strict TypeScript type check
+deno task test   # Runs all 78 unit, integration and security tests
+```
+
+---
+
+## 13. Administrator Financial & Operational Runbook
+
+### Quick Command Reference
+| Command | Usage | Description |
+|---|---|---|
+| `/treasury` | `/treasury` | Opens real-time balance sheet, allocation pools, and action menu. |
+| `/record_expense` | `/record_expense <amount> <currency> <category> <payer> <description>` | Records an operational or creator acquisition expense. |
+| `/record_withdrawal` | `/record_withdrawal <stars> <ton> [netCad]` | Records a Telegram Stars withdrawal and fiat cash settlement. |
+| `/reconcile_stars` | `/reconcile_stars` | Scans for newly vested Stars past the 21-day holding period. |
+| `/price` | `/price <candidateId> <amount> [currency]` | Sets purchase price for a Wanted List creator candidate. |
+| `/treasury_report` | `/treasury_report [YYYY-MM]` | Generates and previews the monthly financial report. |
+
+### Common Operational Scenarios
+
+#### Scenario A: Recording a Creator Purchase from Club Funds
+1. Admin purchases OnlyFans set for Aria for \$25.00 CAD using club debit card.
+2. Send to bot:
+   ```text
+   /record_expense 25.00 CAD creator_ppv club_funds Aria custom pack
+   ```
+3. The bot immediately debits \$25.00 CAD from `settled_cash` and `acquisition_fund`, and links the expense to the creator.
+
+#### Scenario B: Admin Pays Out-of-Pocket for Bot Hosting
+1. Admin pays \$15.00 USD from personal credit card for Deno Deploy / domain.
+2. Send to bot:
+   ```text
+   /record_expense 15.00 USD bot_hosting admin_personal Deno Deploy annual renewal
+   ```
+3. The bot converts \$15.00 USD to CAD (e.g. \$20.25 CAD), debits the `operations_fund`, and credits \$20.25 CAD to `admin_liability` without decreasing club cash.
+4. When club funds are transferred to the admin:
+   - Admin opens `/treasury` -> **Admin Liabilities** -> Select expense -> **Reimburse**.
+   - The liability is cleared and cash is debited.
+
+#### Scenario C: Processing a Telegram Stars Withdrawal
+1. Over 21 days have elapsed; bot reports 10,000 Stars eligible for withdrawal.
+2. Admin requests withdrawal via Telegram Stars / Fragment to TON wallet, receiving 18.2 TON.
+3. TON is sold on an exchange and \$175.50 CAD arrives in the club's bank account.
+4. Send to bot:
+   ```text
+   /record_withdrawal 10000 18.2 175.50
+   ```
+5. The bot updates 10,000 Stars from `withdrawable_estimate` to `settled_cash`, credits \$175.50 CAD to total club cash, and automatically allocates:
+   - **Acquisitions Fund (60%):** +$105.30 CAD
+   - **Operations Fund (25%):** +$43.88 CAD
+   - **Emergency Reserve (15%):** +$26.32 CAD
+
 

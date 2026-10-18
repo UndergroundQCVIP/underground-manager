@@ -14,6 +14,7 @@ import { adminComposer } from "./handlers/admin.ts";
 import { forumComposer } from "./handlers/forum.ts";
 import { wantedComposer } from "./handlers/wanted.ts";
 import { votingComposer } from "./handlers/voting.ts";
+import { treasuryComposer } from "./handlers/treasury.ts";
 
 export function createBot(token?: string): Bot {
   const config = getConfig();
@@ -44,6 +45,7 @@ export function createBot(token?: string): Bot {
   bot.use(forumComposer);
   bot.use(wantedComposer);
   bot.use(votingComposer);
+  bot.use(treasuryComposer);
 
   return bot;
 }

@@ -43,6 +43,17 @@ export async function runHourlyReconciliation(bot: Bot): Promise<{
     console.error("[Cron Error] Failed to auto-finalize expired ballot:", err);
   }
 
+  // 4. Reconcile 21-day Telegram Stars holding period
+  try {
+    const { reconcileStarHoldingStatuses } = await import("../treasury/stars_tracking.ts");
+    const holdingRes = await reconcileStarHoldingStatuses();
+    if (holdingRes.transitionedCount > 0) {
+      console.log(`[Cron] Transitioned ${holdingRes.transitionedCount} Star transactions to withdrawable.`);
+    }
+  } catch (err) {
+    console.error("[Cron Error] Failed reconciling Star holding statuses:", err);
+  }
+
   return { reconciled, reminders, ballotClosed };
 }
 

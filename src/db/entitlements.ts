@@ -267,3 +267,22 @@ export async function countActivePaidSubscribers(): Promise<number> {
   return paidUsers.size;
 }
 
+export async function countActiveComplimentaryMembers(): Promise<number> {
+  const all = await listAllEntitlements();
+  const nowMs = Date.now();
+  const compUsers = new Set<number>();
+
+  for (const e of all) {
+    if (
+      e.source === "complimentary" &&
+      e.status === "active" &&
+      new Date(e.expiresAt).getTime() > nowMs
+    ) {
+      compUsers.add(e.userId);
+    }
+  }
+
+  return compUsers.size;
+}
+
+

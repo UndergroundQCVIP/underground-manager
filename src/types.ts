@@ -157,7 +157,23 @@ export type AuditEventType =
   | "ballot_opened"
   | "ballot_closed"
   | "vote_cast"
-  | "runoff_scheduled";
+  | "runoff_scheduled"
+  // UG-03 Treasury Audit Events:
+  | "star_tx_recorded"
+  | "star_reconciliation_run"
+  | "withdrawal_recorded"
+  | "withdrawal_settled"
+  | "exchange_rate_updated"
+  | "expense_created"
+  | "expense_committed"
+  | "expense_paid"
+  | "expense_refunded"
+  | "expense_reimbursed"
+  | "recurring_expense_created"
+  | "allocations_updated"
+  | "treasury_report_generated"
+  | "candidate_priced"
+  | "acquisition_approved";
 
 export interface AuditEvent {
   id: string;
@@ -250,6 +266,13 @@ export interface WantedCandidate {
   supportCount: number; // Unique supporter count
   creatorId?: string; // Linked Creator record once acquired/available
   notes?: string;
+  expectedPriceMinor?: number; // In currency minor units (e.g. cents)
+  priceCurrency?: string; // e.g. "CAD", "USD"
+  expectedCadMinor?: number; // Converted CAD minor units
+  recurringCostMinor?: number; // Monthly recurring cost in cents if applicable
+  pricingVerifiedAt?: string; // ISO timestamp
+  rightsVerified?: boolean; // Whether distribution permission verified
+  commitmentExpenseId?: string; // Linked commitment expense ID
   createdAt: string;
   updatedAt: string;
 }
@@ -318,3 +341,215 @@ export interface SystemSettings {
   digestEnabled: boolean; // default false
   turnoutObjectivePct: number; // default 20
 }
+
+// ==============================================================================
+// UG-03 Domain Contracts: Treasury, Expenses & Financial Automation
+// ==============================================================================
+
+export type CurrencyCode = "CAD" | "USD" | "EUR" | "TON" | "XTR" | string;
+
+export interface Money {
+  amountMinor: number; // Integer minor units (e.g. cents for CAD/USD/EUR)
+  currency: CurrencyCode;
+}
+
+export type StarHoldingStatus =
+  | "pending" // Received, within 21-day holding period
+  | "withdrawable_estimate" // 21 days elapsed, subject to Telegram rules and balance
+  | "withdrawn" // Withdrawn via Telegram/Fragment
+  | "refunded"; // Refunded or reversed
+
+export interface StarTransactionRecord {
+  id: string; // UUID or unique ID
+  telegramTxId: string; // Telegram Star transaction ID
+  userId?: number; // Member ID when available
+  starsAmount: number; // Positive for revenue, negative for refunds/outlays
+  txType: "subscription" | "invoice" | "refund" | "adjustment" | "withdrawal";
+  txTimestamp: string; // ISO 8601
+  associatedPaymentId?: string; // Link to UG-01 Payment record
+  holdingPeriodEndsAt: string; // txTimestamp + 21 days
+  status: StarHoldingStatus;
+  estimatedRewardUsdCents: number; // Based on configured valuation (e.g. 1.3c/Star)
+  estimatedRewardCadCents: number; // Converted to CAD reporting currency
+  source: "telegram_api" | "webhook_event" | "manual_adjustment";
+  createdAt: string;
+}
+
+export type WithdrawalStatus = "requested" | "completed" | "cancelled";
+
+export interface WithdrawalSettlement {
+  settlementDate: string; // ISO 8601
+  amountExchangedTonNano: number; // In nanoTON
+  currencyReceived: CurrencyCode; // e.g. "CAD"
+  netFundsReceivedMinor: number; // In minor units (cents)
+  effectiveRate: number; // e.g. CAD per TON
+  feeMinor: number; // Exchange fees
+  notes?: string;
+}
+
+export interface WithdrawalRecord {
+  id: string; // UUID
+  withdrawalDate: string; // ISO 8601
+  starsQuantity: number;
+  fragmentReference?: string;
+  tonReceivedNano: number; // 1 TON = 1,000,000,000 nanoTON
+  networkFeeNano: number;
+  status: WithdrawalStatus;
+  settlement?: WithdrawalSettlement; // Present once TON is converted to spendable fiat
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExchangeRateRecord {
+  baseCurrency: string; // e.g. "USD"
+  targetCurrency: string; // e.g. "CAD"
+  rate: number; // target per 1 base
+  date: string; // YYYY-MM-DD
+  source: "open_er_api" | "frankfurter" | "manual" | "fallback";
+  isManual: boolean;
+  updatedAt: string;
+}
+
+export interface TreasuryValuationConfig {
+  starsRewardValuationUsd: number; // Default 0.013 ($0.013 USD per Star)
+  effectiveDate: string; // ISO date
+  updatedBy?: number; // Admin user ID
+  notes?: string;
+}
+
+export type ExpenseCategory =
+  | "creator_subscription"
+  | "creator_content_license"
+  | "platform_operations"
+  | "marketing"
+  | "transaction_fees"
+  | "other";
+
+export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
+  creator_subscription: "Creator Subscription",
+  creator_content_license: "Creator Content / License",
+  platform_operations: "Platform Operations",
+  marketing: "Marketing",
+  transaction_fees: "Transaction Fees",
+  other: "Other",
+};
+
+export type ExpenseStatus =
+  | "planned" // Expected upcoming cost, not yet incurred
+  | "committed" // Budget reserved for approved acquisition
+  | "paid" // Incurred and paid
+  | "refunded" // Fully or partially refunded
+  | "cancelled"; // Cancelled before payment
+
+export type ExpensePayer =
+  | "club_funds" // Paid directly from settled club funds
+  | "admin_personal"; // Paid by an administrator personally (liability owed)
+
+export interface ExpenseRecord {
+  id: string; // UUID
+  description: string;
+  originalAmountMinor: number; // Integer minor units (e.g. cents)
+  originalCurrency: CurrencyCode;
+  cadAmountMinor: number; // Base reporting currency in cents
+  usdAmountMinor: number; // USD equivalent in cents
+  indicativeStarsAmount: number; // Informational estimate based on valuation
+  category: ExpenseCategory;
+  creatorId?: string; // Optional link to Creator
+  candidateId?: string; // Optional link to WantedCandidate
+  expenseDate: string; // ISO 8601
+  status: ExpenseStatus;
+  payer: ExpensePayer;
+  paidByAdminId?: number; // Admin user ID if paid personally
+  reimbursementStatus?: "pending" | "reimbursed" | "waived";
+  reimbursedAt?: string;
+  receiptFileId?: string; // Telegram file_id
+  receiptMessageRef?: string;
+  notes?: string;
+  adjustmentOfId?: string; // If an auditable correction of another expense
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RecurringExpenseTemplate {
+  id: string; // UUID
+  description: string;
+  expectedAmountMinor: number;
+  currency: CurrencyCode;
+  category: ExpenseCategory;
+  creatorId?: string;
+  candidateId?: string;
+  frequency: "monthly" | "yearly";
+  dayOfMonth: number;
+  status: "active" | "paused" | "archived";
+  nextDueDate: string; // ISO date
+  lastNotifiedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TreasuryAllocations {
+  acquisitionPct: number; // Default 60%
+  operationsPct: number; // Default 25%
+  reservePct: number; // Default 15%
+  effectiveDate: string;
+  updatedBy?: number;
+}
+
+export type JournalCategory =
+  | "settled_cash" // Bank/wallet cash in CAD
+  | "acquisition_fund" // Allocated acquisition budget
+  | "operations_fund" // Allocated operations budget
+  | "reserve_fund" // Protected contingency reserve
+  | "admin_liability"; // Amount owed to admins for personal expenses
+
+export type JournalEntryType =
+  | "revenue_settled"
+  | "expense_paid"
+  | "reimbursement"
+  | "allocation"
+  | "adjustment";
+
+export interface FinancialJournalEntry {
+  id: string; // UUID
+  entryType: JournalEntryType;
+  category: JournalCategory;
+  amountMinor: number; // In CAD cents (positive for increase, negative for decrease)
+  referenceId: string; // paymentId, withdrawalId, expenseId, etc.
+  timestamp: string; // ISO 8601
+  notes: string;
+}
+
+export interface TreasuryOverview {
+  reportingCurrency: "CAD";
+  totalStarsReceived: number;
+  pendingStars: number; // Within 21-day holding period
+  potentiallyWithdrawableStars: number; // >= 21 days, estimated
+  withdrawnStars: number;
+  estimatedPendingRewardsCadMinor: number;
+  estimatedWithdrawableRewardsCadMinor: number;
+  settledNetCashCadMinor: number; // Actual cash received through completed settlements
+  allocatedAcquisitionsCadMinor: number; // 60% of settled net receipts
+  allocatedOperationsCadMinor: number; // 25% of settled net receipts
+  allocatedReserveCadMinor: number; // 15% of settled net receipts
+  paidAcquisitionsCadMinor: number;
+  paidOperationsCadMinor: number;
+  paidOtherCadMinor: number;
+  totalPaidExpensesCadMinor: number;
+  committedAcquisitionsCadMinor: number; // Approved outstanding acquisition commitments
+  availableAcquisitionBudgetCadMinor: number; // (allocatedAcquisitions) - (paidAcquisitions) - (committedAcquisitions)
+  adminReimbursementsOwedCadMinor: number; // Unreimbursed personal expenses
+}
+
+export interface TreasuryMonthlyReport {
+  id: string; // UUID
+  period: string; // YYYY-MM
+  overview: TreasuryOverview;
+  activePaidSubscribersCount: number;
+  complimentaryMembersCount: number;
+  creatorsAcquiredThisMonth: string[];
+  newNominationsCount: number;
+  generatedAt: string;
+  publishedMessageId?: number;
+}
+

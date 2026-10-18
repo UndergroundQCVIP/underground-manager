@@ -72,8 +72,9 @@ export function adminMenuKeyboard(): InlineKeyboard {
     .text("🎯 Wanted List", "admin:wanted_menu")
     .row()
     .text("🗳️ Monthly Voting", "admin:voting_menu")
-    .text("⚙️ System Status", "admin:status")
+    .text("💰 Treasury & Budget", "admin:treasury_menu")
     .row()
+    .text("⚙️ System Status", "admin:status")
     .text("⬅️ User Menu", "member:home");
 }
 
@@ -155,3 +156,63 @@ export function memberManageKeyboard(userId: number, entitlementId?: string): In
   kb.text("⬅️ Admin Menu", "admin:menu");
   return kb;
 }
+
+// ==============================================================================
+// UG-03 Treasury Keyboards
+// ==============================================================================
+
+export function treasuryMenuKeyboard(): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("➕ Add Expense", "admin:treasury_add_exp")
+    .text("📋 View Expenses", "admin:treasury_expenses")
+    .row()
+    .text("📤 Record Withdrawal", "admin:treasury_withdraw")
+    .text("🔄 Reconcile Stars", "admin:treasury_reconcile")
+    .row()
+    .text("📊 Monthly Reports", "admin:treasury_reports")
+    .text("⚙️ Allocations", "admin:treasury_allocations")
+    .row()
+    .text("⬅️ Admin Menu", "admin:menu");
+}
+
+export function treasuryExpenseCategoryKeyboard(): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("Creator Sub", "admin:exp_cat:creator_subscription")
+    .text("Content/License", "admin:exp_cat:creator_content_license")
+    .row()
+    .text("Operations", "admin:exp_cat:platform_operations")
+    .text("Marketing", "admin:exp_cat:marketing")
+    .row()
+    .text("Transaction Fees", "admin:exp_cat:transaction_fees")
+    .text("Other", "admin:exp_cat:other")
+    .row()
+    .text("❌ Cancel", "admin:treasury_menu");
+}
+
+export function treasuryExpensePayerKeyboard(category: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("🏦 Club Funds", `admin:exp_pyr:${category}:club_funds`)
+    .text("👤 Admin Personal", `admin:exp_pyr:${category}:admin_personal`)
+    .row()
+    .text("❌ Cancel", "admin:treasury_menu");
+}
+
+export function treasuryReportsKeyboard(period: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("📢 Publish to Channel", `admin:report_pub:${period}`)
+    .text("🔍 Detailed Audit", `admin:report_audit:${period}`)
+    .row()
+    .text("⬅️ Treasury Menu", "admin:treasury_menu");
+}
+
+export function treasuryAllocationsKeyboard(): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("60% Acq / 25% Ops / 15% Res (Default)", "admin:alloc_preset:60_25_15")
+    .row()
+    .text("70% Acq / 20% Ops / 10% Res", "admin:alloc_preset:70_20_10")
+    .row()
+    .text("50% Acq / 30% Ops / 20% Res", "admin:alloc_preset:50_30_20")
+    .row()
+    .text("⬅️ Treasury Menu", "admin:treasury_menu");
+}
+

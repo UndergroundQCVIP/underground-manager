@@ -24,6 +24,10 @@ export interface AppConfig {
   VOTING_PERIOD_DAYS: number;
   VOTING_SHORTLIST_SIZE: number;
   DIGEST_ENABLED: boolean;
+  BASE_CURRENCY: string;
+  DEFAULT_STARS_REWARD_VALUATION_USD: number;
+  TREASURY_REPORT_CHANNEL_ID: number;
+  EXCHANGE_RATE_API_URL: string;
 }
 
 let activeConfig: AppConfig | null = null;
@@ -70,6 +74,17 @@ export function loadConfig(envOverride?: Record<string, string>): AppConfig {
     VOTING_PERIOD_DAYS: Number(getEnv("VOTING_PERIOD_DAYS", "5")),
     VOTING_SHORTLIST_SIZE: Number(getEnv("VOTING_SHORTLIST_SIZE", "5")),
     DIGEST_ENABLED: getEnv("DIGEST_ENABLED", "false") === "true",
+    BASE_CURRENCY: getEnv("BASE_CURRENCY", "CAD"),
+    DEFAULT_STARS_REWARD_VALUATION_USD: Number(
+      getEnv("DEFAULT_STARS_REWARD_VALUATION_USD", "0.013")
+    ),
+    TREASURY_REPORT_CHANNEL_ID: Number(
+      getEnv("TREASURY_REPORT_CHANNEL_ID", "0")
+    ),
+    EXCHANGE_RATE_API_URL: getEnv(
+      "EXCHANGE_RATE_API_URL",
+      "https://open.er-api.com/v6/latest/USD"
+    ),
   };
 
   activeConfig = config;
