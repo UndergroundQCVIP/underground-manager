@@ -3,6 +3,8 @@
  */
 
 import { Composer, InlineKeyboard } from "grammy";
+import { formatTorontoDate } from "../../util/time.ts";
+import { escapeMd } from "../../util/markdown.ts";
 import { getActiveBallot, getBallot, hasUserVoted } from "../../db/voting.ts";
 import { getMembershipSummary } from "../../db/entitlements.ts";
 import { castVote } from "../../voting/service.ts";
@@ -79,7 +81,7 @@ export async function handleOpenVote(ctx: any) {
   // 3. Check if user already voted
   const alreadyVoted = await hasUserVoted(ballot.id, userId);
   if (alreadyVoted) {
-    const closesDate = new Date(ballot.closesAt).toLocaleDateString("en-US", {
+    const closesDate = formatTorontoDate(ballot.closesAt, {
       month: "short",
       day: "numeric",
       hour: "2-digit",
@@ -88,7 +90,7 @@ export async function handleOpenVote(ctx: any) {
 
     const text =
       `✅ *VOTE ALREADY RECORDED*\n\n` +
-      `You have already cast your vote in *${ballot.title}*.\n\n` +
+      `You have already cast your vote in *${escapeMd(ballot.title)}*.\n\n` +
       `🔒 In accordance with Underground voting rules, votes are final, unchangeable, and confidential.\n` +
       `📅 Results will be announced on *${closesDate}*.`;
 
@@ -121,7 +123,7 @@ export async function handleOpenVote(ctx: any) {
   }
   kb.text("⬅️ Main Menu", "member:home");
 
-  const closesDate = new Date(ballot.closesAt).toLocaleDateString("en-US", {
+  const closesDate = formatTorontoDate(ballot.closesAt, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -129,7 +131,7 @@ export async function handleOpenVote(ctx: any) {
   });
 
   const text =
-    `🗳️ *${ballot.title}*\n\n` +
+    `🗳️ *${escapeMd(ballot.title)}*\n\n` +
     `Which creator should Underground acquire next?\n\n` +
     `⏳ *Voting Closes:* ${closesDate}\n` +
     `⚠️ *Rules:* 1 irrevocable vote per paid member. Candidate order is randomized.\n\n` +
@@ -177,7 +179,7 @@ votingComposer.callbackQuery(/^vote:sel:([a-f0-9-]+):([a-f0-9-]+)$/, async (ctx)
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
     `🗳️ *CONFIRM YOUR ACQUISITION VOTE*\n\n` +
-    `Are you sure you want to cast your vote for *${candidate.creatorName}*?\n\n` +
+    `Are you sure you want to cast your vote for *${escapeMd(candidate.creatorName)}*?\n\n` +
     `⚠️ _Once confirmed, your vote is recorded atomically and cannot be withdrawn or changed._`,
     {
       parse_mode: "Markdown",

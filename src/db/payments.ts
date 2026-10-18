@@ -43,6 +43,9 @@ export async function recordPayment(
   atomic.set(["payments", id], payment);
   atomic.set(["payments_by_charge_id", data.chargeId], id);
   atomic.set(["payments_by_user", data.userId, id], payment);
+  // Cleared in the same commit that credits the entitlement (see applyPaidPeriod);
+  // anything still listed here was recorded but never fulfilled (e.g. crash).
+  atomic.set(["payments_pending_fulfillment", data.chargeId], id);
 
   const res = await atomic.commit();
   if (!res.ok) {
@@ -119,6 +122,7 @@ export async function updatePaymentStatus(
   };
 
   const atomic = kv.atomic();
+  atomic.check(res);
   atomic.set(["payments", paymentId], updated);
   atomic.set(["payments_by_user", updated.userId, paymentId], updated);
 
@@ -139,3 +143,22 @@ export async function updatePaymentStatusByChargeId(
   return await updatePaymentStatus(payment.id, status);
 }
 
+
+/** Payments that were recorded but whose entitlement credit never completed. */
+export async function listPaymentsPendingFulfillment(): Promise<Payment[]> {
+  const kv = await getKv();
+  const iter = kv.list<string>({ prefix: ["payments_pending_fulfillment"] });
+  const payments: Payment[] = [];
+  for await (const entry of iter) {
+    const res = await kv.get<Payment>(["payments", entry.value]);
+    if (res.value && res.value.status === "completed") {
+      payments.push(res.value);
+    }
+  }
+  return payments;
+}
+
+export async function clearPendingFulfillment(chargeId: string): Promise<void> {
+  const kv = await getKv();
+  await kv.delete(["payments_pending_fulfillment", chargeId]);
+}

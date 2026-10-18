@@ -7,8 +7,13 @@ import { getKv } from "./kv.ts";
 import { Creator } from "../types.ts";
 import { markDirectoryDirty } from "./directory.ts";
 
+/** Case- and whitespace-insensitive (NFKC) key used to de-duplicate creator names. */
 export function normalizeCreatorName(name: string): string {
-  return name.trim().toLowerCase();
+  return name
+    .normalize("NFKC")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
 }
 
 export async function saveCreator(creator: Creator): Promise<void> {
@@ -78,76 +83,80 @@ export async function listCreators(filter?: {
   );
 }
 
+/** Compare-and-set update of a creator record (retries on concurrent writes). */
+async function patchCreator(
+  id: string,
+  fn: (current: Creator) => Creator | null
+): Promise<Creator | null> {
+  const kv = await getKv();
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const res = await kv.get<Creator>(["creators", id]);
+    if (!res.value) return null;
+    const next = fn(res.value);
+    if (!next) return res.value;
+
+    const atomic = kv.atomic().check(res).set(["creators", id], next);
+    if (next.normalizedName !== res.value.normalizedName) {
+      atomic.delete(["creators_by_name", res.value.normalizedName]);
+      atomic.set(["creators_by_name", next.normalizedName], id);
+    }
+    const commit = await atomic.commit();
+    if (commit.ok) return next;
+  }
+  throw new Error(`Creator ${id} could not be updated (persistent write conflict)`);
+}
+
 export async function updateCreatorName(
   id: string,
   newName: string
 ): Promise<Creator | null> {
-  const kv = await getKv();
-  const current = await getCreator(id);
-  if (!current) return null;
-
-  const oldNormalized = current.normalizedName;
-  const newNormalized = normalizeCreatorName(newName);
-  const now = new Date().toISOString();
-
-  const updated: Creator = {
-    ...current,
-    name: newName.trim(),
-    normalizedName: newNormalized,
-    updatedAt: now,
-  };
-
-  const atomic = kv.atomic();
-  atomic.set(["creators", id], updated);
-  if (oldNormalized !== newNormalized) {
-    atomic.delete(["creators_by_name", oldNormalized]);
-  }
-  atomic.set(["creators_by_name", newNormalized], id);
-
-  const res = await atomic.commit();
-  if (!res.ok) {
-    throw new Error(`Failed to update creator name for ${id}`);
-  }
-
-  await markDirectoryDirty();
+  const trimmed = newName.trim();
+  const updated = await patchCreator(id, (cur) => ({
+    ...cur,
+    name: trimmed,
+    normalizedName: normalizeCreatorName(trimmed),
+    updatedAt: new Date().toISOString(),
+  }));
+  if (updated) await markDirectoryDirty();
   return updated;
 }
 
+/**
+ * Records an authorized photo/video upload. `contentAt` is the message's own
+ * timestamp (not "now"), and the stored last-update never moves backwards, so a
+ * late-delivered or out-of-order update cannot rewind the date shown publicly.
+ */
 export async function recordCreatorMediaUpload(
   chatId: number,
-  topicId: number
+  topicId: number,
+  contentAt: Date = new Date()
 ): Promise<Creator | null> {
-  const kv = await getKv();
-  const creator = await getCreatorByTopic(chatId, topicId);
-  if (!creator) return null;
+  const existing = await getCreatorByTopic(chatId, topicId);
+  if (!existing) return null;
 
-  const now = new Date().toISOString();
-  const updated: Creator = {
-    ...creator,
-    hasContent: true,
-    firstContentDetectedAt: creator.firstContentDetectedAt ?? now,
-    lastContentUpdatedAt: now,
-    updatedAt: now,
-  };
-
-  await kv.set(["creators", creator.id], updated);
-  await markDirectoryDirty();
+  const at = contentAt.toISOString();
+  const updated = await patchCreator(existing.id, (cur) => {
+    const last = cur.lastContentUpdatedAt;
+    const first = cur.firstContentDetectedAt;
+    return {
+      ...cur,
+      hasContent: true,
+      firstContentDetectedAt: first && first < at ? first : at,
+      lastContentUpdatedAt: last && last > at ? last : at,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+  if (updated) await markDirectoryDirty();
   return updated;
 }
 
 export async function archiveCreator(id: string): Promise<Creator | null> {
-  const kv = await getKv();
-  const creator = await getCreator(id);
-  if (!creator) return null;
-
-  const updated: Creator = {
-    ...creator,
+  const updated = await patchCreator(id, (cur) => ({
+    ...cur,
     status: "archived",
     updatedAt: new Date().toISOString(),
-  };
-
-  await kv.set(["creators", id], updated);
-  await markDirectoryDirty();
+  }));
+  if (updated) await markDirectoryDirty();
   return updated;
 }
 

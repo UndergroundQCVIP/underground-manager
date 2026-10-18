@@ -28,6 +28,16 @@ export async function createBallot(
   const atomic = kv.atomic();
   atomic.set(["ballots", id], ballot);
   if (ballot.status === "active") {
+    // Only one ballot may be open at a time; overwriting the pointer would orphan
+    // a running ballot (it would never close and its candidates would stay locked).
+    const pointer = await kv.get<string>(["active_ballot"]);
+    if (pointer.value) {
+      const open = await getBallot(pointer.value);
+      if (open && open.status === "active") {
+        throw new Error("Another ballot is already open. Close it before starting a new one.");
+      }
+    }
+    atomic.check(pointer);
     atomic.set(["active_ballot"], id);
   }
 
@@ -37,6 +47,41 @@ export async function createBallot(
   }
 
   return ballot;
+}
+
+/**
+ * Closes an ACTIVE ballot exactly once. In a single atomic commit it stores the
+ * closed ballot (with results), releases the active pointer, and — for a tie —
+ * opens the runoff. Returns false if another worker already closed it.
+ */
+export async function closeBallotAtomic(
+  closed: Ballot,
+  runoff?: Omit<Ballot, "id" | "createdAt" | "updatedAt">
+): Promise<{ ok: boolean; runoff?: Ballot }> {
+  const kv = await getKv();
+  const res = await kv.get<Ballot>(["ballots", closed.id]);
+  if (!res.value || res.value.status !== "active") return { ok: false };
+
+  const now = new Date().toISOString();
+  const atomic = kv.atomic();
+  atomic.check(res);
+  atomic.set(["ballots", closed.id], { ...closed, status: "closed", updatedAt: now });
+
+  let runoffBallot: Ballot | undefined;
+  if (runoff) {
+    runoffBallot = { ...runoff, id: crypto.randomUUID(), createdAt: now, updatedAt: now };
+    atomic.set(["ballots", runoffBallot.id], runoffBallot);
+    atomic.set(["active_ballot"], runoffBallot.id);
+  } else {
+    const pointer = await kv.get<string>(["active_ballot"]);
+    if (pointer.value === closed.id) {
+      atomic.check(pointer);
+      atomic.delete(["active_ballot"]);
+    }
+  }
+
+  const commit = await atomic.commit();
+  return commit.ok ? { ok: true, runoff: runoffBallot } : { ok: false };
 }
 
 export async function getBallot(id: string): Promise<Ballot | null> {

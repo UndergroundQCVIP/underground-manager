@@ -26,9 +26,10 @@ export async function refreshExchangeRates(): Promise<{
   source: string;
 }> {
   const config = getConfig();
-  const now = new Date().toISOString().slice(0, 10);
+  let now = new Date().toISOString().slice(0, 10);
 
   try {
+    if (!config.EXCHANGE_RATE_API_URL) throw new Error("EXCHANGE_RATE_API_URL not configured");
     const res = await fetch(config.EXCHANGE_RATE_API_URL, {
       signal: AbortSignal.timeout(5000),
     });
@@ -37,10 +38,14 @@ export async function refreshExchangeRates(): Promise<{
       const data = await res.json();
       const rates: Record<string, number> = data.rates ?? {};
       rates["USD"] = 1.0;
+      if (typeof data.time_last_update_unix === "number") {
+        // Record the quote's own publication date, not merely when we fetched it.
+        now = new Date(data.time_last_update_unix * 1000).toISOString().slice(0, 10);
+      }
 
       // Save key pairs into KV
       for (const [target, rate] of Object.entries(rates)) {
-        if (typeof rate === "number" && rate > 0) {
+        if (typeof rate === "number" && Number.isFinite(rate) && rate > 0) {
           await saveExchangeRate({
             baseCurrency: "USD",
             targetCurrency: target.toUpperCase(),
@@ -78,36 +83,77 @@ export async function refreshExchangeRates(): Promise<{
   return { success: true, rates: FALLBACK_RATES_FROM_USD, source: "fallback" };
 }
 
+/** Fiat currencies with 2 minor-unit digits that expenses may be entered in. */
+export const SUPPORTED_EXPENSE_CURRENCIES = ["CAD", "USD", "EUR", "GBP"] as const;
+
+export function normalizeCurrency(currency: string): string {
+  return currency.trim().toUpperCase();
+}
+
+export function isSupportedExpenseCurrency(currency: string): boolean {
+  return (SUPPORTED_EXPENSE_CURRENCIES as readonly string[]).includes(normalizeCurrency(currency));
+}
+
+export interface RateInfo {
+  rate: number;
+  /** Date (YYYY-MM-DD) of the quote(s) used; the oldest one for cross rates. */
+  date: string;
+  source: ExchangeRateRecord["source"] | "identity";
+}
+
 /**
- * Get effective exchange rate between two currencies.
+ * Get the effective exchange rate between two currencies, with provenance.
+ * Throws for a currency with no stored or built-in rate rather than silently
+ * converting 1:1.
  */
+export async function getRateInfo(
+  fromCurrency: CurrencyCode,
+  toCurrency: CurrencyCode
+): Promise<RateInfo> {
+  const from = normalizeCurrency(fromCurrency);
+  const to = normalizeCurrency(toCurrency);
+
+  if (from === to) {
+    return { rate: 1.0, date: new Date().toISOString().slice(0, 10), source: "identity" };
+  }
+
+  const direct = await getExchangeRate(from, to);
+  if (direct) return { rate: direct.rate, date: direct.date, source: direct.source };
+
+  // Cross rate via USD: 1 USD = rateFrom 'from', 1 USD = rateTo 'to'
+  const fromRec = from === "USD" ? null : await getExchangeRate("USD", from);
+  const toRec = to === "USD" ? null : await getExchangeRate("USD", to);
+
+  const rateFrom = from === "USD" ? 1 : fromRec?.rate ?? FALLBACK_RATES_FROM_USD[from];
+  const rateTo = to === "USD" ? 1 : toRec?.rate ?? FALLBACK_RATES_FROM_USD[to];
+  if (!rateFrom || !rateTo) {
+    throw new Error(`No exchange rate available for ${from} -> ${to}`);
+  }
+
+  const dates = [fromRec?.date, toRec?.date].filter((d): d is string => !!d).sort();
+  const usedFallback = (from !== "USD" && !fromRec) || (to !== "USD" && !toRec);
+  return {
+    rate: rateTo / rateFrom,
+    date: dates[0] ?? new Date().toISOString().slice(0, 10),
+    source: usedFallback ? "fallback" : (fromRec ?? toRec)?.source ?? "fallback",
+  };
+}
+
 export async function getRate(
   fromCurrency: CurrencyCode,
   toCurrency: CurrencyCode
 ): Promise<number> {
-  const from = fromCurrency.toUpperCase();
-  const to = toCurrency.toUpperCase();
+  return (await getRateInfo(fromCurrency, toCurrency)).rate;
+}
 
-  if (from === to) return 1.0;
-
-  // Direct check
-  const direct = await getExchangeRate(from, to);
-  if (direct) return direct.rate;
-
-  // Cross rate via USD
-  const fromToUsdRate = await getExchangeRate("USD", from);
-  const toToUsdRate = await getExchangeRate("USD", to);
-
-  const rateFrom = fromToUsdRate ? fromToUsdRate.rate : (FALLBACK_RATES_FROM_USD[from] ?? 1.0);
-  const rateTo = toToUsdRate ? toToUsdRate.rate : (FALLBACK_RATES_FROM_USD[to] ?? 1.0);
-
-  // If 1 USD = rateFrom 'from' and 1 USD = rateTo 'to', then 1 'from' = (rateTo / rateFrom) 'to'
-  return rateTo / rateFrom;
+/** Round half away from zero so refunds (negative amounts) mirror charges exactly. */
+function roundSymmetric(value: number): number {
+  return Math.sign(value) * Math.round(Math.abs(value));
 }
 
 /**
  * Convert money from one currency to another using integer minor units.
- * Result is rounded to nearest integer minor unit (e.g. cents).
+ * Result is rounded (half away from zero) to the nearest integer minor unit.
  */
 export async function convertCurrency(
   amountMinor: number,
@@ -116,11 +162,17 @@ export async function convertCurrency(
 ): Promise<{
   convertedAmountMinor: number;
   rate: number;
+  rateDate?: string;
+  rateSource?: string;
   fromCurrency: CurrencyCode;
   toCurrency: CurrencyCode;
 }> {
-  const from = fromCurrency.toUpperCase();
-  const to = toCurrency.toUpperCase();
+  const from = normalizeCurrency(fromCurrency);
+  const to = normalizeCurrency(toCurrency);
+
+  if (!Number.isInteger(amountMinor)) {
+    throw new Error("Amounts must be integer minor units");
+  }
 
   if (from === to) {
     return {
@@ -131,12 +183,12 @@ export async function convertCurrency(
     };
   }
 
-  const rate = await getRate(from, to);
-  const convertedAmountMinor = Math.round(amountMinor * rate);
-
+  const info = await getRateInfo(from, to);
   return {
-    convertedAmountMinor,
-    rate,
+    convertedAmountMinor: roundSymmetric(amountMinor * info.rate),
+    rate: info.rate,
+    rateDate: info.date,
+    rateSource: info.source,
     fromCurrency: from,
     toCurrency: to,
   };
@@ -153,12 +205,23 @@ export async function convertToBaseCurrency(
   usdAmountMinor: number;
   indicativeStars: number;
   rateToCad: number;
+  rateDate?: string;
+  rateSource?: string;
 }> {
   const config = getConfig();
   const base = config.BASE_CURRENCY;
+  const from = normalizeCurrency(fromCurrency);
 
-  const cadConv = await convertCurrency(amountMinor, fromCurrency, base);
-  const usdConv = await convertCurrency(amountMinor, fromCurrency, "USD");
+  if (!isSupportedExpenseCurrency(from)) {
+    throw new Error(
+      `Unsupported currency "${fromCurrency}". Supported: ${SUPPORTED_EXPENSE_CURRENCIES.join(", ")}`
+    );
+  }
+
+  await ensureFreshRates(from, base);
+
+  const cadConv = await convertCurrency(amountMinor, from, base);
+  const usdConv = await convertCurrency(amountMinor, from, "USD");
 
   const valuation = await getValuationConfig();
   // 1 Star = valuation.starsRewardValuationUsd USD
@@ -175,7 +238,28 @@ export async function convertToBaseCurrency(
     usdAmountMinor: usdConv.convertedAmountMinor,
     indicativeStars,
     rateToCad: cadConv.rate,
+    rateDate: cadConv.rateDate,
+    rateSource: cadConv.rateSource,
   };
+}
+
+/**
+ * Best-effort refresh of the stored USD rates when today's quote is missing, so
+ * expense conversions use a current published rate rather than a built-in
+ * fallback. Never throws; the provenance (source/date) is recorded on each
+ * expense so a fallback rate is visible in the audit trail.
+ */
+export async function ensureFreshRates(...currencies: string[]): Promise<void> {
+  if (!getConfig().EXCHANGE_RATE_API_URL) return;
+  const today = new Date().toISOString().slice(0, 10);
+  for (const currency of currencies) {
+    const c = normalizeCurrency(currency);
+    if (c === "USD") continue;
+    const rec = await getExchangeRate("USD", c);
+    if (rec && (rec.isManual || rec.date >= today)) continue;
+    await refreshExchangeRates();
+    return;
+  }
 }
 
 /**

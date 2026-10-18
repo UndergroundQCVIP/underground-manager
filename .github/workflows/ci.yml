@@ -1,4 +1,4 @@
-name: UG-01 CI & Pre-Publish Verification
+name: CI & Pre-Publish Verification (UG-01..03)
 
 on:
   push:

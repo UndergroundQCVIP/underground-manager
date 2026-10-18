@@ -95,3 +95,19 @@ paymentsComposer.on("message:successful_payment", async (ctx) => {
     );
   }
 });
+
+// Handle refunds issued through the Bot API (refundStarPayment): withdraw the access
+// that the refunded charge paid for and take its Stars out of the revenue figures.
+paymentsComposer.on("message:refunded_payment", async (ctx) => {
+  const refund = ctx.message.refunded_payment;
+  const userId = ctx.from?.id;
+  if (!userId || !refund) return;
+
+  const handled = await TelegramStarsProvider.handleRefund(
+    userId,
+    refund.telegram_payment_charge_id
+  );
+  if (!handled) {
+    console.warn(`[Payments] Refund for unknown charge ${refund.telegram_payment_charge_id}`);
+  }
+});

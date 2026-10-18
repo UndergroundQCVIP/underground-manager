@@ -8,9 +8,13 @@ import { listCreators } from "../db/creators.ts";
 import {
   clearDirectoryDirty,
   getDirectorySyncState,
+  saveDirectorySyncState,
 } from "../db/directory.ts";
 import { logAuditEvent } from "../db/audit.ts";
 import { Creator } from "../types.ts";
+import { escapeMd } from "../util/markdown.ts";
+import { formatTorontoDate } from "../util/time.ts";
+import { isMessageGone, isMessageNotModified, sha256Hex } from "../wanted/service.ts";
 
 export interface DirectoryApiLike {
   sendMessage(
@@ -28,16 +32,12 @@ export interface DirectoryApiLike {
     chatId: number | string,
     messageId: number
   ): Promise<unknown>;
+  deleteMessage?(chatId: number | string, messageId: number): Promise<unknown>;
 }
 
 export function formatCreatorDate(isoString?: string): string {
   if (!isoString) return "Available";
-  const date = new Date(isoString);
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return formatTorontoDate(isoString, { month: "short", day: "numeric", year: "numeric" });
 }
 
 export function buildDirectorySections(
@@ -52,7 +52,7 @@ export function buildDirectorySections(
     ];
   }
 
-  const nowFormatted = new Date().toLocaleDateString("en-US", {
+  const nowFormatted = formatTorontoDate(new Date(), {
     month: "long",
     day: "numeric",
     year: "numeric",
@@ -61,7 +61,8 @@ export function buildDirectorySections(
   // Group creators by initial letter
   const grouped: Record<string, Creator[]> = {};
   for (const c of creators) {
-    const letter = (c.name[0] || "#").toUpperCase();
+    const first = (c.name.normalize("NFD")[0] || "#").toUpperCase();
+    const letter = /[A-Z]/.test(first) ? first : "#";
     if (!grouped[letter]) {
       grouped[letter] = [];
     }
@@ -82,7 +83,7 @@ export function buildDirectorySections(
     for (const c of grouped[letter]) {
       const updateStr = formatCreatorDate(c.lastContentUpdatedAt);
       const deepLink = `https://t.me/${botUsername}?start=creator_${c.id}`;
-      sectionText += `• *${c.name}* — ${updateStr} [🔍 View](${deepLink})\n`;
+      sectionText += `• *${escapeMd(c.name)}* — ${updateStr} [🔍 View](${deepLink})\n`;
     }
     sectionText += "\n";
 
@@ -102,14 +103,8 @@ export function buildDirectorySections(
   return chunks;
 }
 
-export function computeContentHash(chunks: string[]): string {
-  const combined = chunks.join("---CHUNK---");
-  let hash = 0;
-  for (let i = 0; i < combined.length; i++) {
-    hash = (hash << 5) - hash + combined.charCodeAt(i);
-    hash |= 0;
-  }
-  return String(hash);
+export function computeContentHash(chunks: string[]): Promise<string> {
+  return sha256Hex(chunks.join("---CHUNK---"));
 }
 
 export interface SyncDirectoryResult {
@@ -136,6 +131,7 @@ export async function syncPublicDirectory(
   if (!force && !syncState.isDirty) {
     return { updated: false, publishedCount: 0, reason: "not_dirty" };
   }
+  const seqAtStart = syncState.dirtySeq ?? 0;
 
   // Fetch only active creators with confirmed media content
   const creators = await listCreators({
@@ -144,50 +140,60 @@ export async function syncPublicDirectory(
   });
 
   const chunks = buildDirectorySections(creators, config.BOT_USERNAME);
-  const contentHash = computeContentHash(chunks);
+  // Hash the creator-driven content, not the "Updated: <today>" header, so a
+  // day passing never by itself triggers an edit.
+  const contentHash = await computeContentHash(
+    chunks.map((c) => c.replace(/📅 \*Directory Updated:\*[^\n]*\n/, ""))
+  );
 
   if (!force && syncState.lastContentHash === contentHash) {
     // Content is identical, clear dirty flag and skip editing
-    await clearDirectoryDirty(contentHash, syncState.publishedMessageIds);
+    await clearDirectoryDirty(contentHash, syncState.publishedMessageIds, seqAtStart);
     return { updated: false, publishedCount: 0, reason: "content_identical" };
   }
 
   const publishedIds: number[] = [];
+  const existingIds = syncState.publishedMessageIds || [];
 
   try {
-    const existingIds = syncState.publishedMessageIds || [];
-
     for (let i = 0; i < chunks.length; i++) {
       const chunkText = chunks[i];
+      const options = { parse_mode: "Markdown", disable_web_page_preview: true };
+
       if (i < existingIds.length) {
-        // Edit existing message
         const msgId = existingIds[i];
         try {
-          await api.editMessageText(channelId, msgId, chunkText, {
-            parse_mode: "Markdown",
-            disable_web_page_preview: true,
-          });
+          await api.editMessageText(channelId, msgId, chunkText, options);
           publishedIds.push(msgId);
-        } catch {
-          // If edit fails (e.g. message deleted), send new message
-          const newMsg = await api.sendMessage(channelId, chunkText, {
-            parse_mode: "Markdown",
-            disable_web_page_preview: true,
-          });
-          publishedIds.push(newMsg.message_id);
+        } catch (err) {
+          if (isMessageNotModified(err)) {
+            publishedIds.push(msgId); // already shows exactly this text
+          } else if (isMessageGone(err)) {
+            // Only a message that no longer exists is replaced. Any other failure
+            // (rate limit, network) aborts so a retry cannot post duplicates.
+            const newMsg = await api.sendMessage(channelId, chunkText, options);
+            publishedIds.push(newMsg.message_id);
+          } else {
+            throw err;
+          }
         }
       } else {
-        // Send new message for additional chunk
-        const newMsg = await api.sendMessage(channelId, chunkText, {
-          parse_mode: "Markdown",
-          disable_web_page_preview: true,
-        });
+        const newMsg = await api.sendMessage(channelId, chunkText, options);
         publishedIds.push(newMsg.message_id);
       }
     }
 
-    // Pin first directory message
-    if (publishedIds.length > 0) {
+    // Remove stale trailing messages left over when the directory shrank.
+    if (api.deleteMessage) {
+      for (const staleId of existingIds.slice(chunks.length)) {
+        try {
+          await api.deleteMessage(channelId, staleId);
+        } catch { /* already gone */ }
+      }
+    }
+
+    // Pin only when the first message changed: every pin posts a service message.
+    if (publishedIds.length > 0 && publishedIds[0] !== existingIds[0]) {
       try {
         await api.pinChatMessage(channelId, publishedIds[0]);
       } catch {
@@ -195,7 +201,7 @@ export async function syncPublicDirectory(
       }
     }
 
-    await clearDirectoryDirty(contentHash, publishedIds);
+    await clearDirectoryDirty(contentHash, publishedIds, seqAtStart);
 
     await logAuditEvent(
       "directory_synced",
@@ -211,10 +217,23 @@ export async function syncPublicDirectory(
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     console.error("Directory synchronization failed:", errorMsg);
+    // Keep any messages created before the failure so the retry edits them
+    // instead of posting a second copy.
+    if (publishedIds.length > 0) {
+      const merged = [...publishedIds, ...existingIds.slice(publishedIds.length)];
+      await clearDirectoryDirtyKeepDirty(syncState, merged).catch(() => {});
+    }
     return {
       updated: false,
       publishedCount: 0,
       error: errorMsg,
     };
   }
+}
+
+async function clearDirectoryDirtyKeepDirty(
+  state: Awaited<ReturnType<typeof getDirectorySyncState>>,
+  messageIds: number[]
+): Promise<void> {
+  await saveDirectorySyncState({ ...state, publishedMessageIds: messageIds, isDirty: true });
 }

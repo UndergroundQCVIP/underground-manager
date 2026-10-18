@@ -374,7 +374,7 @@ Underground Manager automatically detects new forum topics and topic renames in 
 4. **Empty Topic Suppression:** Empty topics (`hasContent: false`) are kept internally but omitted from the public directory until media is published.
 
 ### Public Directory Channel (`PUBLIC_DIRECTORY_CHAT_ID`)
-- **Daily Synchronization:** Scheduled daily at 3:00 AM (America/Toronto) via Deno Cron (`DIRECTORY_UPDATE_CRON`).
+- **Daily Synchronization:** One hourly `Deno.cron` (UTC) drives all jobs; the daily directory/Wanted/Stars-ledger sync runs at the first hourly tick at or after 03:00 America/Toronto (DST-safe, caught up if missed, at most once per local day). `DIRECTORY_UPDATE_CRON` is only read for its hour field (default `0 3 * * *` = 03:00 Toronto).
 - **Alphabetical A–Z Index:** Creators are grouped alphabetically under letter headers.
 - **Message Chunking:** Telegram messages are limited to 4,096 characters. The sync engine automatically chunks entries into clean posts under 4,000 characters and updates existing channel messages by ID.
 - **Content Hashing:** The directory computes an SHA-256 hash of the generated content. If no creator updates have occurred, Telegram API calls are skipped.

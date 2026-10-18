@@ -3,6 +3,7 @@
  */
 
 import { Composer } from "grammy";
+import { escapeMd } from "../../util/markdown.ts";
 import { isAdministrator } from "../../config.ts";
 import { getMembershipSummary } from "../../db/entitlements.ts";
 import { messages } from "../messages.ts";
@@ -47,7 +48,7 @@ startComposer.command("start", async (ctx) => {
         .text("⬅️ Main Menu", "member:home");
 
       await ctx.reply(
-        `💎 *${creator.name}* is available in *TOKEBEC VIP COLLECTIONS*!\n\n` +
+        `💎 *${escapeMd(creator.name)}* is available in *TOKEBEC VIP COLLECTIONS*!\n\n` +
         `📅 *Last Content Update:* ${updatedStr}\n\n` +
         `As an active VIP member, you can jump directly to this creator's topic:`,
         {
@@ -62,7 +63,7 @@ startComposer.command("start", async (ctx) => {
         .text("⬅️ Main Menu", "member:home");
 
       await ctx.reply(
-        `💎 *${creator.name}* is available in *TOKEBEC VIP COLLECTIONS*!\n\n` +
+        `💎 *${escapeMd(creator.name)}* is available in *TOKEBEC VIP COLLECTIONS*!\n\n` +
         `📅 *Last Content Update:* ${updatedStr}\n\n` +
         `🔒 This collection is exclusive to Underground VIP members.\n` +
         `Subscribe with Telegram Stars to unlock instant access to all creator archives!`,

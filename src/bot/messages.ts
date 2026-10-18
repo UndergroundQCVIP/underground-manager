@@ -4,6 +4,7 @@
  */
 
 import { getConfig } from "../config.ts";
+import { formatTorontoDate } from "../util/time.ts";
 import { MembershipSummary, SpaceId } from "../types.ts";
 import { getSpaceTitle } from "../access/spaces.ts";
 
@@ -56,7 +57,7 @@ export const messages = {
       : "🎁 Complimentary";
 
     const expiryStr = summary.effectiveExpiry
-      ? new Date(summary.effectiveExpiry).toLocaleDateString("en-US", {
+      ? formatTorontoDate(summary.effectiveExpiry, {
           year: "numeric",
           month: "short",
           day: "numeric",
@@ -112,7 +113,7 @@ export const messages = {
   },
 
   paymentSuccess: (expiresAt: string) => {
-    const dateStr = new Date(expiresAt).toLocaleDateString("en-US", {
+    const dateStr = formatTorontoDate(expiresAt, {
       year: "numeric",
       month: "short",
       day: "numeric",

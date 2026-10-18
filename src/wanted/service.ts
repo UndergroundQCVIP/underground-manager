@@ -6,7 +6,7 @@
 import { getConfig } from "../config.ts";
 import { getCreatorByName } from "../db/creators.ts";
 import {
-  createWantedCandidate,
+  createWantedCandidateOnce,
   getCurrentMonthCycle,
   getUserSupportForCycle,
   getWantedCandidate,
@@ -17,6 +17,9 @@ import {
 } from "../db/wanted.ts";
 import { getMembershipSummary } from "../db/entitlements.ts";
 import { logAuditEvent } from "../db/audit.ts";
+import { getKv } from "../db/kv.ts";
+import { escapeMd } from "../util/markdown.ts";
+import { formatTorontoDate } from "../util/time.ts";
 import {
   WANTED_STATUS_LABELS,
   WantedCandidate,
@@ -81,23 +84,28 @@ export async function submitCreatorNomination(
     };
   }
 
-  // 4. Check if creator already exists on Wanted List
-  let candidate = await getWantedCandidateByName(cleanName);
-  let isExisting = false;
+  // 4. Find or create the candidate (atomic by normalized name, so two members
+  // nominating the same creator at the same moment end up on ONE candidate).
+  const { candidate: found, created } = await createWantedCandidateOnce({
+    name: cleanName,
+    normalizedName: cleanName.toLowerCase(),
+    profileUrl: profileUrl?.trim(),
+    status: "requested",
+    suggestedBy: userId,
+    supportCount: 0,
+  });
+  const candidate = found;
+  const isExisting = !created;
 
-  if (candidate) {
-    isExisting = true;
-  } else {
-    // Create new candidate
-    candidate = await createWantedCandidate({
-      name: cleanName,
-      normalizedName: cleanName.toLowerCase(),
-      profileUrl: profileUrl?.trim(),
-      status: "requested",
-      suggestedBy: userId,
-      supportCount: 0,
-    });
+  if (isExisting && !SUPPORTABLE_STATUSES.has(candidate.status)) {
+    return {
+      success: false,
+      isExistingCandidate: true,
+      error: `"${candidate.name}" is already "${WANTED_STATUS_LABELS[candidate.status]}" and can no longer receive support.`,
+    };
+  }
 
+  if (created) {
     await logAuditEvent(
       "wanted_candidate_suggested",
       { candidateId: candidate.id, name: cleanName, profileUrl },
@@ -141,6 +149,13 @@ export async function submitCreatorNomination(
   };
 }
 
+/** Statuses in which a candidate is still collecting community support. */
+const SUPPORTABLE_STATUSES = new Set<WantedCandidateStatus>([
+  "requested",
+  "pricing_review",
+  "eligible_for_voting",
+]);
+
 export async function supportExistingCandidate(
   userId: number,
   candidateId: string
@@ -151,6 +166,17 @@ export async function supportExistingCandidate(
     return {
       success: false,
       error: "Only active paying subscribers can support creators.",
+    };
+  }
+
+  const target = await getWantedCandidate(candidateId);
+  if (!target) {
+    return { success: false, error: "Candidate not found." };
+  }
+  if (!SUPPORTABLE_STATUSES.has(target.status)) {
+    return {
+      success: false,
+      error: `"${target.name}" is already "${WANTED_STATUS_LABELS[target.status]}" and can no longer receive support.`,
     };
   }
 
@@ -201,7 +227,7 @@ export interface WantedApiLike {
   ): Promise<unknown>;
 }
 
-let wantedListMessageId: number | null = null;
+const WANTED_MESSAGE_KEY = ["wanted_list_channel_message"];
 
 export async function syncWantedListChannel(
   api: WantedApiLike
@@ -218,7 +244,7 @@ export async function syncWantedListChannel(
     (c) => c.status !== "available" && c.status !== "rejected_unavailable"
   );
 
-  const nowFormatted = new Date().toLocaleDateString("en-US", {
+  const nowFormatted = formatTorontoDate(new Date(), {
     month: "long",
     day: "numeric",
     year: "numeric",
@@ -235,7 +261,7 @@ export async function syncWantedListChannel(
     activeCandidates.slice(0, 25).forEach((c, index) => {
       const statusLabel = WANTED_STATUS_LABELS[c.status] || c.status;
       const countLabel = c.supportCount === 1 ? "1 supporter" : `${c.supportCount} supporters`;
-      text += `${index + 1}. *${c.name}* — ${countLabel} \`[${statusLabel}]\`\n`;
+      text += `${index + 1}. *${escapeMd(c.name)}* — ${countLabel} \`[${statusLabel}]\`\n`;
     });
     text += "\n";
   }
@@ -256,18 +282,32 @@ export async function syncWantedListChannel(
     },
   };
 
+  const kv = await getKv();
+  // The published message id is persisted: an in-memory id would be lost on every
+  // cold start and the list would be re-posted as a duplicate message.
+  const stored = await kv.get<{ messageId: number; hash: string }>(WANTED_MESSAGE_KEY);
+  const hash = await sha256Hex(text);
+
   try {
-    if (wantedListMessageId) {
-      try {
-        await api.editMessageText(channelId, wantedListMessageId, text, options);
+    if (stored.value) {
+      if (stored.value.hash === hash) {
         return { success: true };
-      } catch {
-        // Fallback to sending new message
+      }
+      try {
+        await api.editMessageText(channelId, stored.value.messageId, text, options);
+        await kv.set(WANTED_MESSAGE_KEY, { messageId: stored.value.messageId, hash });
+        return { success: true };
+      } catch (err) {
+        if (isMessageNotModified(err)) {
+          await kv.set(WANTED_MESSAGE_KEY, { messageId: stored.value.messageId, hash });
+          return { success: true };
+        }
+        if (!isMessageGone(err)) throw err; // transient: retry on the next sync, don't duplicate
       }
     }
 
     const msg = await api.sendMessage(channelId, text, options);
-    wantedListMessageId = msg.message_id;
+    await kv.set(WANTED_MESSAGE_KEY, { messageId: msg.message_id, hash });
 
     await logAuditEvent("wanted_list_synced", { channelId, candidatesCount: activeCandidates.length }, 0);
     return { success: true };
@@ -276,4 +316,23 @@ export async function syncWantedListChannel(
     console.error("Failed to sync Wanted List channel:", errorMsg);
     return { success: false, error: errorMsg };
   }
+}
+
+export async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export function isMessageNotModified(err: unknown): boolean {
+  return String((err as Error)?.message ?? err).toLowerCase().includes("message is not modified");
+}
+
+/** The stored message no longer exists (deleted / invalid id) so a new one must be sent. */
+export function isMessageGone(err: unknown): boolean {
+  const msg = String((err as Error)?.message ?? err).toLowerCase();
+  return (
+    msg.includes("message to edit not found") ||
+    msg.includes("message_id_invalid") ||
+    msg.includes("message can't be edited")
+  );
 }

@@ -3,6 +3,7 @@
  */
 
 import { Composer, InlineKeyboard } from "grammy";
+import { escapeMd } from "../../util/markdown.ts";
 import {
   getCurrentMonthCycle,
   getUserSupportForCycle,
@@ -72,7 +73,7 @@ wantedComposer.callbackQuery("wanted:view", async (ctx) => {
     active.slice(0, 15).forEach((c, idx) => {
       const statusLabel = WANTED_STATUS_LABELS[c.status] || c.status;
       const countLabel = c.supportCount === 1 ? "1 supporter" : `${c.supportCount} supporters`;
-      text += `${idx + 1}. *${c.name}* — ${countLabel} \`[${statusLabel}]\`\n`;
+      text += `${idx + 1}. *${escapeMd(c.name)}* — ${countLabel} \`[${statusLabel}]\`\n`;
     });
   }
 
@@ -168,7 +169,7 @@ wantedComposer.command("suggest", async (ctx) => {
 
   if (result.isExistingCandidate) {
     await ctx.reply(
-      `✅ *${result.candidate.name}* is already on the Wanted List!\n\n` +
+      `✅ *${escapeMd(result.candidate.name)}* is already on the Wanted List!\n\n` +
       `Your support has been added. Current supporters: *${result.candidate.supportCount}*.\n\n` +
       `Thank you for helping curate Underground!`,
       {
@@ -179,7 +180,7 @@ wantedComposer.command("suggest", async (ctx) => {
   } else {
     await ctx.reply(
       `🎉 *Nomination Submitted!*\n\n` +
-      `*${result.candidate.name}* has been added to the Wanted List with 1 supporter.\n\n` +
+      `*${escapeMd(result.candidate.name)}* has been added to the Wanted List with 1 supporter.\n\n` +
       `The community can now support this creator for upcoming voting rounds.`,
       {
         parse_mode: "Markdown",
@@ -252,7 +253,7 @@ wantedComposer.callbackQuery(/^wanted:sup_confirm:([a-f0-9-]+)$/, async (ctx) =>
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
     `👍 *CONFIRM YOUR SUPPORT*\n\n` +
-    `Are you sure you want to support *${candidate.name}*?\n\n` +
+    `Are you sure you want to support *${escapeMd(candidate.name)}*?\n\n` +
     `⚠️ _Once confirmed, your support selection for this month is final and cannot be withdrawn or changed._`,
     {
       parse_mode: "Markdown",
@@ -279,7 +280,7 @@ wantedComposer.callbackQuery(/^wanted:sup_exec:([a-f0-9-]+)$/, async (ctx) => {
   await ctx.answerCallbackQuery({ text: "Support registered!" });
   await ctx.editMessageText(
     `✅ *SUPPORT CONFIRMED!*\n\n` +
-    `You have supported *${result.candidate.name}*.\n` +
+    `You have supported *${escapeMd(result.candidate.name)}*.\n` +
     `Total supporters: *${result.candidate.supportCount}*.\n\n` +
     `Thank you for contributing to Underground acquisitions!`,
     {
@@ -302,7 +303,7 @@ wantedComposer.callbackQuery("wanted:results", async (ctx) => {
         ? b.candidates.find((c) => c.candidateId === b.winnerCandidateId)
         : undefined;
       const winnerName = winnerCandidate ? winnerCandidate.creatorName : (b.isTie ? "Tie / Runoff" : "Closed");
-      text += `• *${b.title}*\n  Winner: *${winnerName}* | Votes: ${b.totalVotesCount ?? 0}\n`;
+      text += `• *${escapeMd(b.title)}*\n  Winner: *${escapeMd(winnerName)}* | Votes: ${b.totalVotesCount ?? 0}\n`;
     }
   }
 

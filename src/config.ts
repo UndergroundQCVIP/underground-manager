@@ -133,11 +133,57 @@ export function validateConfig(config: AppConfig): string[] {
     errors.push("STARS_SUBSCRIPTION_PERIOD_SECONDS must be greater than zero.");
   }
 
-  if (config.BOT_MODE === "webhook" && config.DENO_ENV === "production" && !config.WEBHOOK_SECRET) {
-    errors.push("WEBHOOK_SECRET is required when running in production webhook mode.");
+  if (config.BOT_MODE === "webhook") {
+    // Without the secret, anyone who finds the URL can forge updates — including
+    // `successful_payment` — and grant themselves membership. Required in EVERY
+    // environment, not just production.
+    if (!config.WEBHOOK_SECRET) {
+      errors.push("WEBHOOK_SECRET is required in webhook mode (Telegram secret_token, 1-256 chars of A-Z a-z 0-9 _ -).");
+    } else if (!/^[A-Za-z0-9_-]{16,256}$/.test(config.WEBHOOK_SECRET)) {
+      errors.push("WEBHOOK_SECRET must be 16-256 characters of A-Z a-z 0-9 _ - (Telegram's allowed secret_token alphabet).");
+    }
+  }
+
+  if (config.STARS_SUBSCRIPTION_PERIOD_SECONDS !== 2592000) {
+    errors.push("STARS_SUBSCRIPTION_PERIOD_SECONDS must be 2592000: Telegram only accepts a 30-day subscription_period.");
+  }
+  if (config.STARS_PRICE_AMOUNT > 10000) {
+    errors.push("STARS_PRICE_AMOUNT exceeds Telegram's 10000-Star subscription maximum.");
+  }
+
+  if (config.CURRENCY !== "XTR") {
+    errors.push("CURRENCY must be XTR (Telegram Stars) for the Stars payment provider.");
+  }
+
+  const chatIds = [
+    config.VIP_COLLECTIONS_CHAT_ID,
+    config.WANTED_LIST_CHAT_ID,
+    config.GENERAL_CHAT_ID,
+  ].filter(Boolean);
+  if (new Set(chatIds).size !== chatIds.length) {
+    errors.push("VIP_COLLECTIONS_CHAT_ID, WANTED_LIST_CHAT_ID and GENERAL_CHAT_ID must be three different chats.");
   }
 
   return errors;
+}
+
+/**
+ * Errors that make it unsafe to serve traffic at all (regardless of DENO_ENV).
+ */
+export function fatalConfigErrors(config: AppConfig): string[] {
+  return validateConfig(config).filter(
+    (e) =>
+      e.startsWith("BOT_TOKEN") ||
+      e.startsWith("WEBHOOK_SECRET") ||
+      e.startsWith("ADMIN_USER_IDS")
+  );
+}
+
+/** Local hour (America/Toronto) at which the daily directory/wanted sync runs. */
+export function getDailySyncHour(config: AppConfig = getConfig()): number {
+  const m = /^\s*\d+\s+(\d{1,2})\s+\*\s+\*\s+\*\s*$/.exec(config.DIRECTORY_UPDATE_CRON);
+  const hour = m ? Number(m[1]) : 3;
+  return hour >= 0 && hour <= 23 ? hour : 3;
 }
 
 export function isAdministrator(userId: number, config: AppConfig = getConfig()): boolean {

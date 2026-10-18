@@ -3,7 +3,8 @@
  */
 
 import { Composer, InlineKeyboard } from "grammy";
-import { adminOnlyMiddleware } from "../middleware/auth.ts";
+import { formatTorontoDate } from "../../util/time.ts";
+import { adminRouteGuard } from "../middleware/auth.ts";
 import {
   adminMenuKeyboard,
   grantConfirmKeyboard,
@@ -38,11 +39,13 @@ import {
   SPACE_IDS,
 } from "../../types.ts";
 import { getSpaceTitle } from "../../access/spaces.ts";
+import { escapeMd } from "../../util/markdown.ts";
 
 export const adminComposer = new Composer();
 
-// Apply admin authentication to all routes in this composer
-adminComposer.use(adminOnlyMiddleware);
+// Admin authentication, scoped to this composer's own commands and `admin:*` buttons
+// (see adminRouteGuard: a blanket gate would block every member feature after it).
+adminComposer.use(adminRouteGuard(["admin", "lookup", "grant", "register_creator"]));
 
 // Admin Main Menu
 adminComposer.command("admin", async (ctx) => {
@@ -73,7 +76,7 @@ adminComposer.callbackQuery("admin:members_list", async (ctx) => {
   } else {
     for (const m of members) {
       const name = m.username ? `@${m.username}` : m.firstName;
-      text += `• \`${m.userId}\` — ${name}\n`;
+      text += `• \`${m.userId}\` — ${escapeMd(name)}\n`;
       kb.text(`Manage ${name}`, `admin:manage:${m.userId}`).row();
     }
   }
@@ -134,12 +137,12 @@ adminComposer.command("lookup", async (ctx) => {
   let text =
     `👤 *MEMBER DETAILS*\n\n` +
     `*User ID:* \`${member.userId}\`\n` +
-    `*Name:* ${member.firstName} ${member.lastName || ""}\n` +
-    `*Username:* ${member.username ? `@${member.username}` : "None"}\n` +
-    `*First Seen:* ${new Date(member.firstSeenAt).toLocaleString()}\n` +
+    `*Name:* ${escapeMd(member.firstName)} ${escapeMd(member.lastName || "")}\n` +
+    `*Username:* ${member.username ? `@${escapeMd(member.username)}` : "None"}\n` +
+    `*First Seen:* ${formatTorontoDate(member.firstSeenAt, { dateStyle: "medium", timeStyle: "short" })}\n` +
     `*Membership:* ${summary.primaryType}\n` +
     `*Active Spaces:* ${summary.accessibleSpaces.join(", ") || "None"}\n` +
-    `*Expires:* ${summary.effectiveExpiry ? new Date(summary.effectiveExpiry).toLocaleString() : "N/A"}\n\n` +
+    `*Expires:* ${summary.effectiveExpiry ? formatTorontoDate(summary.effectiveExpiry, { dateStyle: "medium", timeStyle: "short" }) : "N/A"}\n\n` +
     `*Entitlements History:*\n`;
 
   if (allEntitlements.length === 0) {
@@ -147,7 +150,7 @@ adminComposer.command("lookup", async (ctx) => {
   } else {
     for (const ent of allEntitlements.slice(0, 5)) {
       const statusIcon = ent.status === "active" ? "🟢" : "⚪";
-      text += `${statusIcon} *${ent.source}* (${ent.status})\n  Expires: ${new Date(ent.expiresAt).toLocaleDateString()}\n`;
+      text += `${statusIcon} *${ent.source}* (${ent.status})\n  Expires: ${formatTorontoDate(ent.expiresAt)}\n`;
     }
   }
 
@@ -178,10 +181,10 @@ adminComposer.callbackQuery(/^admin:manage:(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
     `👤 *MANAGE MEMBER: \`${userId}\`*\n\n` +
-    `*Name:* ${member.firstName}\n` +
-    `*Username:* ${member.username ? `@${member.username}` : "None"}\n` +
+    `*Name:* ${escapeMd(member.firstName)}\n` +
+    `*Username:* ${member.username ? `@${escapeMd(member.username)}` : "None"}\n` +
     `*Membership:* ${summary.primaryType}\n` +
-    `*Expires:* ${summary.effectiveExpiry ? new Date(summary.effectiveExpiry).toLocaleDateString() : "None"}`,
+    `*Expires:* ${summary.effectiveExpiry ? formatTorontoDate(summary.effectiveExpiry) : "None"}`,
     {
       parse_mode: "Markdown",
       reply_markup: memberManageKeyboard(userId, activeComp?.id),
@@ -329,7 +332,7 @@ adminComposer.callbackQuery(
       `✅ *COMPLIMENTARY ACCESS ACTIVATED*\n\n` +
       `*Member:* \`${userId}\`\n` +
       `*Duration:* ${duration} Days\n` +
-      `*Expires:* ${new Date(result.entitlement.expiresAt).toLocaleDateString()}\n` +
+      `*Expires:* ${formatTorontoDate(result.entitlement.expiresAt)}\n` +
       `*Spaces:* ${result.entitlement.spaces.join(", ")}`,
       {
         parse_mode: "Markdown",
@@ -342,9 +345,9 @@ adminComposer.callbackQuery(
       await ctx.api.sendMessage(
         userId,
         `🎁 *You have been granted complimentary VIP access!*\n\n` +
-        `Access is active for *${duration} days* (until ${new Date(
+        `Access is active for *${duration} days* (until ${formatTorontoDate(
           result.entitlement.expiresAt
-        ).toLocaleDateString()}).\n\n` +
+        )}).\n\n` +
         `Tap below to join your spaces:`,
         {
           parse_mode: "Markdown",
@@ -374,9 +377,9 @@ adminComposer.callbackQuery(/^admin:extend_ent:(\d+):([^:]+):(\d+)$/, async (ctx
 
   await ctx.answerCallbackQuery({ text: `Extended by ${days} days!` });
   await ctx.reply(
-    `✅ Entitlement extended by ${days} days.\nNew expiry: ${new Date(
+    `✅ Entitlement extended by ${days} days.\nNew expiry: ${formatTorontoDate(
       result.entitlement.expiresAt
-    ).toLocaleString()}`,
+    , { dateStyle: "medium", timeStyle: "short" })}`,
     {
       reply_markup: new InlineKeyboard().text("⬅️ Admin Menu", "admin:menu"),
     }
@@ -520,7 +523,7 @@ adminComposer.callbackQuery("admin:creators_menu", async (ctx) => {
   } else {
     for (const c of creators.slice(0, 10)) {
       const statusIcon = c.status === "archived" ? "📦" : (c.hasContent ? "🟢" : "⚪");
-      text += `${statusIcon} *${c.name}* (Thread: \`${c.topicId}\`)\n`;
+      text += `${statusIcon} *${escapeMd(c.name)}* (Thread: \`${c.topicId}\`)\n`;
     }
     text += "\n";
   }
@@ -586,7 +589,7 @@ adminComposer.command("register_creator", async (ctx) => {
 
   await ctx.reply(
     `✅ *Creator Registered!*\n\n` +
-    `• *Name:* ${creator.name}\n` +
+    `• *Name:* ${escapeMd(creator.name)}\n` +
     `• *Topic ID:* \`${creator.topicId}\`\n` +
     `• *Chat ID:* \`${creator.chatId}\`\n` +
     `• *Status:* Active`,
@@ -617,7 +620,7 @@ adminComposer.callbackQuery("admin:wanted_menu", async (ctx) => {
   } else {
     for (const c of candidates.slice(0, 8)) {
       const statusLabel = WANTED_STATUS_LABELS[c.status] || c.status;
-      text += `• *${c.name}* — ${c.supportCount} supporters \`[${statusLabel}]\`\n`;
+      text += `• *${escapeMd(c.name)}* — ${c.supportCount} supporters \`[${statusLabel}]\`\n`;
       kb.text(`Manage ${c.name}`, `admin:manage_cand:${c.id}`).row();
     }
     text += "\n";
@@ -648,19 +651,31 @@ adminComposer.callbackQuery(/^admin:manage_cand:([a-f0-9-]+)$/, async (ctx) => {
 
   const statusLabel = WANTED_STATUS_LABELS[candidate.status] || candidate.status;
   const text =
-    `🎯 *MANAGE CANDIDATE: ${candidate.name}*\n\n` +
+    `🎯 *MANAGE CANDIDATE: ${escapeMd(candidate.name)}*\n\n` +
     `*Supporters:* ${candidate.supportCount}\n` +
     `*Current Status:* \`${statusLabel}\`\n` +
     `*Profile URL:* ${candidate.profileUrl || "None"}\n` +
-    `*Suggested Date:* ${new Date(candidate.createdAt).toLocaleDateString()}\n\n` +
+    `*Suggested Date:* ${formatTorontoDate(candidate.createdAt)}\n\n` +
     `Update status:`;
 
   const kb = new InlineKeyboard()
     .text("✅ Approve for Voting", `admin:set_stat:${candidate.id}:eligible_for_voting`)
     .text("💰 Pricing Review", `admin:set_stat:${candidate.id}:pricing_review`)
-    .row()
-    .text("🎉 Mark Acquired", `admin:set_stat:${candidate.id}:acquired`)
-    .text("🟢 Mark Available", `admin:set_stat:${candidate.id}:available`)
+    .row();
+
+  // Acquisition money flow goes through the treasury (budget check, commitment,
+  // ledger) — never a bare status flip.
+  if (candidate.status === "selected") {
+    kb.text("💳 Approve Acquisition (reserve budget)", `admin:acq_approve:${candidate.id}`).row();
+  } else if (candidate.status === "acquisition_pending") {
+    kb.text("🏦 Paid from club funds", `admin:acq_paid:${candidate.id}:club_funds`)
+      .text("👤 I paid personally", `admin:acq_paid:${candidate.id}:admin_personal`)
+      .row()
+      .text("↩️ Cancel & release budget", `admin:acq_cancel:${candidate.id}`)
+      .row();
+  }
+
+  kb.text("🟢 Mark Available", `admin:set_stat:${candidate.id}:available`)
     .row()
     .text("⛔ Reject / Unavailable", `admin:set_stat:${candidate.id}:rejected_unavailable`)
     .row()
@@ -679,6 +694,14 @@ adminComposer.callbackQuery(/^admin:set_stat:([a-f0-9-]+):([a-z_]+)$/, async (ct
   const newStatus = ctx.match[2] as any;
   const { updateWantedStatus } = await import("../../db/wanted.ts");
 
+  // "voting", "selected", "acquisition_pending" and "acquired" are owned by the
+  // ballot and treasury workflows and cannot be set by hand.
+  const MANUAL_STATUSES = ["requested", "pricing_review", "eligible_for_voting", "available", "rejected_unavailable"];
+  if (!MANUAL_STATUSES.includes(newStatus)) {
+    await ctx.answerCallbackQuery({ text: "That status is managed automatically.", show_alert: true });
+    return;
+  }
+
   const updated = await updateWantedStatus(candidateId, newStatus, `Updated by admin ${ctx.from!.id}`);
   if (!updated) {
     await ctx.answerCallbackQuery({ text: "Failed to update status." });
@@ -686,7 +709,7 @@ adminComposer.callbackQuery(/^admin:set_stat:([a-f0-9-]+):([a-z_]+)$/, async (ct
   }
 
   await ctx.answerCallbackQuery({ text: `Status updated to ${newStatus}` });
-  await ctx.reply(`✅ Candidate *${updated.name}* status updated to \`${newStatus}\`.`, {
+  await ctx.reply(`✅ Candidate *${escapeMd(updated.name)}* status updated to \`${newStatus}\`.`, {
     parse_mode: "Markdown",
     reply_markup: new InlineKeyboard().text("🎯 Wanted Admin", "admin:wanted_menu"),
   });
@@ -721,7 +744,7 @@ adminComposer.callbackQuery("admin:voting_menu", async (ctx) => {
 
   if (activeBallot) {
     const summary = await tallyBallot(activeBallot.id);
-    const closesStr = new Date(activeBallot.closesAt).toLocaleDateString("en-US", {
+    const closesStr = formatTorontoDate(activeBallot.closesAt, {
       month: "short",
       day: "numeric",
       hour: "2-digit",
@@ -729,10 +752,10 @@ adminComposer.callbackQuery("admin:voting_menu", async (ctx) => {
     });
 
     text +=
-      `🟢 *ACTIVE BALLOT: ${activeBallot.title}*\n` +
+      `🟢 *ACTIVE BALLOT: ${escapeMd(activeBallot.title)}*\n` +
       `*Closes:* ${closesStr}\n` +
       `*Votes Cast So Far:* ${summary.totalVotes}\n` +
-      `*Candidates:* ${activeBallot.candidates.map((c) => c.creatorName).join(", ")}\n\n`;
+      `*Candidates:* ${activeBallot.candidates.map((c) => escapeMd(c.creatorName)).join(", ")}\n\n`;
 
     kb.text("🛑 Close Ballot Early & Tally", `admin:close_ballot:${activeBallot.id}`).row();
   } else {
@@ -743,7 +766,7 @@ adminComposer.callbackQuery("admin:voting_menu", async (ctx) => {
   if (past.length > 0) {
     text += `*Past Ballots:*\n`;
     for (const b of past) {
-      text += `• ${b.title} (${b.status})\n`;
+      text += `• ${escapeMd(b.title)} (${b.status})\n`;
     }
   }
 
@@ -783,8 +806,8 @@ adminComposer.callbackQuery("admin:prepare_ballot", async (ctx) => {
   await ctx.editMessageText(
     `🗳️ *PREPARE MONTHLY CREATOR BALLOT*\n\n` +
     `*Eligible Candidates for Shortlist:*\n` +
-    eligible.slice(0, 5).map((c, i) => `${i + 1}. *${c.name}* (${c.supportCount} supporters)`).join("\n") +
-    `\n\nVoting will run for 5 days. Confirm to launch:`,
+    eligible.slice(0, 5).map((c, i) => `${i + 1}. *${escapeMd(c.name)}* (${c.supportCount} supporters)`).join("\n") +
+    `\n\nVoting will run for the configured voting period (VOTING_PERIOD_DAYS). Confirm to launch:`,
     {
       parse_mode: "Markdown",
       reply_markup: kb,
@@ -804,9 +827,9 @@ adminComposer.callbackQuery("admin:launch_ballot", async (ctx) => {
     await ctx.answerCallbackQuery({ text: "Ballot published!" });
     await ctx.reply(
       `🎉 *BALLOT SUCCESSFULLY OPENED!*\n\n` +
-      `*Title:* ${ballot.title}\n` +
-      `*Candidates:* ${ballot.candidates.map((c) => c.creatorName).join(", ")}\n` +
-      `*Closes:* ${new Date(ballot.closesAt).toLocaleString()}`,
+      `*Title:* ${escapeMd(ballot.title)}\n` +
+      `*Candidates:* ${ballot.candidates.map((c) => escapeMd(c.creatorName)).join(", ")}\n` +
+      `*Closes:* ${formatTorontoDate(ballot.closesAt, { dateStyle: "medium", timeStyle: "short" })}`,
       {
         parse_mode: "Markdown",
         reply_markup: new InlineKeyboard().text("🗳️ Voting Admin", "admin:voting_menu"),
@@ -832,9 +855,9 @@ adminComposer.callbackQuery(/^admin:close_ballot:([a-f0-9-]+)$/, async (ctx) => 
       `📊 *BALLOT CLOSED!*\n\n` +
       `*Total Votes Cast:* ${summary.totalVotes}\n` +
       `*Turnout:* ${summary.eligibleTurnoutPct}%\n` +
-      `*Outcome:* ${summary.isTie ? "TIE (Runoff Scheduled)" : (summary.winner ? `Winner: *${summary.winner.creatorName}*` : "No votes cast")}\n\n` +
+      `*Outcome:* ${summary.isTie ? "TIE (Runoff Scheduled)" : (summary.winner ? `Winner: *${escapeMd(summary.winner.creatorName)}*` : "No votes cast")}\n\n` +
       `*Candidate Tallies:*\n` +
-      summary.tally.map((t) => `• ${t.name}: ${t.votes} votes`).join("\n"),
+      summary.tally.map((t) => `• ${escapeMd(t.name)}: ${t.votes} votes`).join("\n"),
       {
         parse_mode: "Markdown",
         reply_markup: new InlineKeyboard().text("🗳️ Voting Admin", "admin:voting_menu"),

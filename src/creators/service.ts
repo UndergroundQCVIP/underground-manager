@@ -154,7 +154,9 @@ export async function handleForumTopicEdited(
 export async function handleMediaUpload(
   chatId: number,
   topicId: number,
-  senderUserId: number
+  senderUserId: number,
+  /** Telegram message.date (unix seconds): the real upload time. */
+  messageDateUnix?: number
 ): Promise<Creator | null> {
   const config = getConfig();
 
@@ -178,7 +180,8 @@ export async function handleMediaUpload(
   }
 
   const wasEmpty = !creator.hasContent;
-  const updated = await recordCreatorMediaUpload(chatId, topicId);
+  const contentAt = messageDateUnix ? new Date(messageDateUnix * 1000) : new Date();
+  const updated = await recordCreatorMediaUpload(chatId, topicId, contentAt);
 
   if (updated) {
     await logAuditEvent(

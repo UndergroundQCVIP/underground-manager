@@ -14,6 +14,7 @@ export async function getDirectorySyncState(): Promise<DirectorySyncState> {
     res.value ?? {
       publishedMessageIds: [],
       isDirty: false,
+      dirtySeq: 0,
     }
   );
 }
@@ -25,24 +26,57 @@ export async function saveDirectorySyncState(
   await kv.set(DIRECTORY_STATE_KEY, state);
 }
 
+/**
+ * Flags the directory as needing a refresh. Every call bumps `dirtySeq` so a sync
+ * that is already running cannot clear a change made while it was in flight.
+ */
 export async function markDirectoryDirty(): Promise<void> {
   const kv = await getKv();
-  const current = await getDirectorySyncState();
-  if (!current.isDirty) {
-    await kv.set(DIRECTORY_STATE_KEY, { ...current, isDirty: true });
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const res = await kv.get<DirectorySyncState>(DIRECTORY_STATE_KEY);
+    const current: DirectorySyncState = res.value ?? {
+      publishedMessageIds: [],
+      isDirty: false,
+      dirtySeq: 0,
+    };
+    const commit = await kv
+      .atomic()
+      .check(res)
+      .set(DIRECTORY_STATE_KEY, {
+        ...current,
+        isDirty: true,
+        dirtySeq: (current.dirtySeq ?? 0) + 1,
+      })
+      .commit();
+    if (commit.ok) return;
   }
+  throw new Error("Could not mark the creator directory dirty (write conflict)");
 }
 
+/**
+ * Records a completed sync. The dirty flag is only cleared if no change was
+ * recorded since the sync started (`seqAtStart`).
+ */
 export async function clearDirectoryDirty(
   newContentHash: string,
-  publishedMessageIds: number[]
+  publishedMessageIds: number[],
+  seqAtStart?: number
 ): Promise<void> {
   const kv = await getKv();
-  const state: DirectorySyncState = {
-    lastSyncAt: new Date().toISOString(),
-    lastContentHash: newContentHash,
-    publishedMessageIds,
-    isDirty: false,
-  };
-  await kv.set(DIRECTORY_STATE_KEY, state);
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const res = await kv.get<DirectorySyncState>(DIRECTORY_STATE_KEY);
+    const current = res.value;
+    const seqNow = current?.dirtySeq ?? 0;
+    const changedDuringSync = seqAtStart !== undefined && seqNow !== seqAtStart;
+    const state: DirectorySyncState = {
+      lastSyncAt: new Date().toISOString(),
+      lastContentHash: newContentHash,
+      publishedMessageIds,
+      isDirty: changedDuringSync,
+      dirtySeq: seqNow,
+    };
+    const commit = await kv.atomic().check(res).set(DIRECTORY_STATE_KEY, state).commit();
+    if (commit.ok) return;
+  }
+  throw new Error("Could not record directory sync state (write conflict)");
 }

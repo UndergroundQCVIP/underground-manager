@@ -5,10 +5,10 @@
 
 import { getConfig } from "../config.ts";
 import {
+  closeBallotAtomic,
   createBallot,
   getActiveBallot,
   getBallot,
-  hasUserVoted,
   recordVote,
   tallyBallot,
   updateBallot,
@@ -24,11 +24,16 @@ import {
 } from "../db/entitlements.ts";
 import { logAuditEvent } from "../db/audit.ts";
 import { getSystemSettings } from "../db/settings.ts";
+import { escapeMd } from "../util/markdown.ts";
+import { formatTorontoDate } from "../util/time.ts";
 import {
   Ballot,
   BallotCandidate,
   VoteResultSummary,
 } from "../types.ts";
+
+/** Candidates that may be placed on a ballot (not already won, bought or on another ballot). */
+const VOTABLE_STATUSES = new Set(["requested", "pricing_review", "eligible_for_voting"]);
 
 export interface PrepareBallotParams {
   adminId: number;
@@ -43,12 +48,17 @@ export async function prepareMonthlyBallot(
   const limit = params.shortlistSize || settings.votingShortlistSize;
   const cycleId = getCurrentMonthCycle();
 
+  const open = await getActiveBallot();
+  if (open) {
+    throw new Error("A ballot is already open. Close it before starting a new one.");
+  }
+
   let candidates: BallotCandidate[] = [];
 
   if (params.candidateIds && params.candidateIds.length > 0) {
     const all = await listWantedCandidates();
     candidates = all
-      .filter((c) => params.candidateIds!.includes(c.id))
+      .filter((c) => params.candidateIds!.includes(c.id) && VOTABLE_STATUSES.has(c.status))
       .map((c) => ({
         candidateId: c.id,
         creatorName: c.name,
@@ -82,7 +92,7 @@ export async function prepareMonthlyBallot(
 
   const ballot = await createBallot({
     monthCycle: cycleId,
-    title: `Monthly Acquisition Ballot — ${now.toLocaleString("en-US", { month: "long", year: "numeric" })}`,
+    title: `Monthly Acquisition Ballot — ${formatTorontoDate(now, { month: "long", year: "numeric" })}`,
     candidates,
     status: "active",
     startsAt: now.toISOString(),
@@ -145,12 +155,9 @@ export async function castVote(
     return { success: false, error: result.error };
   }
 
-  await logAuditEvent(
-    "vote_cast",
-    { ballotId, candidateId }, // Vote is anonymous in audit log
-    0,
-    userId
-  );
+  // The audit trail records THAT a member voted (so turnout is auditable) but never
+  // WHAT they voted for: the choice must not be linkable to the member.
+  await logAuditEvent("vote_cast", { ballotId }, 0, userId);
 
   return { success: true };
 }
@@ -163,6 +170,15 @@ export interface VotingPublisherApi {
   ): Promise<{ message_id: number }>;
 }
 
+/**
+ * Closes a ballot (idempotent, safe under concurrent cron/admin calls and
+ * restarts) and publishes the outcome.
+ *
+ * The decision — closed ballot, results, and any runoff — is committed in ONE
+ * atomic operation, so a crash can never leave a tie without its runoff or create
+ * two runoffs. Side effects (candidate statuses, announcement) follow and are
+ * safe to repeat; an unsent announcement is retried on the next hourly run.
+ */
 export async function closeAndFinalizeBallot(
   ballotId: string,
   api?: VotingPublisherApi
@@ -172,105 +188,59 @@ export async function closeAndFinalizeBallot(
     throw new Error(`Ballot ${ballotId} not found`);
   }
 
-  if (ballot.status === "closed") {
-    return await tallyBallot(ballotId);
+  if (ballot.status !== "active") {
+    const summary = await tallyBallot(ballotId, ballot.totalEligibleMembersAtClose);
+    if (ballot.status === "closed" && !ballot.resultsAnnouncedAt && api) {
+      await announceOutcome(ballot, summary, api);
+    }
+    return summary;
   }
 
-  // Get total active paid subscribers for turnout calculation
   const totalEligible = await countActivePaidSubscribers();
-
-  ballot.status = "closed";
-  ballot.totalEligibleMembersAtClose = totalEligible;
-
   const summary = await tallyBallot(ballotId, totalEligible);
-  ballot.totalVotesCount = summary.totalVotes;
+
+  const closed: Ballot = {
+    ...ballot,
+    status: "closed",
+    totalEligibleMembersAtClose: totalEligible,
+    totalVotesCount: summary.totalVotes,
+  };
+
+  let runoffDraft: Omit<Ballot, "id" | "createdAt" | "updatedAt"> | undefined;
 
   if (summary.isTie) {
-    ballot.isTie = true;
-    ballot.tiedCandidateIds = summary.tiedCandidates.map((c) => c.candidateId);
+    closed.isTie = true;
+    closed.tiedCandidateIds = summary.tiedCandidates.map((c) => c.candidateId);
 
-    // Schedule Runoff Vote between tied candidates
-    const settings = await getSystemSettings();
-    const runoffClosesAt = new Date(
-      Date.now() + settings.votingPeriodDays * 86400 * 1000
-    ).toISOString();
-
-    const runoffBallot = await createBallot({
-      monthCycle: ballot.monthCycle,
-      title: `⚡ RUNOFF VOTE — ${ballot.title}`,
-      candidates: summary.tiedCandidates,
-      status: "active",
-      startsAt: new Date().toISOString(),
-      closesAt: runoffClosesAt,
-      turnoutObjective: ballot.turnoutObjective,
-      isRunoff: true,
-      parentBallotId: ballot.id,
-    });
-
-    await logAuditEvent(
-      "runoff_scheduled",
-      {
+    if (!ballot.isRunoff) {
+      const settings = await getSystemSettings();
+      runoffDraft = {
+        monthCycle: ballot.monthCycle,
+        title: `⚡ RUNOFF VOTE — ${ballot.title}`,
+        candidates: summary.tiedCandidates,
+        status: "active",
+        startsAt: new Date().toISOString(),
+        closesAt: new Date(Date.now() + settings.votingPeriodDays * 86400 * 1000).toISOString(),
+        turnoutObjective: ballot.turnoutObjective,
+        isRunoff: true,
         parentBallotId: ballot.id,
-        runoffBallotId: runoffBallot.id,
-        tiedCandidates: summary.tiedCandidates.map((c) => c.creatorName),
-      },
-      0
-    );
-
-    if (api) {
-      const config = getConfig();
-      if (config.WANTED_LIST_CHAT_ID) {
-        await api.sendMessage(
-          config.WANTED_LIST_CHAT_ID,
-          `⚡ *TIE DETECTED — RUNOFF VOTE OPEN!*\n\n` +
-          `The vote ended in a tie between:\n` +
-          summary.tiedCandidates.map((c) => `• *${c.creatorName}*`).join("\n") +
-          `\n\nA 5-day runoff ballot is now open inside Underground Manager.`,
-          {
-            parse_mode: "Markdown",
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  {
-                    text: "🗳️ Vote in Runoff",
-                    url: `https://t.me/${config.BOT_USERNAME}?start=vote`,
-                  },
-                ],
-              ],
-            },
-          }
-        );
-      }
+      };
+    } else {
+      // A runoff that ties again is not repeated indefinitely: an administrator decides.
+      closed.needsAdminDecision = true;
     }
   } else if (summary.winner) {
-    ballot.winnerCandidateId = summary.winner.candidateId;
-
-    // Mark winning candidate as 'selected' / 'acquisition_pending'
-    await updateWantedStatus(
-      summary.winner.candidateId,
-      "selected",
-      `Won ${ballot.title} with ${summary.tally[0]?.votes || 0} votes`
-    );
-
-    if (api) {
-      const config = getConfig();
-      if (config.WANTED_LIST_CHAT_ID) {
-        await api.sendMessage(
-          config.WANTED_LIST_CHAT_ID,
-          `🎉 *MONTHLY CREATOR VOTE RESULTS!*\n\n` +
-          `🏆 *Winner:* *${summary.winner.creatorName}*\n` +
-          `📊 *Total Votes Cast:* ${summary.totalVotes}\n` +
-          `👥 *Member Turnout:* ${summary.eligibleTurnoutPct}%\n\n` +
-          `*Final Tallies:*\n` +
-          summary.tally.map((t) => `• ${t.name}: ${t.votes} votes`).join("\n") +
-          `\n\n_Acquisition has been submitted for administrator approval._`,
-          { parse_mode: "Markdown" }
-        );
-      }
-    }
+    closed.winnerCandidateId = summary.winner.candidateId;
+  } else {
+    closed.needsAdminDecision = true; // nobody voted
   }
 
-  await updateBallot(ballot);
+  const result = await closeBallotAtomic(closed, runoffDraft);
+  if (!result.ok) {
+    // Another worker closed it first; just report the stored outcome.
+    const current = await getBallot(ballotId);
+    return await tallyBallot(ballotId, current?.totalEligibleMembersAtClose);
+  }
 
   await logAuditEvent(
     "ballot_closed",
@@ -283,6 +253,99 @@ export async function closeAndFinalizeBallot(
     },
     0
   );
+  if (result.runoff) {
+    await logAuditEvent(
+      "runoff_scheduled",
+      {
+        parentBallotId: ballot.id,
+        runoffBallotId: result.runoff.id,
+        tiedCandidates: summary.tiedCandidates.map((c) => c.creatorName),
+      },
+      0
+    );
+  }
+
+  // Candidate statuses: the winner is selected; tied candidates stay "voting" for
+  // the runoff; everyone else goes back to the pool for future ballots.
+  const staysVoting = new Set(result.runoff ? summary.tiedCandidates.map((c) => c.candidateId) : []);
+  for (const c of ballot.candidates) {
+    if (c.candidateId === closed.winnerCandidateId) {
+      await updateWantedStatus(
+        c.candidateId,
+        "selected",
+        `Won ${ballot.title} with ${summary.tally[0]?.votes || 0} votes`
+      );
+    } else if (!staysVoting.has(c.candidateId)) {
+      await updateWantedStatus(c.candidateId, "eligible_for_voting");
+    }
+  }
+
+  if (api) {
+    const stored = (await getBallot(ballotId)) ?? closed;
+    await announceOutcome(stored, summary, api, result.runoff);
+  }
 
   return summary;
+}
+
+async function announceOutcome(
+  ballot: Ballot,
+  summary: VoteResultSummary,
+  api: VotingPublisherApi,
+  runoff?: Ballot
+): Promise<void> {
+  const config = getConfig();
+  if (!config.WANTED_LIST_CHAT_ID) return;
+
+  const botLink = (start: string) => ({
+    inline_keyboard: [[{ text: "🗳️ Open in Underground Manager", url: `https://t.me/${config.BOT_USERNAME}?start=${start}` }]],
+  });
+
+  let text: string;
+  let options: Record<string, unknown> = { parse_mode: "Markdown" };
+
+  if (summary.isTie && (runoff || (ballot.isTie && !ballot.isRunoff))) {
+    text =
+      `⚡ *TIE DETECTED — RUNOFF VOTE OPEN!*\n\n` +
+      `The vote ended in a tie between:\n` +
+      summary.tiedCandidates.map((c) => `• *${escapeMd(c.creatorName)}*`).join("\n") +
+      `\n\nA runoff ballot is now open inside Underground Manager.`;
+    options = { parse_mode: "Markdown", reply_markup: botLink("vote") };
+  } else if (summary.winner) {
+    text =
+      `🎉 *MONTHLY CREATOR VOTE RESULTS!*\n\n` +
+      `🏆 *Winner:* *${escapeMd(summary.winner.creatorName)}*\n` +
+      `📊 *Total Votes Cast:* ${summary.totalVotes}\n` +
+      `👥 *Member Turnout:* ${summary.eligibleTurnoutPct}%\n\n` +
+      `*Final Tallies:*\n` +
+      summary.tally.map((t) => `• ${escapeMd(t.name)}: ${t.votes} votes`).join("\n") +
+      `\n\n_The result is submitted for administrator approval. Nothing is purchased automatically._`;
+  } else if (summary.isTie) {
+    text =
+      `⚖️ *RUNOFF ENDED IN A TIE*\n\nThe administrators will decide between:\n` +
+      summary.tiedCandidates.map((c) => `• *${escapeMd(c.creatorName)}*`).join("\n");
+  } else {
+    text = `🗳️ *VOTE CLOSED*\n\nNo votes were cast this round, so no creator was selected.`;
+  }
+
+  try {
+    await api.sendMessage(config.WANTED_LIST_CHAT_ID, text, options);
+    await updateBallot({ ...(await getBallot(ballot.id) ?? ballot), resultsAnnouncedAt: new Date().toISOString() });
+  } catch (err) {
+    // Left unannounced on purpose: the hourly job retries the announcement.
+    console.error(`[Voting] Could not announce results of ballot ${ballot.id}:`, err);
+  }
+}
+
+/** Re-sends results that failed to publish (called from the hourly job). */
+export async function retryUnannouncedBallots(api: VotingPublisherApi): Promise<number> {
+  const { listPastBallots } = await import("../db/voting.ts");
+  let retried = 0;
+  for (const b of await listPastBallots(5)) {
+    if (b.status === "closed" && !b.resultsAnnouncedAt) {
+      await closeAndFinalizeBallot(b.id, api);
+      retried++;
+    }
+  }
+  return retried;
 }
