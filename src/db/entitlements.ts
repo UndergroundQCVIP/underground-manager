@@ -248,3 +248,22 @@ export async function listAllEntitlements(): Promise<Entitlement[]> {
   }
   return entitlements;
 }
+
+export async function countActivePaidSubscribers(): Promise<number> {
+  const all = await listAllEntitlements();
+  const nowMs = Date.now();
+  const paidUsers = new Set<number>();
+
+  for (const e of all) {
+    if (
+      e.source === "telegram_stars" &&
+      e.status === "active" &&
+      new Date(e.expiresAt).getTime() > nowMs
+    ) {
+      paidUsers.add(e.userId);
+    }
+  }
+
+  return paidUsers.size;
+}
+

@@ -11,6 +11,9 @@ import { membershipComposer } from "./handlers/membership.ts";
 import { paymentsComposer } from "./handlers/payments.ts";
 import { joinReqComposer } from "./handlers/join_req.ts";
 import { adminComposer } from "./handlers/admin.ts";
+import { forumComposer } from "./handlers/forum.ts";
+import { wantedComposer } from "./handlers/wanted.ts";
+import { votingComposer } from "./handlers/voting.ts";
 
 export function createBot(token?: string): Bot {
   const config = getConfig();
@@ -38,6 +41,9 @@ export function createBot(token?: string): Bot {
   bot.use(paymentsComposer);
   bot.use(joinReqComposer);
   bot.use(adminComposer);
+  bot.use(forumComposer);
+  bot.use(wantedComposer);
+  bot.use(votingComposer);
 
   return bot;
 }

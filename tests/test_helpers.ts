@@ -8,9 +8,11 @@ import { SpaceId } from "../src/types.ts";
 
 export const MOCK_CONFIG: AppConfig = {
   BOT_TOKEN: "123456789:ABCDEF_mock_token_for_tests",
+  BOT_USERNAME: "UndergroundManagerBot",
   WEBHOOK_SECRET: "test_secret_token_12345",
   ADMIN_USER_IDS: [111111, 222222],
   VIP_COLLECTIONS_CHAT_ID: -1001001,
+  PUBLIC_DIRECTORY_CHAT_ID: -1001004,
   WANTED_LIST_CHAT_ID: -1001002,
   GENERAL_CHAT_ID: -1001003,
   STARS_PRICE_AMOUNT: 750,
@@ -20,6 +22,10 @@ export const MOCK_CONFIG: AppConfig = {
   PORT: 8000,
   DENO_ENV: "test",
   SUPPORT_USERNAME: "@TestUndergroundSupport",
+  DIRECTORY_UPDATE_CRON: "0 3 * * *",
+  VOTING_PERIOD_DAYS: 5,
+  VOTING_SHORTLIST_SIZE: 5,
+  DIGEST_ENABLED: false,
 };
 
 export async function setupTestEnvironment(): Promise<Deno.Kv> {
@@ -84,6 +90,17 @@ export class MockTelegramApi {
   async sendMessage(chatId: number | string, text: string, options?: unknown) {
     const messageId = this.sentMessages.length + 1;
     this.sentMessages.push({ chatId, text, options });
-    return { message_id: messageId };
+    return { message_id: messageId, chat: { id: chatId }, text };
+  }
+
+  public editedMessages: { chatId: number | string; messageId: number; text: string; options?: unknown }[] = [];
+
+  async editMessageText(chatId: number | string, messageId: number, text: string, options?: unknown) {
+    this.editedMessages.push({ chatId, messageId, text, options });
+    return { message_id: messageId, chat: { id: chatId }, text };
+  }
+
+  async pinChatMessage(chatId: number | string, messageId: number) {
+    return true;
   }
 }

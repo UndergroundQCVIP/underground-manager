@@ -1,14 +1,14 @@
-# UNDERGROUND MANAGER — Phase UG-01: Foundation & Memberships
+# UNDERGROUND MANAGER — Phase UG-01 & UG-02: Foundation, Memberships, Creator Directory & Voting
 
 A simple, secure, and reliable Telegram-native membership management bot built with TypeScript, [grammY](https://grammy.dev/), Deno 2, Deno KV, and Deno Cron for Deno Deploy.
 
-Underground Manager automatically manages recurring Telegram Stars subscriptions, join request approvals for private spaces, automated member removals upon subscription expiration, and administrator-granted complimentary memberships.
+Underground Manager automatically manages recurring Telegram Stars subscriptions, join request approvals for private spaces, automated member removals upon subscription expiration, administrator-granted complimentary memberships, public creator directory synchronization from private forum topics, and member-governed acquisition voting.
 
 ---
 
 ## 1. Feature Status Matrix
 
-In strict compliance with the UG-01 Implementation Contract:
+In strict compliance with the UG-01 and UG-02 Implementation Contracts:
 
 | Component / Feature | Status | Notes |
 |---|---|---|
@@ -22,37 +22,39 @@ In strict compliance with the UG-01 Implementation Contract:
 | **Safe Member Removal (Ban & Immediate Unban)** | 🟡 **Implemented & Automated-Tested** | Expired non-admins removed without permanent blacklist; admins protected. |
 | **Complimentary Memberships (7d, 30d, 90d, 365d)** | ✅ **Completed & Tested** | Full admin wizard, customizable reasons & space levels, audit logged. |
 | **3-Day Expiry Reminder for Complimentary Members** | ✅ **Completed & Tested** | Automatically scheduled; single-delivery reminder with Stars purchase call-to-action. |
-| **Hourly Scheduled Reconciliation (Deno Cron)** | ✅ **Completed & Tested** | Hourly job (`0 * * * *`) reconciles access states and sends reminders. |
-| **Member Inline Keyboard UI & Navigation** | ✅ **Completed & Tested** | Join, My Membership, Access Channels, Support (/paysupport). |
-| **Administrator Private Menu & Lookup** | ✅ **Completed & Tested** | Protected by numeric user ID whitelist; member lookup, extend, revoke, resync. |
+| **Hourly Scheduled Reconciliation (Deno Cron)** | ✅ **Completed & Tested** | Hourly job (`0 * * * *`) reconciles access states, closes expired ballots, and sends reminders. |
+| **Member Inline Keyboard UI & Navigation** | ✅ **Completed & Tested** | Join, My Membership, Access Channels, Wanted List, Voting, Support (/paysupport). |
+| **Administrator Private Menu & Lookup** | ✅ **Completed & Tested** | Whitelisted numeric user IDs; member lookup, complimentary wizard, creator registry, voting controls. |
 | **Update Idempotency & Webhook Secret Token** | ✅ **Completed & Tested** | Prevents webhook spoofing and duplicate message processing. |
-| **Creator Directory & Topic Indexing (UG-02)** | ⛔ **Out of Scope (UG-02)** | Intentionally not implemented in UG-01. |
-| **Creator Nominations & Voting (UG-02)** | ⛔ **Out of Scope (UG-02)** | Intentionally not implemented in UG-01. |
-| **Treasury & Financial Payouts (UG-03)** | ⛔ **Out of Scope (UG-03)** | Intentionally not implemented in UG-01. |
+| **Creator Forum Topic Detection & Indexing (UG-02)** | ✅ **Completed & Tested** | Real-time topic creation/edit & photo/video detection; empty topics suppressed. |
+| **Public Creator Directory Sync (UG-02)** | ✅ **Completed & Tested** | Daily 3:00 AM sync with A–Z grouping, content hash diffs, <4000 char chunking. |
+| **Deep Link Membership Protection (UG-02)** | ✅ **Completed & Tested** | `t.me/<bot>?start=creator_<id>`: direct private topic link for paid members, Stars CTA for non-members. |
+| **Wanted List & Community Nominations (UG-02)** | ✅ **Completed & Tested** | `/suggest` and interactive voting; 1 support per paid member per monthly cycle. |
+| **Monthly Acquisition Voting & Quorum (UG-02)** | ✅ **Completed & Tested** | Top 5 shortlisted candidates; irrevocable vote; 20% turnout check; auto 5-day tie runoffs. |
+| **Treasury & Financial Payouts (UG-03)** | ⛔ **Out of Scope (UG-03)** | Intentionally deferred to Phase UG-03. |
 
 ---
 
 ## 2. Protected Telegram Architecture
 
-Underground Manager manages access to three private Telegram spaces:
+Underground Manager manages access and synchronization across four Telegram spaces:
 
-1. **TOKEBEC VIP COLLECTIONS** (`VIP_COLLECTIONS_CHAT_ID`)
-   - **Type:** Telegram Supergroup with **Topics (Forum)** enabled.
-   - **Purpose:** Primary creator library.
-   - **Note:** Existing topics and creator content are completely preserved and untouched.
-2. **Wanted List** (`WANTED_LIST_CHAT_ID`)
-   - **Type:** Private Telegram Channel.
-   - **Purpose:** Creator requests and community nominations.
-3. **Underground General Chat** (`GENERAL_CHAT_ID`)
-   - **Type:** Private Telegram Group.
-   - **Purpose:** Member community and discussions.
+| Name | Type | Access | Purpose |
+|---|---|---|---|
+| **Underground QC VIP** | Channel | Public | Welcome, announcements, subscription entry point |
+| **Public Creator Directory** (`PUBLIC_DIRECTORY_CHAT_ID`) | Channel | Public | Alphabetical directory of available creators and update dates |
+| **TOKEBEC VIP COLLECTIONS** (`VIP_COLLECTIONS_CHAT_ID`) | Forum Supergroup | Paid / Private | Primary creator media library (one topic per creator) |
+| **Wanted List** (`WANTED_LIST_CHAT_ID`) | Channel | Paid / Private | Creator nominations, community rankings, and ballot announcements |
+| **Underground General Chat** (`GENERAL_CHAT_ID`) | Supergroup | Paid / Private | Member conversations and optional weekly update digests |
+| **Underground Manager** | Bot | Hybrid | Automation, subscriptions, access gates, nominations, and voting |
 
 ### Access Levels
-- **Paid Stars Subscription:** Full access to all 3 spaces (`vip_collections`, `general_chat`, `wanted_list`).
+- **Paid Stars Subscription:** Full access to all 3 private spaces (`vip_collections`, `general_chat`, `wanted_list`) + nomination and voting rights.
 - **Complimentary Access Levels:**
   - `vip_only`: Access to TOKEBEC VIP COLLECTIONS only (default).
   - `vip_and_chat`: Access to TOKEBEC VIP COLLECTIONS + Underground General Chat.
-  - `full`: Full access to all 3 spaces.
+  - `full`: Full access to all 3 spaces (read-only in Wanted List; nominations and voting are strictly reserved for paying Stars subscribers).
+
 
 ---
 
@@ -72,7 +74,7 @@ underground-manager/
 ├── README.md              # Complete technical documentation & operational manual
 ├── src/
 │   ├── config.ts          # Environment variables, chat mapping, price settings, validation
-│   ├── types.ts           # Core domain models (Member, Entitlement, Payment, Space, Audit)
+│   ├── types.ts           # Core domain models (Member, Entitlement, Creator, Wanted, Ballot, Audit)
 │   ├── main.ts            # Entry point: HTTP Webhook / Polling server + Deno.cron
 │   ├── db/
 │   │   ├── kv.ts          # Deno KV lifecycle and test injection
@@ -81,6 +83,11 @@ underground-manager/
 │   │   ├── payments.ts    # Transaction logs and atomic charge ID idempotency
 │   │   ├── sync.ts        # Space admission/removal state tracking
 │   │   ├── links.ts       # Cached join-request invite links
+│   │   ├── creators.ts    # [UG-02] Creator topic indexing & media upload tracking
+│   │   ├── directory.ts   # [UG-02] Public directory state, message chunking, content hash
+│   │   ├── wanted.ts      # [UG-02] Candidate nominations, atomic monthly support, rankings
+│   │   ├── voting.ts      # [UG-02] Ballots, atomic vote casting, tallies, runoff records
+│   │   ├── settings.ts    # [UG-02] Dynamic operational settings persistence
 │   │   └── audit.ts       # Immutable audit event log
 │   ├── payments/
 │   │   ├── provider.ts    # Generic PaymentProvider interface
@@ -90,10 +97,18 @@ underground-manager/
 │   │   ├── links.ts       # Join link generation with creates_join_request=true
 │   │   ├── join_requests.ts # Join request verification and approval/decline
 │   │   └── sync.ts        # Access synchronization, bot permission checks, safe removals
+│   ├── creators/
+│   │   └── service.ts     # [UG-02] Topic detection, media upload tracking, link matching
+│   ├── directory/
+│   │   └── sync.ts        # [UG-02] Public channel sync, A-Z categorization, deep linking
+│   ├── wanted/
+│   │   └── service.ts     # [UG-02] Nomination validation, duplicate checks, channel sync
+│   ├── voting/
+│   │   └── service.ts     # [UG-02] Ballot creation, turnout quorum, runoff scheduling
 │   ├── complimentary/
 │   │   └── service.ts     # Admin complimentary grants, revokes, and 3-day reminders
 │   ├── cron/
-│   │   └── reconciliation.ts # Hourly reconciliation job
+│   │   └── reconciliation.ts # Hourly reconciliation job & daily 3:00 AM directory sync
 │   └── bot/
 │       ├── bot.ts         # GrammY bot assembly and error handling
 │       ├── keyboards.ts   # Inline keyboards for members and administrators
@@ -102,17 +117,25 @@ underground-manager/
 │       │   ├── auth.ts    # Admin authorization and member tracking
 │       │   └── idempotency.ts # Update ID deduplication
 │       └── handlers/
-│           ├── start.ts   # /start, /help, /paysupport, home navigation
+│           ├── start.ts   # /start, /help, /paysupport, home navigation & deep links
 │           ├── membership.ts # Join info, Stars invoice link, My Membership, channel links
 │           ├── payments.ts# pre_checkout_query and message:successful_payment
 │           ├── join_req.ts# chat_join_request verification
-│           └── admin.ts   # Admin menu, member lookup, complimentary wizard, status, resync
+│           ├── forum.ts   # [UG-02] Forum topic created/edited & media upload listener
+│           ├── wanted.ts  # [UG-02] /wanted, /suggest, and interactive support casting
+│           ├── voting.ts  # [UG-02] /vote, candidate presentation, atomic confirmation
+│           └── admin.ts   # Admin menu, complimentary wizard, creator & voting controls
 └── tests/
     ├── test_helpers.ts    # In-memory Deno KV and MockTelegramApi
     ├── payments_test.ts   # 9 automated tests for Stars billing & idempotency
     ├── access_test.ts     # 9 automated tests for join requests & removal logic
     ├── complimentary_test.ts # 8 automated tests for complimentary workflow & reminders
-    └── security_test.ts   # 6 automated tests for webhook security, auth & concurrency
+    ├── security_test.ts   # 6 automated tests for webhook security, auth & concurrency
+    ├── creators_test.ts   # 6 automated tests for creator topics & media tracking
+    ├── directory_test.ts  # 4 automated tests for public directory synchronization
+    ├── wanted_test.ts     # 7 automated tests for nominations & monthly support
+    ├── voting_test.ts     # 5 automated tests for ballots, votes, quorum & runoffs
+    └── acquisitions_test.ts # 3 automated tests for post-acquisition transitions
 ```
 
 ---
@@ -123,12 +146,15 @@ underground-manager/
 1. Open [@BotFather](https://t.me/BotFather) on Telegram.
 2. Send `/newbot` and follow the instructions to create `@UndergroundManagerBot`. Save the resulting `BOT_TOKEN`.
 3. Configure Bot Privacy:
-   - Send `/setprivacy` -> Select your bot -> Choose **Disable** (required so the bot can receive join requests and admin commands in groups).
+   - Send `/setprivacy` -> Select your bot -> Choose **Disable** (required so the bot can receive join requests, admin commands, and forum topic service messages in groups).
 4. Configure Bot Commands:
    - Send `/setcommands` -> Select your bot -> Paste:
      ```text
      start - Open Underground Manager main menu
      help - How to use the bot and access channels
+     wanted - Browse Wanted List & support creators
+     suggest - Propose a new creator for the Wanted List
+     vote - Cast your vote in the active monthly acquisition ballot
      paysupport - Subscription billing help and support
      admin - Open Administrator controls (admins only)
      ```
@@ -137,17 +163,24 @@ underground-manager/
    - Note: Stars payments use `currency: "XTR"` and `provider_token: ""`.
 
 ### Step 2: Telegram Space Administrator Rights
-Add your bot as an **Administrator** in all 3 spaces:
+Add your bot as an **Administrator** in all 4 spaces:
 1. **TOKEBEC VIP COLLECTIONS** (Forum Supergroup):
    - Administrator Permissions Required:
      - `can_invite_users` (required to create invite links and approve join requests)
      - `can_restrict_members` (required to remove expired non-admin members)
-     - `can_manage_topics` (for UG-02 compatibility)
-2. **Wanted List** (Channel):
+     - `can_manage_topics` (required to detect and register forum topics)
+2. **Public Creator Directory** (Public Channel):
+   - Administrator Permissions Required:
+     - `can_post_messages` (required to publish and update the directory)
+     - `can_edit_messages` (required to update existing directory chunk messages)
+     - `can_delete_messages` (required to clean up excess chunk messages)
+3. **Wanted List** (Channel):
    - Administrator Permissions Required:
      - `can_invite_users`
      - `can_manage_chat`
-3. **Underground General Chat** (Group):
+     - `can_post_messages`
+     - `can_edit_messages`
+4. **Underground General Chat** (Group):
    - Administrator Permissions Required:
      - `can_invite_users`
      - `can_restrict_members`
@@ -163,6 +196,7 @@ To find the numeric chat ID for each space:
 1. Forward a message from each channel/group to [@userinfobot](https://t.me/userinfobot) or use Telegram Web (the URL contains the chat ID prefixed with `-100`).
 2. Example IDs:
    - `VIP_COLLECTIONS_CHAT_ID=-1001234567890`
+   - `PUBLIC_DIRECTORY_CHAT_ID=-1001234567893`
    - `WANTED_LIST_CHAT_ID=-1001234567891`
    - `GENERAL_CHAT_ID=-1001234567892`
 
@@ -175,18 +209,25 @@ Create a `.env` file for local development or set the following in Deno Deploy:
 | Variable | Description | Example | Default |
 |---|---|---|---|
 | `BOT_TOKEN` | Bot API token from @BotFather | `123456:ABC-DEF1234ghIkl` | *Required* |
+| `BOT_USERNAME` | Bot username without `@` (used for deep linking) | `UndergroundManagerBot` | `UndergroundManagerBot` |
 | `WEBHOOK_SECRET` | Secret token for webhook verification (`X-Telegram-Bot-Api-Secret-Token`) | `f7a29...` | *Required in Prod* |
 | `ADMIN_USER_IDS` | Comma-separated numeric Telegram user IDs of administrators | `12345678,87654321` | *Required* |
 | `VIP_COLLECTIONS_CHAT_ID` | Numeric Chat ID for VIP Collections forum | `-1001234567890` | *Required* |
+| `PUBLIC_DIRECTORY_CHAT_ID` | Numeric Chat ID for Public Creator Directory channel | `-1001234567893` | `0` |
 | `WANTED_LIST_CHAT_ID` | Numeric Chat ID for Wanted List channel | `-1001234567891` | *Required* |
 | `GENERAL_CHAT_ID` | Numeric Chat ID for General Chat | `-1001234567892` | *Required* |
 | `STARS_PRICE_AMOUNT` | Price in Telegram Stars for recurring subscription | `750` | `750` |
 | `STARS_SUBSCRIPTION_PERIOD_SECONDS` | Recurring subscription duration in seconds | `2592000` (30 days) | `2592000` |
 | `CURRENCY` | Currency code for Stars | `XTR` | `XTR` |
+| `DIRECTORY_UPDATE_CRON` | Daily Directory & Wanted List sync cron expression | `0 3 * * *` | `0 3 * * *` |
+| `VOTING_PERIOD_DAYS` | Monthly acquisition voting period duration in days | `5` | `5` |
+| `VOTING_SHORTLIST_SIZE` | Maximum top candidates included on monthly ballot | `5` | `5` |
+| `DIGEST_ENABLED` | Enable weekly creator update digest in General Chat | `false` | `false` |
 | `BOT_MODE` | Runtime mode: `webhook` (Deploy) or `polling` (Local) | `webhook` | `webhook` |
 | `PORT` | HTTP listener port | `8000` | `8000` |
 | `DENO_ENV` | Environment: `production`, `development`, or `test` | `production` | `development` |
 | `SUPPORT_USERNAME` | Support handle displayed in `/paysupport` | `@UndergroundSupport` | `@UndergroundSupport` |
+
 
 ---
 
@@ -221,7 +262,7 @@ Create a `.env` file for local development or set the following in Deno Deploy:
 ## 7. Local Development & Testing
 
 ### Running Tests
-The project includes a comprehensive, automated test suite covering 32 test cases across Payments, Access Control, Complimentary Memberships, and Security:
+The project includes a comprehensive, automated test suite covering **57 test cases across 9 test suites** (Payments, Access Control, Complimentary Memberships, Security, Creators, Directory Sync, Wanted List, Voting, and Acquisitions):
 
 ```bash
 deno task test
@@ -266,3 +307,77 @@ Send `/lookup <userId>` or `/lookup @username`:
 - Access reconciliation runs automatically every hour via Deno Cron.
 - Admins can trigger an immediate manual reconciliation anytime via `/admin` > **System Status** > **Trigger Safe Resync**.
 - The bot checks each member against active database entitlements. If expired, it kicks them without permanently banning them, allowing seamless re-entry upon future payment.
+
+### Creator Registration & Topic Repair
+Underground Manager automatically detects new forum topics and topic renames in `TOKEBEC VIP COLLECTIONS`. If a topic was created prior to bot installation or an event was missed:
+- Command: `/register_creator <Creator Name> <Topic Thread ID>`
+- Example: `/register_creator Aria 42`
+- Or use `/admin` > **Creator Management** to view all registered creators and trigger an immediate directory refresh.
+
+### Wanted List Administration
+- View ranked nominations via `/admin` > **Wanted List Admin**.
+- Admins can mark candidates as acquired, reject proposals, or merge duplicate suggestions.
+- Trigger manual Wanted List channel sync anytime via the admin menu.
+
+### Acquisition Voting Administration
+- Inspect the active monthly ballot and real-time tallies via `/admin` > **Voting Admin**.
+- Manually create or close ballots when needed.
+- If a ballot ends in a tie between top candidates, the bot automatically schedules a 5-day runoff ballot.
+
+---
+
+## 9. Creator Directory & Forum Synchronization (UG-02)
+
+### Topic Detection & Media Indexing
+1. **New Topics:** When an administrator creates a new topic in **TOKEBEC VIP COLLECTIONS**, the bot detects `message:forum_topic_created` and creates a creator record (`hasContent: false`).
+2. **Topic Renames:** When a topic is renamed, `message:forum_topic_edited` updates the creator's display name without altering historical records or creating duplicate profiles.
+3. **Media Uploads:** When authorized administrators upload photos or videos into a topic thread:
+   - The bot records the upload timestamp as `lastContentUpdateAt`.
+   - The creator is marked as `hasContent: true`.
+   - Text messages, reactions, and uploads from non-administrators do not affect the update timestamp.
+4. **Empty Topic Suppression:** Empty topics (`hasContent: false`) are kept internally but omitted from the public directory until media is published.
+
+### Public Directory Channel (`PUBLIC_DIRECTORY_CHAT_ID`)
+- **Daily Synchronization:** Scheduled daily at 3:00 AM (America/Toronto) via Deno Cron (`DIRECTORY_UPDATE_CRON`).
+- **Alphabetical A–Z Index:** Creators are grouped alphabetically under letter headers.
+- **Message Chunking:** Telegram messages are limited to 4,096 characters. The sync engine automatically chunks entries into clean posts under 4,000 characters and updates existing channel messages by ID.
+- **Content Hashing:** The directory computes an SHA-256 hash of the generated content. If no creator updates have occurred, Telegram API calls are skipped.
+- **Privacy Protection:** The public directory never leaks private Telegram join links or media files. Instead, each creator links to a deep link:
+  ```text
+  https://t.me/<BOT_USERNAME>?start=creator_<creatorId>
+  ```
+
+### Deep Link Protection
+When a user clicks a creator deep link in the public directory:
+- **Active Paying Member:** The bot verifies active entitlement and displays a direct button linking to the private topic (`https://t.me/c/<clean_chat_id>/<topicId>`).
+- **Non-Member / Expired Member:** The bot presents a preview and a call-to-action to subscribe via Telegram Stars.
+
+---
+
+## 10. Wanted List & Community Acquisition Voting (UG-02)
+
+### Community Nominations
+- Active paying members can propose creators using `/suggest <Creator Name> [optional URL/notes]`.
+- Suggestions are validated (minimum 2 characters, alphanumeric filtering, duplicate detection).
+- Successfully submitted suggestions appear in the private **Wanted List** channel (`WANTED_LIST_CHAT_ID`) sorted by member support.
+- Complimentary members can view the Wanted List channel, but are blocked from nominating or voting to maintain subscriber economic governance.
+
+### Monthly Support Cycles
+- Each calendar month forms a distinct support cycle (e.g. `2026-10`).
+- Each paying member may support **one** candidate per monthly cycle.
+- Support casting is atomic and updates the candidate's monthly score.
+
+### Monthly Acquisition Voting
+1. **Shortlist Selection:** At the end of each cycle, the bot selects the top candidates (default 5) by support count.
+2. **Ballot Creation:** A formal acquisition ballot is opened for voting (default duration: 5 days).
+3. **Voting Interface (`/vote`):**
+   - Active paying subscribers cast one irrevocable vote.
+   - Candidate options are randomized per session to prevent positional voting bias.
+   - Votes are recorded atomically (`votes_by_ballot_user` KV key).
+4. **Quorum & Closure:**
+   - When the voting window expires (checked hourly via Deno Cron), the ballot closes automatically.
+   - The engine checks member turnout against the 20% active subscriber quorum.
+   - If quorum is met, the winning creator is announced and transitions to `approved`.
+   - In the event of a first-place tie, the engine automatically creates a 5-day runoff ballot between the tied candidates.
+5. **Acquisition Completion:** When administrators acquire the winning creator and create their topic in TOKEBEC VIP COLLECTIONS, the candidate automatically transitions to `acquired` and links to the creator profile.
+

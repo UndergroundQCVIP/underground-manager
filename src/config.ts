@@ -6,9 +6,11 @@ import { SpaceId } from "./types.ts";
 
 export interface AppConfig {
   BOT_TOKEN: string;
+  BOT_USERNAME: string;
   WEBHOOK_SECRET: string;
   ADMIN_USER_IDS: number[];
   VIP_COLLECTIONS_CHAT_ID: number;
+  PUBLIC_DIRECTORY_CHAT_ID: number;
   WANTED_LIST_CHAT_ID: number;
   GENERAL_CHAT_ID: number;
   STARS_PRICE_AMOUNT: number;
@@ -18,6 +20,10 @@ export interface AppConfig {
   PORT: number;
   DENO_ENV: "production" | "development" | "test";
   SUPPORT_USERNAME: string;
+  DIRECTORY_UPDATE_CRON: string;
+  VOTING_PERIOD_DAYS: number;
+  VOTING_SHORTLIST_SIZE: number;
+  DIGEST_ENABLED: boolean;
 }
 
 let activeConfig: AppConfig | null = null;
@@ -44,9 +50,11 @@ export function loadConfig(envOverride?: Record<string, string>): AppConfig {
 
   const config: AppConfig = {
     BOT_TOKEN: getEnv("BOT_TOKEN", ""),
+    BOT_USERNAME: getEnv("BOT_USERNAME", "UndergroundManagerBot"),
     WEBHOOK_SECRET: getEnv("WEBHOOK_SECRET", ""),
     ADMIN_USER_IDS: adminIds,
     VIP_COLLECTIONS_CHAT_ID: Number(getEnv("VIP_COLLECTIONS_CHAT_ID", "0")),
+    PUBLIC_DIRECTORY_CHAT_ID: Number(getEnv("PUBLIC_DIRECTORY_CHAT_ID", "0")),
     WANTED_LIST_CHAT_ID: Number(getEnv("WANTED_LIST_CHAT_ID", "0")),
     GENERAL_CHAT_ID: Number(getEnv("GENERAL_CHAT_ID", "0")),
     STARS_PRICE_AMOUNT: Number(getEnv("STARS_PRICE_AMOUNT", "750")),
@@ -58,6 +66,10 @@ export function loadConfig(envOverride?: Record<string, string>): AppConfig {
     PORT: Number(getEnv("PORT", "8000")),
     DENO_ENV: (getEnv("DENO_ENV", "development") as AppConfig["DENO_ENV"]),
     SUPPORT_USERNAME: getEnv("SUPPORT_USERNAME", "@UndergroundSupport"),
+    DIRECTORY_UPDATE_CRON: getEnv("DIRECTORY_UPDATE_CRON", "0 3 * * *"),
+    VOTING_PERIOD_DAYS: Number(getEnv("VOTING_PERIOD_DAYS", "5")),
+    VOTING_SHORTLIST_SIZE: Number(getEnv("VOTING_SHORTLIST_SIZE", "5")),
+    DIGEST_ENABLED: getEnv("DIGEST_ENABLED", "false") === "true",
   };
 
   activeConfig = config;

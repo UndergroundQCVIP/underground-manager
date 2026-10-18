@@ -1,6 +1,7 @@
 /**
- * Underground Manager — UG-01: Foundation & Memberships
- * Core Domain Types and Data Contracts
+ * Underground Manager — Core Domain Types and Data Contracts
+ * Phase UG-01: Foundation & Memberships
+ * Phase UG-02: Creator Directory & Voting
  */
 
 export type SpaceId = "vip_collections" | "wanted_list" | "general_chat";
@@ -141,7 +142,22 @@ export type AuditEventType =
   | "complimentary_reminder_sent"
   | "permission_check_failed"
   | "unauthorized_access_attempt"
-  | "reconciliation_run";
+  | "reconciliation_run"
+  // UG-02 Audit Events:
+  | "creator_registered"
+  | "creator_renamed"
+  | "creator_media_updated"
+  | "creator_archived"
+  | "directory_synced"
+  | "wanted_candidate_suggested"
+  | "wanted_candidate_supported"
+  | "wanted_status_updated"
+  | "wanted_list_synced"
+  | "ballot_prepared"
+  | "ballot_opened"
+  | "ballot_closed"
+  | "vote_cast"
+  | "runoff_scheduled";
 
 export interface AuditEvent {
   id: string;
@@ -171,4 +187,134 @@ export interface InvoicePayloadData {
   planId: string;
   periodSeconds: number;
   timestamp: number;
+}
+
+// ==============================================================================
+// UG-02 Domain Contracts: Creator Forum, Directory, Wanted List & Voting
+// ==============================================================================
+
+export interface Creator {
+  id: string; // Stable internal UUID
+  name: string; // Display name, e.g. "Aria"
+  normalizedName: string; // Lowercase clean name for uniqueness check
+  chatId: number; // Forum group chat ID
+  topicId: number; // Telegram message_thread_id
+  topicCreatedAt: string; // ISO timestamp
+  firstContentDetectedAt?: string; // ISO timestamp
+  lastContentUpdatedAt?: string; // ISO timestamp (only updated on authorized media)
+  hasContent: boolean; // True ONLY if authorized media has been uploaded
+  coverFileId?: string; // Optional administrator-approved cover photo
+  status: "active" | "archived";
+  wantedListId?: string; // Associated Wanted List candidate ID
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DirectorySyncState {
+  lastSyncAt?: string;
+  lastContentHash?: string; // Hash to detect actual changes and avoid redundant edits
+  publishedMessageIds: number[]; // Channel message IDs for directory sections
+  isDirty: boolean; // Flag set whenever creator name/media changes
+}
+
+export type WantedCandidateStatus =
+  | "requested"
+  | "pricing_review"
+  | "eligible_for_voting"
+  | "voting"
+  | "selected"
+  | "acquisition_pending"
+  | "acquired"
+  | "available"
+  | "rejected_unavailable";
+
+export const WANTED_STATUS_LABELS: Record<WantedCandidateStatus, string> = {
+  requested: "Requested",
+  pricing_review: "Pricing Review",
+  eligible_for_voting: "Eligible for Voting",
+  voting: "Voting in Progress",
+  selected: "Selected",
+  acquisition_pending: "Acquisition Pending",
+  acquired: "Acquired",
+  available: "Available in Collections",
+  rejected_unavailable: "Rejected / Unavailable",
+};
+
+export interface WantedCandidate {
+  id: string; // UUID
+  name: string; // Clean creator name
+  normalizedName: string; // Lowercase for deduplication
+  profileUrl?: string; // Optional external link provided by user
+  status: WantedCandidateStatus;
+  suggestedBy: number; // Telegram user ID of nominator
+  supportCount: number; // Unique supporter count
+  creatorId?: string; // Linked Creator record once acquired/available
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MemberSupportRecord {
+  id: string; // UUID
+  cycleId: string; // Monthly cycle, e.g. "2026-10"
+  userId: number; // Telegram user ID
+  candidateId: string; // WantedCandidate ID
+  type: "nomination" | "support";
+  createdAt: string;
+}
+
+export type BallotStatus = "draft" | "active" | "closed" | "cancelled";
+
+export interface BallotCandidate {
+  candidateId: string; // WantedCandidate ID
+  creatorName: string;
+  profileUrl?: string;
+}
+
+export interface Ballot {
+  id: string; // UUID
+  monthCycle: string; // e.g. "2026-10"
+  title: string;
+  candidates: BallotCandidate[];
+  status: BallotStatus;
+  startsAt: string; // ISO
+  closesAt: string; // ISO (startsAt + 5 days)
+  turnoutObjective: number; // Default 0.20 (20%)
+  totalEligibleMembersAtClose?: number;
+  totalVotesCount?: number;
+  winnerCandidateId?: string;
+  isTie?: boolean;
+  tiedCandidateIds?: string[];
+  isRunoff?: boolean;
+  parentBallotId?: string; // If this ballot is a runoff from a tie
+  publishedMessageId?: number; // Telegram message ID in Wanted List channel
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VoteRecord {
+  id: string; // UUID
+  ballotId: string;
+  userId: number;
+  candidateId: string;
+  createdAt: string;
+}
+
+export interface VoteResultSummary {
+  ballotId: string;
+  totalVotes: number;
+  eligibleTurnoutPct: number;
+  winner?: BallotCandidate;
+  isTie: boolean;
+  tiedCandidates: BallotCandidate[];
+  tally: { candidateId: string; name: string; votes: number }[];
+}
+
+export interface SystemSettings {
+  directoryUpdateCron: string; // default "0 3 * * *" (3:00 AM)
+  votingPeriodDays: number; // default 5
+  votingShortlistSize: number; // default 5
+  nominationLimitPerCycle: number; // default 1
+  digestEnabled: boolean; // default false
+  turnoutObjectivePct: number; // default 20
 }

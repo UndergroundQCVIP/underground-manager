@@ -498,3 +498,351 @@ adminComposer.callbackQuery("admin:resync", async (ctx) => {
     await ctx.reply(`⚠️ Reconciliation error: ${msg}`);
   }
 });
+
+// ==============================================================================
+// UG-02 Administrator Controls: Creators, Directory, Wanted List & Voting
+// ==============================================================================
+
+// Creator Management Menu
+adminComposer.callbackQuery("admin:creators_menu", async (ctx) => {
+  const { listCreators } = await import("../../db/creators.ts");
+  const creators = await listCreators();
+  const withContent = creators.filter((c) => c.hasContent).length;
+
+  let text =
+    `👩‍🎤 *CREATOR DIRECTORY MANAGEMENT*\n\n` +
+    `*Total Registered Creators:* ${creators.length}\n` +
+    `*Available in Directory (with media):* ${withContent}\n\n` +
+    `*Recent Creators:*\n`;
+
+  if (creators.length === 0) {
+    text += `_No creators registered yet. Topics created in TOKEBEC VIP COLLECTIONS will appear here._\n\n`;
+  } else {
+    for (const c of creators.slice(0, 10)) {
+      const statusIcon = c.status === "archived" ? "📦" : (c.hasContent ? "🟢" : "⚪");
+      text += `${statusIcon} *${c.name}* (Thread: \`${c.topicId}\`)\n`;
+    }
+    text += "\n";
+  }
+
+  text += `💡 _To manually pair an existing topic:_ \`/register_creator <thread_id> <name>\``;
+
+  const kb = new InlineKeyboard()
+    .text("🔄 Sync Public Directory Now", "admin:sync_dir")
+    .row()
+    .text("⬅️ Admin Menu", "admin:menu");
+
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText(text, {
+    parse_mode: "Markdown",
+    reply_markup: kb,
+  });
+});
+
+// Trigger Public Directory Sync
+adminComposer.callbackQuery("admin:sync_dir", async (ctx) => {
+  const { syncPublicDirectory } = await import("../../directory/sync.ts");
+  await ctx.answerCallbackQuery({ text: "Synchronizing Public Creator Directory..." });
+
+  const result = await syncPublicDirectory(ctx.api, true);
+  if (result.updated) {
+    await ctx.reply(`✅ *Public Directory Synchronized!*\nPublished/updated ${result.publishedCount} message(s).`, {
+      parse_mode: "Markdown",
+      reply_markup: new InlineKeyboard().text("⬅️ Creators Menu", "admin:creators_menu"),
+    });
+  } else {
+    await ctx.reply(`ℹ️ Directory sync completed: ${result.reason || result.error || "No updates needed."}`, {
+      reply_markup: new InlineKeyboard().text("⬅️ Creators Menu", "admin:creators_menu"),
+    });
+  }
+});
+
+// /register_creator command
+adminComposer.command("register_creator", async (ctx) => {
+  const args = ctx.match?.trim().split(/\s+/);
+  if (!args || args.length < 2) {
+    await ctx.reply("Usage: `/register_creator <numeric_topic_id> <Creator Name>`\nExample: `/register_creator 42 Aria`", {
+      parse_mode: "Markdown",
+    });
+    return;
+  }
+
+  const topicId = Number(args[0]);
+  const creatorName = args.slice(1).join(" ");
+  const config = (await import("../../config.ts")).getConfig();
+
+  if (isNaN(topicId) || topicId <= 0) {
+    await ctx.reply("Invalid topic ID. Must be a positive numeric thread ID.");
+    return;
+  }
+
+  const { registerOrRepairTopic } = await import("../../creators/service.ts");
+  const creator = await registerOrRepairTopic(
+    ctx.from!.id,
+    config.VIP_COLLECTIONS_CHAT_ID,
+    topicId,
+    creatorName
+  );
+
+  await ctx.reply(
+    `✅ *Creator Registered!*\n\n` +
+    `• *Name:* ${creator.name}\n` +
+    `• *Topic ID:* \`${creator.topicId}\`\n` +
+    `• *Chat ID:* \`${creator.chatId}\`\n` +
+    `• *Status:* Active`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: new InlineKeyboard().text("👩‍🎤 Creators Menu", "admin:creators_menu"),
+    }
+  );
+});
+
+// Wanted List Admin Menu
+adminComposer.callbackQuery("admin:wanted_menu", async (ctx) => {
+  const { listWantedCandidates } = await import("../../db/wanted.ts");
+  const { WANTED_STATUS_LABELS } = await import("../../types.ts");
+
+  const candidates = await listWantedCandidates();
+  const pendingReview = candidates.filter((c) => c.status === "requested" || c.status === "pricing_review");
+
+  let text =
+    `🎯 *WANTED LIST ADMINISTRATION*\n\n` +
+    `*Total Candidates:* ${candidates.length}\n` +
+    `*Pending Review:* ${pendingReview.length}\n\n` +
+    `*Top Community Nominations:*\n`;
+
+  const kb = new InlineKeyboard();
+  if (candidates.length === 0) {
+    text += `_No candidates on Wanted List yet._\n\n`;
+  } else {
+    for (const c of candidates.slice(0, 8)) {
+      const statusLabel = WANTED_STATUS_LABELS[c.status] || c.status;
+      text += `• *${c.name}* — ${c.supportCount} supporters \`[${statusLabel}]\`\n`;
+      kb.text(`Manage ${c.name}`, `admin:manage_cand:${c.id}`).row();
+    }
+    text += "\n";
+  }
+
+  kb.text("🔄 Sync Wanted Channel", "admin:sync_wanted_channel")
+    .row()
+    .text("⬅️ Admin Menu", "admin:menu");
+
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText(text, {
+    parse_mode: "Markdown",
+    reply_markup: kb,
+  });
+});
+
+// Manage Specific Candidate
+adminComposer.callbackQuery(/^admin:manage_cand:([a-f0-9-]+)$/, async (ctx) => {
+  const candidateId = ctx.match[1];
+  const { getWantedCandidate } = await import("../../db/wanted.ts");
+  const { WANTED_STATUS_LABELS } = await import("../../types.ts");
+
+  const candidate = await getWantedCandidate(candidateId);
+  if (!candidate) {
+    await ctx.answerCallbackQuery({ text: "Candidate not found." });
+    return;
+  }
+
+  const statusLabel = WANTED_STATUS_LABELS[candidate.status] || candidate.status;
+  const text =
+    `🎯 *MANAGE CANDIDATE: ${candidate.name}*\n\n` +
+    `*Supporters:* ${candidate.supportCount}\n` +
+    `*Current Status:* \`${statusLabel}\`\n` +
+    `*Profile URL:* ${candidate.profileUrl || "None"}\n` +
+    `*Suggested Date:* ${new Date(candidate.createdAt).toLocaleDateString()}\n\n` +
+    `Update status:`;
+
+  const kb = new InlineKeyboard()
+    .text("✅ Approve for Voting", `admin:set_stat:${candidate.id}:eligible_for_voting`)
+    .text("💰 Pricing Review", `admin:set_stat:${candidate.id}:pricing_review`)
+    .row()
+    .text("🎉 Mark Acquired", `admin:set_stat:${candidate.id}:acquired`)
+    .text("🟢 Mark Available", `admin:set_stat:${candidate.id}:available`)
+    .row()
+    .text("⛔ Reject / Unavailable", `admin:set_stat:${candidate.id}:rejected_unavailable`)
+    .row()
+    .text("⬅️ Wanted Admin", "admin:wanted_menu");
+
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText(text, {
+    parse_mode: "Markdown",
+    reply_markup: kb,
+  });
+});
+
+// Set Candidate Status
+adminComposer.callbackQuery(/^admin:set_stat:([a-f0-9-]+):([a-z_]+)$/, async (ctx) => {
+  const candidateId = ctx.match[1];
+  const newStatus = ctx.match[2] as any;
+  const { updateWantedStatus } = await import("../../db/wanted.ts");
+
+  const updated = await updateWantedStatus(candidateId, newStatus, `Updated by admin ${ctx.from!.id}`);
+  if (!updated) {
+    await ctx.answerCallbackQuery({ text: "Failed to update status." });
+    return;
+  }
+
+  await ctx.answerCallbackQuery({ text: `Status updated to ${newStatus}` });
+  await ctx.reply(`✅ Candidate *${updated.name}* status updated to \`${newStatus}\`.`, {
+    parse_mode: "Markdown",
+    reply_markup: new InlineKeyboard().text("🎯 Wanted Admin", "admin:wanted_menu"),
+  });
+});
+
+// Sync Wanted List Channel
+adminComposer.callbackQuery("admin:sync_wanted_channel", async (ctx) => {
+  const { syncWantedListChannel } = await import("../../wanted/service.ts");
+  await ctx.answerCallbackQuery({ text: "Syncing Wanted List channel..." });
+
+  const result = await syncWantedListChannel(ctx.api);
+  if (result.success) {
+    await ctx.reply("✅ Wanted List channel synchronized successfully!", {
+      reply_markup: new InlineKeyboard().text("🎯 Wanted Admin", "admin:wanted_menu"),
+    });
+  } else {
+    await ctx.reply(`⚠️ Failed to sync Wanted List channel: ${result.error}`, {
+      reply_markup: new InlineKeyboard().text("🎯 Wanted Admin", "admin:wanted_menu"),
+    });
+  }
+});
+
+// Voting Administration Menu
+adminComposer.callbackQuery("admin:voting_menu", async (ctx) => {
+  const { getActiveBallot, listPastBallots, tallyBallot } = await import("../../db/voting.ts");
+  const activeBallot = await getActiveBallot();
+  const past = await listPastBallots(3);
+
+  let text = `🗳️ *ACQUISITION VOTING ADMINISTRATION*\n\n`;
+
+  const kb = new InlineKeyboard();
+
+  if (activeBallot) {
+    const summary = await tallyBallot(activeBallot.id);
+    const closesStr = new Date(activeBallot.closesAt).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    text +=
+      `🟢 *ACTIVE BALLOT: ${activeBallot.title}*\n` +
+      `*Closes:* ${closesStr}\n` +
+      `*Votes Cast So Far:* ${summary.totalVotes}\n` +
+      `*Candidates:* ${activeBallot.candidates.map((c) => c.creatorName).join(", ")}\n\n`;
+
+    kb.text("🛑 Close Ballot Early & Tally", `admin:close_ballot:${activeBallot.id}`).row();
+  } else {
+    text += `⚪ _No active voting ballot in progress._\n\n`;
+    kb.text("📝 Prepare Monthly Ballot", "admin:prepare_ballot").row();
+  }
+
+  if (past.length > 0) {
+    text += `*Past Ballots:*\n`;
+    for (const b of past) {
+      text += `• ${b.title} (${b.status})\n`;
+    }
+  }
+
+  kb.text("⬅️ Admin Menu", "admin:menu");
+
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText(text, {
+    parse_mode: "Markdown",
+    reply_markup: kb,
+  });
+});
+
+// Prepare Ballot Prompt
+adminComposer.callbackQuery("admin:prepare_ballot", async (ctx) => {
+  const { listWantedCandidates } = await import("../../db/wanted.ts");
+  const candidates = await listWantedCandidates();
+  const eligible = candidates.filter(
+    (c) =>
+      (c.status === "eligible_for_voting" || c.status === "requested") &&
+      c.supportCount > 0
+  );
+
+  if (eligible.length < 2) {
+    await ctx.answerCallbackQuery({
+      text: "Need at least 2 candidates with supporters to create a ballot.",
+      show_alert: true,
+    });
+    return;
+  }
+
+  const kb = new InlineKeyboard()
+    .text("🚀 Open Ballot Now (Top 5 Candidates)", "admin:launch_ballot")
+    .row()
+    .text("❌ Cancel", "admin:voting_menu");
+
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText(
+    `🗳️ *PREPARE MONTHLY CREATOR BALLOT*\n\n` +
+    `*Eligible Candidates for Shortlist:*\n` +
+    eligible.slice(0, 5).map((c, i) => `${i + 1}. *${c.name}* (${c.supportCount} supporters)`).join("\n") +
+    `\n\nVoting will run for 5 days. Confirm to launch:`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: kb,
+    }
+  );
+});
+
+// Launch Ballot Execution
+adminComposer.callbackQuery("admin:launch_ballot", async (ctx) => {
+  const { prepareMonthlyBallot } = await import("../../voting/service.ts");
+
+  try {
+    const ballot = await prepareMonthlyBallot({
+      adminId: ctx.from!.id,
+    });
+
+    await ctx.answerCallbackQuery({ text: "Ballot published!" });
+    await ctx.reply(
+      `🎉 *BALLOT SUCCESSFULLY OPENED!*\n\n` +
+      `*Title:* ${ballot.title}\n` +
+      `*Candidates:* ${ballot.candidates.map((c) => c.creatorName).join(", ")}\n` +
+      `*Closes:* ${new Date(ballot.closesAt).toLocaleString()}`,
+      {
+        parse_mode: "Markdown",
+        reply_markup: new InlineKeyboard().text("🗳️ Voting Admin", "admin:voting_menu"),
+      }
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await ctx.answerCallbackQuery({ text: `Failed: ${msg}`, show_alert: true });
+  }
+});
+
+// Close Ballot Early
+adminComposer.callbackQuery(/^admin:close_ballot:([a-f0-9-]+)$/, async (ctx) => {
+  const ballotId = ctx.match[1];
+  const { closeAndFinalizeBallot } = await import("../../voting/service.ts");
+
+  await ctx.answerCallbackQuery({ text: "Closing ballot and computing tallies..." });
+
+  try {
+    const summary = await closeAndFinalizeBallot(ballotId, ctx.api);
+
+    await ctx.reply(
+      `📊 *BALLOT CLOSED!*\n\n` +
+      `*Total Votes Cast:* ${summary.totalVotes}\n` +
+      `*Turnout:* ${summary.eligibleTurnoutPct}%\n` +
+      `*Outcome:* ${summary.isTie ? "TIE (Runoff Scheduled)" : (summary.winner ? `Winner: *${summary.winner.creatorName}*` : "No votes cast")}\n\n` +
+      `*Candidate Tallies:*\n` +
+      summary.tally.map((t) => `• ${t.name}: ${t.votes} votes`).join("\n"),
+      {
+        parse_mode: "Markdown",
+        reply_markup: new InlineKeyboard().text("🗳️ Voting Admin", "admin:voting_menu"),
+      }
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await ctx.reply(`⚠️ Failed closing ballot: ${msg}`);
+  }
+});
+

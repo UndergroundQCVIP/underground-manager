@@ -24,6 +24,10 @@ export function mainMenuKeyboard(isMember: boolean, isAdmin: boolean): InlineKey
     .text("🔓 Access My Channels", "member:channels")
     .row();
 
+  kb.text("🎯 Wanted List", "wanted:menu")
+    .text("🗳️ Monthly Vote", "vote:open")
+    .row();
+
   kb.text("💬 Help & Support", "member:support");
 
   if (isAdmin) {
@@ -61,14 +65,14 @@ export function supportKeyboard(): InlineKeyboard {
 
 export function adminMenuKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
-    .text("👥 Recent Members", "admin:members_list")
-    .text("🎁 Grant Complimentary", "admin:grant_wizard")
+    .text("👥 Members", "admin:members_list")
+    .text("🎁 Complimentary", "admin:grant_wizard")
     .row()
-    .text("🔍 Member Lookup", "admin:lookup_prompt")
-    .text("📊 Subscription Overview", "admin:subs_overview")
+    .text("👩‍🎤 Creator Directory", "admin:creators_menu")
+    .text("🎯 Wanted List", "admin:wanted_menu")
     .row()
+    .text("🗳️ Monthly Voting", "admin:voting_menu")
     .text("⚙️ System Status", "admin:status")
-    .text("🔄 Trigger Resync", "admin:resync")
     .row()
     .text("⬅️ User Menu", "member:home");
 }
