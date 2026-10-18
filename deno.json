@@ -1,0 +1,21 @@
+{
+  "name": "underground-manager",
+  "version": "1.0.0",
+  "exports": "./src/main.ts",
+  "tasks": {
+    "start": "deno run --allow-net --allow-env --unstable-kv --unstable-cron src/main.ts",
+    "dev": "BOT_MODE=polling deno run --watch --allow-net --allow-env --unstable-kv --unstable-cron src/main.ts",
+    "test": "deno test --allow-net --allow-env --unstable-kv --unstable-cron tests/",
+    "check": "deno check src/main.ts tests/*_test.ts"
+  },
+  "unstable": ["kv", "cron"],
+  "imports": {
+    "grammy": "npm:grammy@^1.35.0",
+    "@grammyjs/types": "npm:@grammyjs/types@^3.19.0",
+    "@std/assert": "jsr:@std/assert@^1.0.10"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true
+  }
+}

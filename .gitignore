@@ -1,0 +1,15 @@
+# Environment & Secrets
+.env
+*.env.local
+
+# Operating System
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Deno cache / local KV
+.deno/
+*.sqlite
+*.sqlite-journal

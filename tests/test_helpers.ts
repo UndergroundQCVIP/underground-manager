@@ -1,0 +1,89 @@
+/**
+ * Underground Manager — Test Helpers & Mock Telegram API
+ */
+
+import { setConfigForTesting, AppConfig } from "../src/config.ts";
+import { setKvForTesting } from "../src/db/kv.ts";
+import { SpaceId } from "../src/types.ts";
+
+export const MOCK_CONFIG: AppConfig = {
+  BOT_TOKEN: "123456789:ABCDEF_mock_token_for_tests",
+  WEBHOOK_SECRET: "test_secret_token_12345",
+  ADMIN_USER_IDS: [111111, 222222],
+  VIP_COLLECTIONS_CHAT_ID: -1001001,
+  WANTED_LIST_CHAT_ID: -1001002,
+  GENERAL_CHAT_ID: -1001003,
+  STARS_PRICE_AMOUNT: 750,
+  STARS_SUBSCRIPTION_PERIOD_SECONDS: 2592000, // 30 days
+  CURRENCY: "XTR",
+  BOT_MODE: "webhook",
+  PORT: 8000,
+  DENO_ENV: "test",
+  SUPPORT_USERNAME: "@TestUndergroundSupport",
+};
+
+export async function setupTestEnvironment(): Promise<Deno.Kv> {
+  const kv = await Deno.openKv(":memory:");
+  setKvForTesting(kv);
+  setConfigForTesting({ ...MOCK_CONFIG });
+  return kv;
+}
+
+export class MockTelegramApi {
+  public approvedJoinRequests: { chatId: number | string; userId: number }[] = [];
+  public declinedJoinRequests: { chatId: number | string; userId: number }[] = [];
+  public bannedMembers: { chatId: number | string; userId: number }[] = [];
+  public unbannedMembers: { chatId: number | string; userId: number }[] = [];
+  public sentMessages: { chatId: number | string; text: string; options?: unknown }[] = [];
+  public createdInviteLinks: { chatId: number | string; options: unknown }[] = [];
+
+  public mockMemberStatus: Map<string, { status: string; can_invite_users?: boolean; can_restrict_members?: boolean }> =
+    new Map();
+
+  async getMe() {
+    return { id: 999999, username: "UndergroundManagerBot" };
+  }
+
+  async createChatInviteLink(chatId: number | string, options: { name?: string; creates_join_request?: boolean }) {
+    this.createdInviteLinks.push({ chatId, options });
+    return { invite_link: `https://t.me/+mock_invite_${chatId}` };
+  }
+
+  async approveChatJoinRequest(chatId: number | string, userId: number): Promise<boolean> {
+    this.approvedJoinRequests.push({ chatId, userId });
+    return true;
+  }
+
+  async declineChatJoinRequest(chatId: number | string, userId: number): Promise<boolean> {
+    this.declinedJoinRequests.push({ chatId, userId });
+    return true;
+  }
+
+  async getChatMember(chatId: number | string, userId: number) {
+    const key = `${chatId}:${userId}`;
+    if (this.mockMemberStatus.has(key)) {
+      return this.mockMemberStatus.get(key)!;
+    }
+    // Default: regular member, or administrator if bot itself
+    if (userId === 999999) {
+      return { status: "administrator", can_invite_users: true, can_restrict_members: true };
+    }
+    return { status: "member" };
+  }
+
+  async banChatMember(chatId: number | string, userId: number): Promise<boolean> {
+    this.bannedMembers.push({ chatId, userId });
+    return true;
+  }
+
+  async unbanChatMember(chatId: number | string, userId: number): Promise<boolean> {
+    this.unbannedMembers.push({ chatId, userId });
+    return true;
+  }
+
+  async sendMessage(chatId: number | string, text: string, options?: unknown) {
+    const messageId = this.sentMessages.length + 1;
+    this.sentMessages.push({ chatId, text, options });
+    return { message_id: messageId };
+  }
+}
