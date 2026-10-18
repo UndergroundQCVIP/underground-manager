@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "exports": "./src/main.ts",
   "tasks": {
-    "start": "deno run --allow-net --allow-env --unstable-kv --unstable-cron src/main.ts",
-    "dev": "BOT_MODE=polling deno run --watch --allow-net --allow-env --unstable-kv --unstable-cron src/main.ts",
+    "start": "deno run --env --allow-net --allow-env --unstable-kv --unstable-cron src/main.ts",
+    "dev": "BOT_MODE=polling deno run --env --watch --allow-net --allow-env --unstable-kv --unstable-cron src/main.ts",
     "test": "deno test --allow-net --allow-env --unstable-kv --unstable-cron tests/",
     "check": "deno check src/main.ts tests/*_test.ts",
-    "verify": "deno run --allow-net --allow-env --unstable-kv scripts/verify_setup.ts"
+    "verify": "deno run --env --allow-net --allow-env --unstable-kv scripts/verify_setup.ts"
   },
   "unstable": ["kv", "cron"],
   "imports": {
