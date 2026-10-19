@@ -28,9 +28,11 @@ import {
 import {
   getActiveContribution,
   getContribution,
+  listContributions,
   saveContribution,
   transitionContribution,
 } from "../db/contributions.ts";
+import { classifyTelegramError } from "../migration/service.ts";
 import { getActiveMigrationForCreator } from "../db/migrations.ts";
 import { recordMediaIndex } from "../db/media_index.ts";
 import { contributionRewardsEnabled } from "../membership/mode.ts";
@@ -441,7 +443,7 @@ export async function approveContribution(
   id: string,
   adminId: number,
   decision: ContributionDecision = { type: "no_reward" }
-): Promise<{ ok: boolean; error?: string; published?: number; rewardError?: string }> {
+): Promise<PublishOutcome> {
   const current = await getContribution(id);
   if (!current) return { ok: false, error: "Contribution introuvable." };
 
@@ -488,51 +490,178 @@ export async function approveContribution(
   if ("error" in resolved) return await fail(resolved.error);
   const creator = resolved.creator;
 
-  const fresh = (await getContribution(id)) ?? claimed;
-  const mig2 = await getActiveMigrationForCreator(creator.id);
-  if (mig2 && ["copying", "needs_review", "ready_to_finalize", "paused"].includes(mig2.status)) {
-    return await fail(`${creator.name} fait l'objet d'une migration (${mig2.status.replace(/_/g, " ")}).`);
-  }
+  const outcome = await runPublishing(api, id, adminId);
+  return outcome;
+}
 
-  const ids = fresh.items.map((i) => i.messageId).sort((a, b) => a - b);
-  let copies: { message_id: number }[];
-  try {
-    copies = await api.copyMessages(creator.chatId, fresh.userId, ids, { message_thread_id: creator.topicId });
-  } catch (err) {
-    return await fail(`Échec de la publication : ${errText(err)}`);
-  }
+// ---------------------------------------------------------------------------
+// Publishing engine: album-safe batches, durable progress, lease, rate-limit aware
+// ---------------------------------------------------------------------------
 
-  if (copies.length !== ids.length) {
-    // Some originals no longer exist (e.g., the member deleted them); do not retry blindly,
-    // and NEVER reward until an administrator resolves the publication result.
-    await transitionContribution(id, ["publishing"], (x) => {
-      x.status = "needs_review";
-      x.publishedMessageIds = copies.map((c) => c.message_id);
-      x.rewardStatus = decision.type === "reward" ? "pending" : "none";
-      x.note = `Demandés : ${ids.length}, publiés par Telegram : ${copies.length} (Telegram n'indique pas lesquels manquent). Vérifiez le sujet. Aucune récompense n'est accordée avant votre résolution.`;
-    });
-    if (copies.length > 0) await recordPublished(creator.id, creator.chatId, creator.topicId, fresh, copies);
-    return {
-      ok: false,
-      error: `Seulement ${copies.length} élément(s) sur ${ids.length} ont pu être publiés (les originaux ont peut-être été supprimés). Vérifiez le sujet, puis résolvez la contribution. Aucune récompense accordée.`,
-      published: copies.length,
-    };
-  }
+const PUBLISH_BATCH = 50; // Telegram allows up to 100 per copyMessages call
+const PUBLISH_BUDGET_MS = 20_000;
+const LEASE_MS = 90_000;
 
-  await transitionContribution(id, ["publishing"], (x) => {
-    x.status = "approved";
-    x.publishedMessageIds = copies.map((c) => c.message_id);
+/** Pack messages into batches of at most `size`, never splitting an album. */
+export function chunkContributionItems(items: ContributionItem[], size = PUBLISH_BATCH): ContributionItem[][] {
+  const sorted = [...items].sort((a, b) => a.messageId - b.messageId);
+  const units: ContributionItem[][] = [];
+  for (const it of sorted) {
+    const last = units[units.length - 1];
+    if (it.mediaGroupId && last && last[0].mediaGroupId === it.mediaGroupId) last.push(it);
+    else units.push([it]);
+  }
+  const batches: ContributionItem[][] = [];
+  let cur: ContributionItem[] = [];
+  for (const u of units) {
+    if (cur.length > 0 && cur.length + u.length > size) {
+      batches.push(cur);
+      cur = [];
+    }
+    cur = cur.concat(u);
+  }
+  if (cur.length) batches.push(cur);
+  return batches;
+}
+
+async function acquirePublishLease(id: string): Promise<Contribution | null> {
+  const c = await getContribution(id);
+  if (!c || c.status !== "publishing") return null;
+  if (c.lockedUntil && c.lockedUntil > Date.now()) return null;
+  return await transitionContribution(id, ["publishing"], (x) => {
+    x.lockedUntil = Date.now() + LEASE_MS;
   });
-  await recordPublished(creator.id, creator.chatId, creator.topicId, fresh, copies);
-  await logAuditEvent(
-    "contribution_approved",
-    { contributionId: id, creatorId: creator.id, items: ids.length, reward: decision.type === "reward" },
-    adminId,
-    fresh.userId
-  );
+}
 
-  const rewardError = await finalizeApproved(api, id, adminId);
-  return { ok: true, published: copies.length, rewardError };
+export interface PublishOutcome {
+  ok: boolean;
+  error?: string;
+  published?: number;
+  rewardError?: string;
+  /** More batches remain; the cron (or "continue") finishes them without re-copying anything. */
+  inProgress?: boolean;
+}
+
+async function runPublishing(api: ContributionApiLike, id: string, adminId: number): Promise<PublishOutcome> {
+  const leased = await acquirePublishLease(id);
+  if (!leased) return { ok: true, inProgress: true, error: "Publication déjà en cours." };
+
+  const release = () => transitionContribution(id, ["publishing", "failed", "needs_review", "approved"], (x) => { x.lockedUntil = undefined; });
+  const fail = async (message: string): Promise<PublishOutcome> => {
+    await transitionContribution(id, ["publishing"], (x) => {
+      x.status = "failed";
+      x.note = message;
+      x.lockedUntil = undefined;
+    });
+    return { ok: false, error: message };
+  };
+
+  try {
+    let resolved: Resolved;
+    try {
+      resolved = await resolveTargetCreator(api, leased, adminId);
+    } catch (err) {
+      return await fail(`Échec de la préparation du créateur : ${errText(err)}`);
+    }
+    if ("error" in resolved) return await fail(resolved.error);
+    const creator = resolved.creator;
+
+    const fresh = (await getContribution(id)) ?? leased;
+    const mig = await getActiveMigrationForCreator(creator.id);
+    if (mig && ["copying", "needs_review", "ready_to_finalize", "paused"].includes(mig.status)) {
+      return await fail(`${creator.name} fait l'objet d'une migration (${mig.status.replace(/_/g, " ")}).`);
+    }
+
+    const batches = chunkContributionItems(fresh.items);
+    const total = fresh.items.length;
+    let consumed = 0;
+    const deadline = Date.now() + PUBLISH_BUDGET_MS;
+
+    for (const batch of batches) {
+      const state = (await getContribution(id)) ?? fresh;
+      if (consumed < (state.publishCursor ?? 0)) {
+        consumed += batch.length; // already published in an earlier run
+        continue;
+      }
+      if (state.retryAfter && state.retryAfter > Date.now()) return { ok: true, inProgress: true, published: consumed };
+      if (Date.now() > deadline) return { ok: true, inProgress: true, published: consumed };
+
+      let copies: { message_id: number }[];
+      try {
+        copies = await api.copyMessages(creator.chatId, fresh.userId, batch.map((i) => i.messageId), {
+          message_thread_id: creator.topicId,
+        });
+      } catch (err) {
+        const info = classifyTelegramError(err);
+        if (info.retryAfter !== undefined) {
+          await transitionContribution(id, ["publishing"], (x) => {
+            x.retryAfter = Date.now() + info.retryAfter! * 1000;
+          });
+          return { ok: true, inProgress: true, published: consumed };
+        }
+        return await fail(`Échec de la publication (${consumed}/${total} déjà publiés; la reprise continue sans doublon) : ${info.message}`);
+      }
+
+      if (copies.length !== batch.length) {
+        // Some originals no longer exist (e.g., the member deleted them); do not retry blindly,
+        // and NEVER reward until an administrator resolves the publication result.
+        await transitionContribution(id, ["publishing"], (x) => {
+          x.status = "needs_review";
+          x.lockedUntil = undefined;
+          x.publishedMessageIds = [...(x.publishedMessageIds ?? []), ...copies.map((c) => c.message_id)];
+          x.note = `Demandés : ${batch.length} dans le lot (${consumed} déjà publiés avant), publiés par Telegram : ${copies.length} (Telegram n'indique pas lesquels manquent). Vérifiez le sujet. Aucune récompense n'est accordée avant votre résolution.`;
+        });
+        if (copies.length > 0) await recordPublished(creator.id, creator.chatId, creator.topicId, id, batch, copies);
+        return {
+          ok: false,
+          error: `Seulement ${consumed + copies.length} élément(s) sur ${total} ont pu être publiés (les originaux ont peut-être été supprimés). Vérifiez le sujet, puis résolvez la contribution. Aucune récompense accordée.`,
+          published: consumed + copies.length,
+        };
+      }
+
+      await transitionContribution(id, ["publishing"], (x) => {
+        x.publishCursor = (x.publishCursor ?? 0) + batch.length;
+        x.publishedMessageIds = [...(x.publishedMessageIds ?? []), ...copies.map((c) => c.message_id)];
+        x.retryAfter = undefined;
+      });
+      await recordPublished(creator.id, creator.chatId, creator.topicId, id, batch, copies);
+      consumed += batch.length;
+    }
+
+    const final = await transitionContribution(id, ["publishing"], (x) => {
+      x.status = "approved";
+      x.lockedUntil = undefined;
+    });
+    if (!final) return { ok: false, error: "État de la contribution modifié pendant la publication." };
+    await logAuditEvent(
+      "contribution_approved",
+      { contributionId: id, creatorId: creator.id, items: total, reward: final.decision?.type === "reward", kind: final.kind ?? "existing" },
+      adminId,
+      final.userId
+    );
+    const rewardError = await finalizeApproved(api, id, adminId);
+    return { ok: true, published: total, rewardError };
+  } finally {
+    await release().catch(() => {});
+  }
+}
+
+/** Resume a publication that stopped (time budget, rate limit). Never re-copies finished batches. */
+export async function continuePublishing(api: ContributionApiLike, id: string, adminId = 0): Promise<PublishOutcome> {
+  const c = await getContribution(id);
+  if (!c || c.status !== "publishing") return { ok: false, error: "Cette contribution n'est pas en cours de publication." };
+  return await runPublishing(api, id, adminId || c.reviewedBy || 0);
+}
+
+/** Cron entry: continue every submission whose publication is waiting (and whose rate-limit wait is over). */
+export async function continueAllPublishing(api: ContributionApiLike): Promise<number> {
+  let n = 0;
+  for (const c of await listContributions("publishing")) {
+    if ((c.retryAfter ?? 0) > Date.now() || (c.lockedUntil ?? 0) > Date.now()) continue;
+    const r = await continuePublishing(api, c.id, c.reviewedBy ?? 0);
+    if (r.ok && !r.inProgress) n++;
+  }
+  return n;
 }
 
 /** Admin verified a partially published submission: accept it and apply the stored decision. */
@@ -629,10 +758,11 @@ async function recordPublished(
   creatorId: string,
   chatId: number,
   topicId: number,
-  c: Contribution,
+  contributionId: string,
+  items: ContributionItem[],
   copies: { message_id: number }[]
 ): Promise<void> {
-  const sorted = [...c.items].sort((a, b) => a.messageId - b.messageId);
+  const sorted = [...items].sort((a, b) => a.messageId - b.messageId);
   const now = new Date().toISOString();
   for (let i = 0; i < copies.length; i++) {
     const src = sorted[i];
@@ -642,7 +772,7 @@ async function recordPublished(
       topicId,
       messageId: copies[i].message_id,
       kind: src.kind,
-      mediaGroupId: src.mediaGroupId ? `contrib:${c.id}:${src.mediaGroupId}` : undefined,
+      mediaGroupId: src.mediaGroupId ? `contrib:${contributionId}:${src.mediaGroupId}` : undefined,
       hasCaption: false,
       source: "contribution",
       recordedAt: now,

@@ -9,6 +9,9 @@ export interface Call {
   payload: Record<string, unknown>;
 }
 
+/** Mutable switches for the fake Telegram transport. */
+export const harnessState = { protectedSource: false };
+
 export function makeBot() {
   const bot = createBot("123456:TEST_TOKEN");
   // deno-lint-ignore no-explicit-any
@@ -26,6 +29,15 @@ export function makeBot() {
     calls.push({ method, payload: p });
     const msg = { message_id: nextMsg++, date: 0, chat: { id: 1, type: "private" }, text: "x" };
     switch (method) {
+      case "getMe":
+        return Promise.resolve({ ok: true, result: { id: 999999, is_bot: true, first_name: "Bot", username: "UndergroundManagerBot" } } as never);
+      case "getChat":
+        return Promise.resolve({
+          ok: true,
+          result: { id: p.chat_id, type: "supergroup", title: "Discussion Tokebec", has_protected_content: harnessState.protectedSource || undefined },
+        } as never);
+      case "getChatMember":
+        return Promise.resolve({ ok: true, result: { status: "administrator", user: { id: p.user_id, is_bot: false, first_name: "x" } } } as never);
       case "createInvoiceLink":
         return Promise.resolve({ ok: true, result: "https://t.me/$invoice" } as never);
       case "createChatInviteLink":

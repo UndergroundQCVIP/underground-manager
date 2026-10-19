@@ -254,6 +254,11 @@ export function registerCronJobs(bot: Bot): void {
         try {
           const { runAllCopyingMigrations } = await import("../migration/service.ts");
           await runAllCopyingMigrations(bot.api);
+          // UG-06: continue large submissions and legacy imports that stopped on a time budget or rate limit
+          const { continueAllPublishing } = await import("../contributions/service.ts");
+          await continueAllPublishing(bot.api);
+          const { continueAllImports } = await import("../imports/service.ts");
+          await continueAllImports(bot.api);
         } catch (err) {
           console.error("[Cron Fatal] Error running migration worker:", err);
         }

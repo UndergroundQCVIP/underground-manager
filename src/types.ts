@@ -267,7 +267,11 @@ export type AuditEventType =
   | "membership_mode_changed"
   | "navigation_synced"
   | "referral_attributed"
-  | "referral_bonus_granted";
+  | "referral_bonus_granted"
+  | "import_started"
+  | "import_finished"
+  | "import_cancelled"
+  | "import_undone";
 
 export interface AuditEvent {
   id: string;
@@ -718,7 +722,7 @@ export interface MediaIndexEntry {
   kind: "photo" | "video" | "unknown";
   mediaGroupId?: string;
   hasCaption: boolean;
-  source: "live" | "manual" | "migration" | "contribution";
+  source: "live" | "manual" | "migration" | "contribution" | "import";
   recordedAt: string;
 }
 
@@ -881,6 +885,12 @@ export interface Contribution {
   rewardStatus?: "none" | "pending" | "granted";
   rejectionReason?: string;
   itemCount?: number; // kept after rejection purges the message IDs
+  /** Publication progress: items already copied (batch-aligned). Lets a retry/resume never re-copy. */
+  publishCursor?: number;
+  /** Epoch ms lease so the cron and a button press cannot publish the same submission twice. */
+  lockedUntil?: number;
+  /** Epoch ms before which Telegram asked us to wait (429). */
+  retryAfter?: number;
   /** Administrator's in-progress reward configuration (before confirming). */
   draft?: { scopes: CollectionCategory[]; days: number };
 }
@@ -904,4 +914,46 @@ export interface NavigationState {
   welcome?: { chatId: number; messageId: number; hash: string };
   lobby?: { chatId: number; messageId: number; hash: string };
   directoryKeyboardHash?: string;
+}
+
+// ==============================================================================
+// UG-06 Legacy range import (copy a block of message IDs from an old chat into a topic)
+// ==============================================================================
+
+export type ImportJobStatus =
+  | "prepared" // Preflight done, preview sent; waiting for the administrator's confirmation
+  | "blocked" // Protected content / bot not in the source chat
+  | "running"
+  | "needs_review" // A batch was interrupted mid-copy: outcome unknown, never re-copied blindly
+  | "failed" // Stopped on an error; resumable without re-copying finished batches
+  | "done"
+  | "cancelled"
+  | "undone"; // The bot-made copies were removed again by the administrator
+
+export interface ImportJob {
+  id: string;
+  adminId: number;
+  creatorId: string;
+  creatorName: string;
+  /** Source chat: numeric id (private chats) or "@username" (public). */
+  sourceChat: number | string;
+  sourceTitle?: string;
+  fromId: number;
+  toId: number;
+  destChatId: number;
+  destTopicId: number;
+  status: ImportJobStatus;
+  cursor: number; // next source message id to request
+  inflight?: { from: number; to: number }; // batch being copied (outcome unknown if we crash)
+  batchesDone: number;
+  requested: number;
+  copied: number;
+  skipped: number; // ids that no longer exist / cannot be copied (gaps are normal)
+  isNewCreator: boolean;
+  note?: string;
+  blockedReason?: "protected_content" | "bot_not_in_source" | "source_unreachable";
+  lockedUntil?: number;
+  retryAfter?: number;
+  createdAt: string;
+  updatedAt: string;
 }

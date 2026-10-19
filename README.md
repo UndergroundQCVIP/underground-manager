@@ -662,3 +662,13 @@ Main menu → **🤝 Parrainage** gives each user a personal link `t.me/<bot>?st
 * **Stars:** **1 day per full 100 Stars** the referred person spends (cumulative, remainders carry over; renewals count). Regular → Regular forum; Retro Plus → Regular + Retro.
 * Follows the contribution-reward switch (disabled in Stars-only mode unless enabled). Refunds do **not** claw back referral days.
 
+### 15.6 Moving legacy content into the new forums (`/import`)
+The Bot API cannot read a chat's history, so the bot copies a **block of message IDs** you point it at. From the legacy Tokebec discussion group (where a channel's comments live):
+
+1. Add the bot to that group (member is enough). It must **not** have *Restrict Saving Content* on — Telegram then forbids copying and the bot does not bypass it.
+2. Open the creator's destination topic in the Regular or Retro forum and type `/import <link to first comment> <link to last comment>` (right-click a comment → *Copy message link*). The forum comes from where you type it; an unregistered topic becomes a **new creator**, a registered one is **updated**.
+3. In your private chat the bot sends a **preview** (about six messages spread across the block, including both bounds) and asks you to confirm publication rights. Everything between the two links is copied, so check that the bounds are really the first and last item of that creator.
+4. It copies in batches of 100, resumes after rate limits or interruptions without duplicating, refuses to import an overlapping block twice, and tells you when it is done. **↩️ Annuler cet import** deletes exactly the copies the bot made.
+
+Limits: albums can split where two 100-message batches meet; comments of different posts that interleave in the group are copied together if they fall inside the block (use the preview, undo if wrong); Telegram allows roughly 20–30 messages per minute per group, so large blocks take time (progress continues automatically via the 5-minute worker).
+

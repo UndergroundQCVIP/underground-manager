@@ -92,6 +92,12 @@ export class MockMigrationApi extends MockTelegramApi {
       .map(() => ({ message_id: this.nextDest++ }));
   }
 
+  public deletedMessages: { chatId: number; ids: number[] }[] = [];
+  async deleteMessages(chatId: number | string, ids: number[]) {
+    this.deletedMessages.push({ chatId: Number(chatId), ids: [...ids] });
+    return true;
+  }
+
   async editUserStarSubscription(userId: number, chargeId: string, canceled: boolean) {
     this.starSubscriptionEdits.push({ userId, chargeId, canceled });
     return true;
