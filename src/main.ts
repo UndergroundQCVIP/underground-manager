@@ -56,7 +56,9 @@ async function main() {
     });
   } else {
     // Webhook mode (default for Deno Deploy)
-    const handleWebhook = webhookCallback(bot, "std/http");
+    const handleWebhook = // Long jobs (imports, large publications) budget ~20s per step; grammY's default 10s timeout would
+    // answer Telegram with a 500 and trigger redeliveries while the work is still running.
+    webhookCallback(bot, "std/http", { timeoutMilliseconds: 55_000 });
     console.log(`[Server] Starting HTTP webhook listener on port ${config.PORT}...`);
     Deno.serve(
       { port: config.PORT },

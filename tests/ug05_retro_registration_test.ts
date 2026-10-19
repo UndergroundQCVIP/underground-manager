@@ -301,3 +301,23 @@ Deno.test("RETRO — A managed but unregistered topic gets a one-time hint to us
     await kv.close();
   }
 });
+
+Deno.test("DIAG — /diag reports configuration, live rights and registered creators to admins only", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    await seedCreator({ name: "Aria", topicId: 1 });
+    const { bot, calls } = makeBot();
+    await bot.handleUpdate({ update_id: 9_200_001, message: { message_id: 1, date: 0, chat: { id: ADMIN, type: "private", first_name: "A" }, from: { id: ADMIN, is_bot: false, first_name: "A" }, text: "/diag", entities: [{ type: "bot_command", offset: 0, length: 5 }] } } as never);
+    const out = String((calls.filter((x) => x.method === "sendMessage").at(-1)!.payload as { text: string }).text);
+    assertStringIncludes(out, "Forum Retro (TELEGRAM_RETRO_FORUM_CHAT_ID)");
+    assertStringIncludes(out, "Créateurs Retro inscrits : 0");
+    assertStringIncludes(out, "/register_here");
+    assert(!out.includes("TEST_TOKEN"));
+
+    calls.length = 0;
+    await bot.handleUpdate({ update_id: 9_200_002, message: { message_id: 2, date: 0, chat: { id: 5555, type: "private", first_name: "X" }, from: { id: 5555, is_bot: false, first_name: "X" }, text: "/diag", entities: [{ type: "bot_command", offset: 0, length: 5 }] } } as never);
+    assertStringIncludes(JSON.stringify(calls.filter((x) => x.method === "sendMessage")), "Accès refusé");
+  } finally {
+    await kv.close();
+  }
+});

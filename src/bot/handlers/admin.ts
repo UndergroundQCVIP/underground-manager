@@ -48,11 +48,79 @@ export const adminComposer = new Composer();
 // (see adminRouteGuard: a blanket gate would block every member feature after it).
 export const ADMIN_COMMANDS = [
   "admin", "lookup", "grant", "register_creator",
-  "index_media", "attest_inventory", "retire_creator", "move_to_retro", "relink_creator",
+  "index_media", "attest_inventory", "retire_creator", "move_to_retro", "relink_creator", "diag",
 ];
 adminComposer.use(
   adminRouteGuard({ callbackPrefixes: ["admin:", "mig:"], commands: ADMIN_COMMANDS })
 );
+
+/**
+ * /diag — what the RUNNING bot actually sees (configuration, live Telegram rights, registered
+ * creators per forum). Plain text so nothing can break formatting; no secrets are shown.
+ */
+adminComposer.command("diag", async (ctx) => {
+  const { getConfig } = await import("../../config.ts");
+  const { listCreators, creatorCollection } = await import("../../db/creators.ts");
+  const { getDirectorySyncState } = await import("../../db/directory.ts");
+  const c = getConfig();
+  const tail = (n: number) => (n ? `…${String(n).slice(-5)}` : "NON DÉFINI");
+  const lines: string[] = ["🩺 DIAGNOSTIC (robot en ligne)", ""];
+
+  lines.push(`Forum Regular (VIP_COLLECTIONS_CHAT_ID) : ${tail(c.VIP_COLLECTIONS_CHAT_ID)}`);
+  lines.push(`Forum Retro (TELEGRAM_RETRO_FORUM_CHAT_ID) : ${tail(c.TELEGRAM_RETRO_FORUM_CHAT_ID)}`);
+  lines.push(`Répertoire public : ${tail(c.PUBLIC_DIRECTORY_CHAT_ID)}`);
+  lines.push(`Mode d'adhésion par défaut : ${c.MEMBERSHIP_MODE}`);
+  lines.push("");
+
+  for (const [label, chatId] of [["Regular", c.VIP_COLLECTIONS_CHAT_ID], ["Retro", c.TELEGRAM_RETRO_FORUM_CHAT_ID]] as const) {
+    if (!chatId) {
+      lines.push(`${label} : identifiant absent de l'environnement du robot → le robot ignore ce forum.`);
+      continue;
+    }
+    try {
+      const me = await ctx.api.getMe();
+      const chat = await ctx.api.getChat(chatId);
+      const m = await ctx.api.getChatMember(chatId, me.id);
+      // deno-lint-ignore no-explicit-any
+      const r = m as any;
+      lines.push(
+        `${label} : « ${"title" in chat ? chat.title : "?"} » · sujets ${"is_forum" in chat && chat.is_forum ? "activés" : "NON activés"} · ` +
+          `robot ${m.status}` +
+          (m.status === "administrator"
+            ? ` · gérer les sujets ${r.can_manage_topics === false ? "NON" : "oui"} · anonyme ${r.is_anonymous ? "oui" : "non"}`
+            : "")
+      );
+    } catch (err) {
+      lines.push(`${label} : ERREUR Telegram → ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  const all = await listCreators();
+  lines.push("");
+  for (const col of ["regular", "retro"] as const) {
+    const mine = all.filter((x) => creatorCollection(x) === col);
+    const listed = mine.filter((x) => x.hasContent && x.status === "active").length;
+    lines.push(`Créateurs ${col === "retro" ? "Retro" : "Regular"} inscrits : ${mine.length} (listés au répertoire : ${listed})`);
+    if (col === "retro") {
+      for (const x of mine.slice(0, 15)) lines.push(`   • ${x.name} — sujet ${x.topicId}${x.hasContent ? "" : " (aucun contenu détecté → non listé)"}`);
+    }
+  }
+
+  const dir = await getDirectorySyncState();
+  lines.push("");
+  lines.push(`Répertoire : dernière synchro ${dir.lastSyncAt ?? "jamais"} · changements en attente : ${dir.isDirty ? "oui" : "non"}`);
+  if (dir.lastError) lines.push(`Dernière erreur de synchro : ${dir.lastError}`);
+  try {
+    const w = await ctx.api.getWebhookInfo();
+    lines.push(`Webhook : ${w.pending_update_count} en attente` + (w.last_error_message ? ` · dernière erreur ${new Date((w.last_error_date ?? 0) * 1000).toISOString()} : ${w.last_error_message}` : " · aucune erreur"));
+  } catch { /* optional */ }
+
+  lines.push("");
+  if (all.filter((x) => creatorCollection(x) === "retro").length === 0 && c.TELEGRAM_RETRO_FORUM_CHAT_ID) {
+    lines.push("➡️ Aucun Retro inscrit : tapez /register_here dans chaque sujet Retro (en tant qu'administrateur, pas en anonyme si possible).");
+  }
+  await ctx.reply(lines.join("\n").slice(0, 3900));
+});
 
 // Admin Main Menu
 adminComposer.command("admin", async (ctx) => {
