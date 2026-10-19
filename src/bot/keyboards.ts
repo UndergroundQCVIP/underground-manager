@@ -7,6 +7,7 @@ import {
   COMPLIMENTARY_REASONS,
   ComplimentaryAccessLevel,
   ComplimentaryReason,
+  MembershipMode,
   MembershipPlanId,
   SpaceId,
 } from "../types.ts";
@@ -16,7 +17,8 @@ import { getSpaceTitle } from "../access/spaces.ts";
 export function mainMenuKeyboard(
   isMember: boolean,
   isAdmin: boolean,
-  plan: MembershipPlanId | "none" = "none"
+  plan: MembershipPlanId | "none" = "none",
+  mode: MembershipMode = "contributions_and_stars"
 ): InlineKeyboard {
   const kb = new InlineKeyboard();
 
@@ -24,7 +26,7 @@ export function mainMenuKeyboard(
     .text("📋 Mon abonnement", "member:status")
     .row();
 
-  if (plan === "regular" && getPlan("retro_plus").enabled) {
+  if (plan === "regular" && getPlan("retro_plus").enabled && mode !== "contribution_only") {
     kb.text("⬆️ Passer à Retro Plus", "member:upgrade").row();
   }
 
@@ -52,12 +54,21 @@ export function mainMenuKeyboard(
 }
 
 /** Plan picker. Buttons adapt to the member's current plan. */
-export function plansKeyboard(plan: MembershipPlanId | "none"): InlineKeyboard {
+export function plansKeyboard(
+  plan: MembershipPlanId | "none",
+  mode: MembershipMode = "contributions_and_stars"
+): InlineKeyboard {
   const kb = new InlineKeyboard();
   const regular = getPlan("regular");
   const retro = getPlan("retro_plus");
+  const stars = mode !== "contribution_only";
 
-  if (plan === "none") {
+  if (mode !== "stars_only") kb.text("➕ Contribuer pour gagner l'accès", "contrib:start").row();
+
+  if (!stars) {
+    // Contribution Only: no new Stars checkout. A paying Retro Plus member may still downgrade.
+    if (plan === "retro_plus") kb.text("⬇️ Revenir à Regular au renouvellement", "member:downgrade").row();
+  } else if (plan === "none") {
     if (regular.enabled) kb.text(`🌟 Regular — ${regular.priceStars} Étoiles`, "member:pay:regular").row();
     if (retro.enabled) kb.text(`🎞️ Retro Plus — ${retro.priceStars} Étoiles`, "member:pay:retro_plus").row();
   } else if (plan === "regular") {
@@ -69,8 +80,8 @@ export function plansKeyboard(plan: MembershipPlanId | "none"): InlineKeyboard {
   return kb;
 }
 
-export function subscribeKeyboard(): InlineKeyboard {
-  return plansKeyboard("none");
+export function subscribeKeyboard(mode: MembershipMode = "contributions_and_stars"): InlineKeyboard {
+  return plansKeyboard("none", mode);
 }
 
 export function spacesKeyboard(
@@ -108,8 +119,8 @@ export function adminMenuKeyboard(): InlineKeyboard {
     .text("🎯 Liste de souhaits", "admin:wanted_menu")
     .text("🗳️ Vote mensuel", "admin:voting_menu")
     .row()
-    .text("📥 Contributions", "cadm:queue")
-    .text("⚙️ Paramètres", "admin:status")
+    .text("📥 Contributions", "cadm:hub")
+    .text("⚙️ Paramètres", "admin:settings")
     .text("⬅️ Menu membre", "member:home");
 }
 

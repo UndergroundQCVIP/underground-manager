@@ -6,6 +6,7 @@ import { getKv } from "./kv.ts";
 import {
   Entitlement,
   EntitlementStatus,
+  CollectionCategory,
   MembershipPlanId,
   MembershipSummary,
   SpaceId,
@@ -105,6 +106,7 @@ export async function getMembershipSummary(userId: number): Promise<MembershipSu
   const activeEntitlements = await getActiveUserEntitlements(userId);
   const hasPaid = activeEntitlements.some((e) => e.source === "telegram_stars");
   const hasComplimentary = activeEntitlements.some((e) => e.source === "complimentary");
+  const hasContribution = activeEntitlements.some((e) => e.source === "contribution");
 
   const accessibleSpaceSet = new Set<SpaceId>();
   let latestExpiryMs = 0;
@@ -120,9 +122,11 @@ export async function getMembershipSummary(userId: number): Promise<MembershipSu
   }
 
   const isMember = activeEntitlements.length > 0;
-  let primaryType: "Paid" | "Complimentary" | "None" = "None";
+  let primaryType: "Paid" | "Contribution" | "Complimentary" | "None" = "None";
   if (hasPaid) {
     primaryType = "Paid";
+  } else if (hasContribution) {
+    primaryType = "Contribution";
   } else if (hasComplimentary) {
     primaryType = "Complimentary";
   }
@@ -136,6 +140,8 @@ export async function getMembershipSummary(userId: number): Promise<MembershipSu
     hasRetroAccess,
     hasPaid,
     hasComplimentary,
+    hasContribution,
+    canParticipate: hasPaid || hasContribution,
     primaryType,
     activeEntitlements,
     accessibleSpaces: Array.from(accessibleSpaceSet),
@@ -441,3 +447,115 @@ export async function countActiveComplimentaryMembers(): Promise<number> {
 }
 
 
+
+// ==============================================================================
+// UG-05: contribution-earned entitlements
+// ==============================================================================
+
+export interface ApplyContributionDaysParams {
+  userId: number;
+  scope: CollectionCategory;
+  days: number;
+  /** The submission this reward belongs to. Applying it twice is a no-op. */
+  contributionId: string;
+  spaces: SpaceId[];
+}
+
+export interface ApplyContributionDaysResult {
+  entitlement: Entitlement;
+  applied: boolean; // false = this submission's days were already included
+  created: boolean;
+}
+
+/**
+ * Credits reward days to the member's contribution entitlement for ONE scope:
+ *   new_expiration = max(now, existing_expiration) + days
+ * It never shortens anything, never touches Stars/complimentary entitlements,
+ * and is idempotent per contribution (the id is recorded on the entitlement
+ * in the same atomic commit that adds the days).
+ */
+export async function applyContributionDays(
+  params: ApplyContributionDaysParams
+): Promise<ApplyContributionDaysResult> {
+  const kv = await getKv();
+  const pointerKey = ["contrib_ent_ptr", params.userId, params.scope];
+
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const pointer = await kv.get<string>(pointerKey);
+    const existingRes = pointer.value
+      ? await kv.get<Entitlement>(["entitlements", pointer.value])
+      : null;
+    // A revoked entitlement is never revived; a lapsed one is simply extended from now.
+    const existing =
+      existingRes?.value && existingRes.value.status !== "revoked" ? existingRes.value : null;
+
+    if (existing?.metadata?.rewardIds?.includes(params.contributionId)) {
+      return { entitlement: existing, applied: false, created: false };
+    }
+
+    const nowMs = Date.now();
+    const baseMs = Math.max(nowMs, existing ? new Date(existing.expiresAt).getTime() : 0);
+    const expiresAt = new Date(baseMs + params.days * 86_400_000).toISOString();
+    const nowIso = new Date(nowMs).toISOString();
+
+    const atomic = kv.atomic();
+    atomic.check(pointer);
+
+    let entitlement: Entitlement;
+    let created = false;
+    if (existing && existingRes) {
+      atomic.check(existingRes);
+      entitlement = {
+        ...existing,
+        spaces: Array.from(new Set([...existing.spaces, ...params.spaces])),
+        expiresAt,
+        status: "active",
+        updatedAt: nowIso,
+        metadata: {
+          ...existing.metadata,
+          rewardIds: [...(existing.metadata?.rewardIds ?? []), params.contributionId],
+          lastRewardId: params.contributionId,
+          reminderSent: false, // a new expiry deserves a fresh 3-day reminder
+        },
+      };
+    } else {
+      created = true;
+      entitlement = {
+        id: crypto.randomUUID(),
+        userId: params.userId,
+        source: "contribution",
+        contributionScope: params.scope,
+        spaces: [...params.spaces],
+        startsAt: nowIso,
+        expiresAt,
+        status: "active",
+        metadata: { rewardIds: [params.contributionId], lastRewardId: params.contributionId },
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      atomic.set(pointerKey, entitlement.id);
+    }
+
+    atomic.set(["entitlements", entitlement.id], entitlement);
+    atomic.set(["entitlements_by_user", entitlement.userId, entitlement.id], entitlement);
+    atomic.set(["active_entitlements_by_user", entitlement.userId, entitlement.id], entitlement);
+
+    const commit = await atomic.commit();
+    if (commit.ok) return { entitlement, applied: true, created };
+    await backoff(attempt);
+  }
+  throw new Error(`Contribution reward for ${params.userId} could not be applied (write conflict)`);
+}
+
+/** UG-05: distinct members who may vote — active paid OR contribution-earned (complimentary excluded). */
+export async function countEligibleParticipants(): Promise<number> {
+  const all = await listAllEntitlements();
+  const nowMs = Date.now();
+  const users = new Set<number>();
+  for (const e of all) {
+    if ((e.source === "telegram_stars" || e.source === "contribution") && isEntitlementActive(e, nowMs)) {
+      users.add(e.userId);
+    }
+  }
+  return users.size;
+}

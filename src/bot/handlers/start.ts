@@ -8,6 +8,9 @@ import { getClubName, isAdministrator } from "../../config.ts";
 import { creatorCollection } from "../../db/creators.ts";
 import { getPlan } from "../../plans/plans.ts";
 import { getMembershipSummary } from "../../db/entitlements.ts";
+import { getMembershipMode } from "../../membership/mode.ts";
+import { renderNavPage } from "../public_pages.ts";
+import { NAV_PAGES, NavPage } from "../../navigation/service.ts";
 import { messages } from "../messages.ts";
 import { mainMenuKeyboard, supportKeyboard } from "../keyboards.ts";
 
@@ -23,6 +26,19 @@ startComposer.command("start", async (ctx) => {
 
   const match = ctx.match?.trim();
   const summary = await getMembershipSummary(userId);
+  const mode = await getMembershipMode();
+
+  // 0. Public navigation deep links (welcome menu / lobby / directory buttons)
+  if (match && (NAV_PAGES as readonly string[]).includes(match)) {
+    if (match === "contribute") {
+      const { contributeChooser } = await import("./contribute.ts");
+      await contributeChooser(ctx);
+      return;
+    }
+    const page = await renderNavPage(match as NavPage, ctx.api, summary, mode);
+    await ctx.reply(page.text, { parse_mode: "Markdown", reply_markup: page.kb, link_preview_options: { is_disabled: true } });
+    return;
+  }
 
   // 1. Deep Link: Creator details / directory entry
   if (match && match.startsWith("creator_")) {
@@ -69,11 +85,13 @@ startComposer.command("start", async (ctx) => {
     } else {
       const retroLocked = collection === "retro" && summary.isMember;
       const kb = new InlineKeyboard();
-      if (retroLocked && getPlan("retro_plus").enabled) {
+      if (retroLocked && getPlan("retro_plus").enabled && mode !== "contribution_only") {
         kb.text("⬆️ Passer à Retro Plus", "member:upgrade").row();
       } else {
-        kb.text("💎 Forfaits d'adhésion", "member:plans").row();
+        kb.text("💎 Comment obtenir l'accès", "member:plans").row();
       }
+      // A direct route to contribute content for this very creator.
+      if (mode !== "stars_only") kb.text(`➕ Contribuer pour ${creator.name}`.slice(0, 60), `contrib:pick:${creator.id}`).row();
       kb.text("⬅️ Menu principal", "member:home");
 
       await ctx.reply(
@@ -84,9 +102,13 @@ startComposer.command("start", async (ctx) => {
 
 ` +
         (collection === "retro"
-          ? `🔒 Cette collection est réservée aux membres *${club} Retro Plus*.`
-          : `🔒 Cette collection est réservée aux membres ${club}.
-Abonnez-vous avec les Étoiles Telegram pour débloquer l'accès immédiat aux archives de créateurs !`),
+          ? `🔒 Cette collection est réservée aux membres ayant l'accès *Retro* (Retro Plus ou accès Retro gagné par contribution).\n`
+          : `🔒 Cette collection est réservée aux membres ${club}.\n`) +
+        (mode === "contribution_only"
+          ? "Vous pouvez gagner l'accès en contribuant du contenu approuvé."
+          : mode === "stars_only"
+          ? "Abonnez-vous avec les Étoiles Telegram pour débloquer l'accès."
+          : "Abonnez-vous avec les Étoiles Telegram ou contribuez pour gagner l'accès."),
         {
           parse_mode: "Markdown",
           reply_markup: kb,
@@ -113,7 +135,7 @@ Abonnez-vous avec les Étoiles Telegram pour débloquer l'accès immédiat aux a
 ` +
       `• *Appuyer :* Voter pour les suggestions existantes de la communauté
 ` +
-      `• *Règles :* 1 suggestion ou appui par membre payant par cycle mensuel
+      `• *Règles :* 1 suggestion ou appui par membre actif par cycle mensuel
 
 ` +
       `Choisissez une option ci-dessous :`,
@@ -135,9 +157,9 @@ Abonnez-vous avec les Étoiles Telegram pour débloquer l'accès immédiat aux a
   const firstName = ctx.from?.first_name || "Membre";
   const isAdmin = isAdministrator(userId);
 
-  await ctx.reply(messages.welcome(firstName, summary.isMember, summary.plan), {
+  await ctx.reply(messages.welcome(firstName, summary.isMember, summary.hasPaid ? summary.plan : "none", mode), {
     parse_mode: "Markdown",
-    reply_markup: mainMenuKeyboard(summary.isMember, isAdmin, summary.plan),
+    reply_markup: mainMenuKeyboard(summary.isMember, isAdmin, summary.hasPaid ? summary.plan : "none", mode),
   });
 });
 
@@ -147,12 +169,13 @@ startComposer.callbackQuery("member:home", async (ctx) => {
 
   const firstName = ctx.from?.first_name || "Membre";
   const summary = await getMembershipSummary(userId);
+  const mode = await getMembershipMode();
   const isAdmin = isAdministrator(userId);
 
   await ctx.answerCallbackQuery();
-  await ctx.editMessageText(messages.welcome(firstName, summary.isMember, summary.plan), {
+  await ctx.editMessageText(messages.welcome(firstName, summary.isMember, summary.hasPaid ? summary.plan : "none", mode), {
     parse_mode: "Markdown",
-    reply_markup: mainMenuKeyboard(summary.isMember, isAdmin, summary.plan),
+    reply_markup: mainMenuKeyboard(summary.isMember, isAdmin, summary.hasPaid ? summary.plan : "none", mode),
   });
 });
 
@@ -194,4 +217,17 @@ startComposer.command("whoami", async (ctx) => {
     `Expiration : ${summary.effectiveExpiry ?? "—"}`,
   ];
   await ctx.reply(lines.join("\n"));
+});
+
+// In-bot navigation buttons (nav:<page>) mirror the public deep links.
+startComposer.callbackQuery(/^nav:([a-z]+)$/, async (ctx) => {
+  const page = ctx.match[1] as NavPage;
+  if (!(NAV_PAGES as readonly string[]).includes(page)) return;
+  const userId = ctx.from?.id;
+  if (!userId) return;
+  const summary = await getMembershipSummary(userId);
+  const mode = await getMembershipMode();
+  await ctx.answerCallbackQuery();
+  const res = await renderNavPage(page, ctx.api, summary, mode);
+  await ctx.editMessageText(res.text, { parse_mode: "Markdown", reply_markup: res.kb, link_preview_options: { is_disabled: true } });
 });

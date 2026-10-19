@@ -6,7 +6,7 @@
 
 import { getClubName, getConfig } from "../config.ts";
 import { formatTorontoDate } from "../util/time.ts";
-import { MembershipPlanId, MembershipSummary, SpaceId } from "../types.ts";
+import { MembershipMode, MembershipPlanId, MembershipSummary, SpaceId } from "../types.ts";
 import { getSpaceTitle } from "../access/spaces.ts";
 import { getPlan } from "../plans/plans.ts";
 
@@ -16,8 +16,26 @@ function planLine(planId: MembershipPlanId): string {
   return `*${plan.label}* — ${price}`;
 }
 
+/** How a visitor can get access right now, according to the active acquisition mode. */
+export function membershipMethods(mode: MembershipMode): string {
+  const contribution =
+    `🤝 *Contribuer* — envoyez du contenu autorisé. Si un administrateur l'approuve, il peut décider d'accorder du temps d'accès ` +
+    `(durée et forum(s) choisis par l'administrateur). Tous les envois approuvés ne donnent pas nécessairement droit à une récompense.`;
+  const stars =
+    `🌟 ${planLine("regular")}\n🎞️ ${planLine("retro_plus")}\n` +
+    `Abonnements récurrents de 30 jours par Étoiles Telegram, annulables en tout temps.`;
+  if (mode === "contribution_only") return contribution;
+  if (mode === "stars_only") return stars;
+  return `${contribution}\n\n${stars}`;
+}
+
 export const messages = {
-  welcome: (firstName: string, isMember: boolean, plan: MembershipPlanId | "none" = "none") => {
+  welcome: (
+    firstName: string,
+    isMember: boolean,
+    plan: MembershipPlanId | "none" = "none",
+    mode: MembershipMode = "contributions_and_stars"
+  ) => {
     const club = getClubName();
     if (isMember) {
       const planName = plan === "retro_plus" ? "Retro Plus" : plan === "regular" ? "Regular" : "";
@@ -30,16 +48,23 @@ export const messages = {
     return (
       `👋 *Bienvenue sur ${club}, ${escapeMarkdown(firstName)}.*\n\n` +
       `${club} est une communauté privée exclusive offrant des archives de créateurs triées sur le volet, des collections privées et des discussions entre membres.\n\n` +
-      `🌟 ${planLine("regular")}\n` +
-      `🎞️ ${planLine("retro_plus")}\n` +
-      `Abonnements récurrents facturés par les Étoiles Telegram officielles.\n\n` +
+      `${membershipMethods(mode)}\n\n` +
       `Choisissez une option ci-dessous pour vous joindre ou gérer votre compte :`
     );
   },
 
-  plansOverview: (summary?: MembershipSummary) => {
+  plansOverview: (summary?: MembershipSummary, mode: MembershipMode = "contributions_and_stars") => {
     const club = getClubName();
     const retro = getPlan("retro_plus");
+    if (mode === "contribution_only") {
+      return (
+        `💎 *${club} — COMMENT OBTENIR L'ACCÈS*\n\n` +
+        `*Regular* — TOKEBEC VIP COLLECTIONS, Liste de souhaits, clavardage général, suggestions et votes.\n` +
+        `*Retro* — RETRO | ${club} en plus de tout Regular.\n\n` +
+        `${membershipMethods(mode)}\n\n` +
+        `⏳ L'accès gagné expire à la fin de la période accordée, sauf si vous avez un autre droit valide.`
+      );
+    }
     let text =
       `💎 *${club} — FORFAITS D'ADHÉSION*\n\n` +
       `*Regular* — ${getPlan("regular").priceStars} Étoiles / 30 jours\n` +
@@ -52,27 +77,32 @@ export const messages = {
       `• RETRO | ${club} (voûte Retro)\n\n` +
       `Les deux forfaits donnent exactement les mêmes droits de vote. Retro Plus ajoute seulement l'accès à la collection Retro.\n` +
       `🔄 Abonnements récurrents de 30 jours par Étoiles Telegram — annulables en tout temps dans Paramètres Telegram > Étoiles.`;
-    if (summary?.plan === "regular" && retro.enabled) {
+    if (mode === "contributions_and_stars") {
+      text += `\n\n🤝 *Ou contribuez :* un administrateur peut accorder du temps d'accès pour du contenu approuvé (pas de garantie pour chaque envoi).`;
+    }
+    if (summary?.hasPaid && summary.plan === "regular" && retro.enabled) {
       text += `\n\n⬆️ Vous pouvez passer à Retro Plus ci-dessous.`;
     }
     return text;
   },
 
-  nonMemberInfo: () => messages.plansOverview(),
+  nonMemberInfo: (mode: MembershipMode = "contributions_and_stars") => messages.plansOverview(undefined, mode),
 
-  membershipStatus: (summary: MembershipSummary) => {
+  membershipStatus: (summary: MembershipSummary, mode: MembershipMode = "contributions_and_stars") => {
     if (!summary.isMember) {
-      const retro = getPlan("retro_plus");
       return (
         `📋 *MON ABONNEMENT*\n\n` +
-        `*Statut :* ⚪ Inactif / Aucun abonnement\n` +
-        `*Regular :* ${getPlan("regular").priceStars} Étoiles tous les 30 jours\n` +
-        `*Retro Plus :* ${retro.enabled ? `${retro.priceStars} Étoiles tous les 30 jours` : "Bientôt disponible"}\n\n` +
-        `Vous n'avez actuellement aucun abonnement actif. Appuyez ci-dessous pour voir les forfaits.`
+        `*Statut :* ⚪ Inactif / Aucun abonnement\n\n` +
+        `${membershipMethods(mode)}\n\n` +
+        `Appuyez ci-dessous pour voir comment obtenir l'accès.`
       );
     }
 
-    const typeStr = summary.hasPaid ? "🌟 Payant (Étoiles Telegram)" : "🎁 Gracieux";
+    const typeStr = summary.hasPaid
+      ? "🌟 Payant (Étoiles Telegram)"
+      : summary.hasContribution
+      ? "🤝 Gagné par contribution"
+      : "🎁 Gracieux";
     const planStr = summary.plan === "retro_plus" ? "🎞️ Retro Plus" : "Regular";
 
     const fmtOpts = { year: "numeric", month: "short", day: "numeric" } as const;
@@ -90,13 +120,17 @@ export const messages = {
 
     // Per-entitlement paid-through dates keep plan changes transparent.
     const lines = summary.activeEntitlements
-      .filter((e) => e.source === "telegram_stars")
-      .map((e) => `  • ${getPlan(e.plan ?? "regular").label} : payé jusqu'au ${formatTorontoDate(e.expiresAt, fmtOpts)}`)
+      .filter((e) => e.source === "telegram_stars" || e.source === "contribution")
+      .map((e) =>
+        e.source === "contribution"
+          ? `  • Contribution (${e.contributionScope === "retro" ? "Retro" : "Regular"}) : valide jusqu'au ${formatTorontoDate(e.expiresAt, fmtOpts)}`
+          : `  • ${getPlan(e.plan ?? "regular").label} : payé jusqu'au ${formatTorontoDate(e.expiresAt, fmtOpts)}`
+      )
       .join("\n");
 
     return (
       `📋 *MON ABONNEMENT*\n\n` +
-      `*Forfait :* ${planStr}\n` +
+      (summary.hasPaid ? `*Forfait :* ${planStr}\n` : "") +
       `*Type :* ${typeStr}\n` +
       `*Statut :* 🟢 Actif\n` +
       `*Valide jusqu'au :* ${expiryStr}\n` +

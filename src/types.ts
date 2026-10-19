@@ -102,6 +102,15 @@ export const PLAN_PAYLOAD_IDS: Record<MembershipPlanId, string> = {
 
 export type CollectionCategory = "regular" | "retro";
 
+/**
+ * UG-05: spaces covered by a contribution-earned entitlement, per creator forum.
+ * Any earned forum access also includes the community spaces (Wanted List, General Chat).
+ */
+export const CONTRIBUTION_SPACES: Record<CollectionCategory, SpaceId[]> = {
+  regular: ["vip_collections", "wanted_list", "general_chat"],
+  retro: ["retro_collections", "wanted_list", "general_chat"],
+};
+
 export type ComplimentaryReason =
   | "content_contribution"
   | "partnership"
@@ -115,7 +124,7 @@ export const COMPLIMENTARY_REASONS: Record<ComplimentaryReason, string> = {
   admin_exception: "Exception administrative",
 };
 
-export type EntitlementSource = "telegram_stars" | "complimentary";
+export type EntitlementSource = "telegram_stars" | "complimentary" | "contribution";
 
 export type EntitlementStatus = "active" | "expired" | "revoked";
 
@@ -125,6 +134,9 @@ export interface EntitlementMetadata {
   chargeId?: string; // Telegram payment charge ID (for stars)
   invoicePayload?: string;
   reminderSent?: boolean; // 3-day expiration reminder sent
+  /** UG-05: contribution submissions whose days are already included (idempotency). */
+  rewardIds?: string[];
+  lastRewardId?: string;
   notes?: string;
 }
 
@@ -135,6 +147,8 @@ export interface Entitlement {
   spaces: SpaceId[];
   /** UG-04: purchased plan. Absent on legacy records (treated as "regular"). */
   plan?: MembershipPlanId;
+  /** UG-05: for source "contribution", which creator forum this earned access covers. */
+  contributionScope?: CollectionCategory;
   startsAt: string; // ISO 8601
   expiresAt: string; // ISO 8601
   status: EntitlementStatus;
@@ -247,7 +261,11 @@ export type AuditEventType =
   | "migration_source_deleted"
   | "contribution_submitted"
   | "contribution_approved"
-  | "contribution_rejected";
+  | "contribution_rejected"
+  | "contribution_reward_granted"
+  | "contribution_resolved"
+  | "membership_mode_changed"
+  | "navigation_synced";
 
 export interface AuditEvent {
   id: string;
@@ -263,7 +281,14 @@ export interface MembershipSummary {
   isMember: boolean;
   hasPaid: boolean;
   hasComplimentary: boolean;
-  primaryType: "Paid" | "Complimentary" | "None";
+  primaryType: "Paid" | "Contribution" | "Complimentary" | "None";
+  /** UG-05: active entitlement earned through approved contributions. */
+  hasContribution: boolean;
+  /**
+   * Eligible to nominate/support creators and vote: paid OR contribution-earned
+   * (complimentary stays excluded, as before).
+   */
+  canParticipate: boolean;
   activeEntitlements: Entitlement[];
   accessibleSpaces: SpaceId[];
   /** UG-04: highest purchased/granted tier. */
@@ -436,7 +461,15 @@ export interface SystemSettings {
   nominationLimitPerCycle: number; // default 1
   digestEnabled: boolean; // default false
   turnoutObjectivePct: number; // default 20
+  /** UG-05: how members can obtain access. Default for the community launch: contribution_only. */
+  membershipMode: MembershipMode;
+  /** UG-05: default reward duration offered when approving with a reward. */
+  contributionDefaultDays: number;
+  /** UG-05: in stars_only mode, allow contribution rewards only if explicitly enabled. */
+  contributionRewardsInStarsMode: boolean;
 }
+
+export type MembershipMode = "contribution_only" | "contributions_and_stars" | "stars_only";
 
 // ==============================================================================
 // UG-03 Domain Contracts: Treasury, Expenses & Financial Automation
@@ -800,10 +833,29 @@ export interface ContributionItem {
   mediaGroupId?: string;
 }
 
+/** UG-05: proposal for a creator that does not exist yet. Nothing is created until approval. */
+export interface NewCreatorProposal {
+  name: string;
+  profileUrl?: string;
+  collection: CollectionCategory;
+  /** Existing creators with a similar name, detected at submission. */
+  duplicateCandidateIds: string[];
+  /** Administrator chose an existing creator instead of creating a new one. */
+  useExistingCreatorId?: string;
+  /** Administrator explicitly approved the creator identity and publication rights. */
+  identityRightsConfirmed?: boolean;
+  /** Set once the topic/creator has been created (retry-safe). */
+  createdCreatorId?: string;
+}
+
+export type ContributionDecision =
+  | { type: "reward"; scopes: CollectionCategory[]; days: number }
+  | { type: "no_reward" };
+
 export interface Contribution {
   id: string;
   userId: number; // Contributor (private chat id == user id)
-  creatorId: string;
+  creatorId: string; // "" while a new-creator proposal is not yet approved
   creatorName: string;
   items: ContributionItem[];
   status: ContributionStatus;
@@ -814,4 +866,38 @@ export interface Contribution {
   createdAt: string;
   submittedAt?: string;
   updatedAt: string;
+  // --- UG-05 ---
+  kind?: "existing" | "new"; // absent = existing (UG-04 records)
+  proposal?: NewCreatorProposal;
+  /** Conversation step while a new-creator proposal is being collected. */
+  step?: "name" | "url" | "collection" | "media";
+  /** The administrator's final choice, recorded when approval starts. */
+  decision?: ContributionDecision;
+  /** Reward bookkeeping: none = approved without reward, granted = days applied. */
+  rewardStatus?: "none" | "pending" | "granted";
+  rejectionReason?: string;
+  itemCount?: number; // kept after rejection purges the message IDs
+  /** Administrator's in-progress reward configuration (before confirming). */
+  draft?: { scopes: CollectionCategory[]; days: number };
+}
+
+/** UG-05: one finalized reward per submission (key = contribution id). */
+export interface ContributionReward {
+  contributionId: string;
+  userId: number;
+  scopes: CollectionCategory[];
+  days: number;
+  grantedBy: number;
+  status: "applying" | "granted";
+  /** New expiry per scope after this reward. */
+  expiresAt: Partial<Record<CollectionCategory, string>>;
+  createdAt: string;
+  grantedAt?: string;
+}
+
+/** UG-05: references to bot-managed public information messages. */
+export interface NavigationState {
+  welcome?: { chatId: number; messageId: number; hash: string };
+  lobby?: { chatId: number; messageId: number; hash: string };
+  directoryKeyboardHash?: string;
 }

@@ -10,6 +10,7 @@ import { getActiveBallot, getBallot, hasUserVoted } from "../../db/voting.ts";
 import { getMembershipSummary } from "../../db/entitlements.ts";
 import { castVote } from "../../voting/service.ts";
 import { subscribeKeyboard } from "../keyboards.ts";
+import { getMembershipMode } from "../../membership/mode.ts";
 
 export const votingComposer = new Composer();
 
@@ -30,22 +31,22 @@ export async function handleOpenVote(ctx: any) {
   const summary = await getMembershipSummary(userId);
 
   // 1. Eligibility Check
-  if (!summary.hasPaid) {
+  if (!summary.canParticipate) {
     const text =
       `🔒 *VOTE MENSUEL DES CRÉATEURS*\n\n` +
-      `Le vote d'acquisition de créateurs est un avantage exclusif réservé aux abonnés payants actifs.\n\n` +
-      `Abonnez-vous avec les Étoiles Telegram ci-dessous pour participer au choix de nos prochains créateurs :`;
+      `Le vote d'acquisition de créateurs est un avantage exclusif réservé aux membres actifs (abonnés ou ayant gagné leur accès par contribution).\n\n` +
+      `Obtenez l'accès ci-dessous pour participer au choix de nos prochains créateurs :`;
 
     if (ctx.callbackQuery) {
       await ctx.answerCallbackQuery();
       await ctx.editMessageText(text, {
         parse_mode: "Markdown",
-        reply_markup: subscribeKeyboard(),
+        reply_markup: subscribeKeyboard(await getMembershipMode()),
       });
     } else {
       await ctx.reply(text, {
         parse_mode: "Markdown",
-        reply_markup: subscribeKeyboard(),
+        reply_markup: subscribeKeyboard(await getMembershipMode()),
       });
     }
     return;
@@ -135,7 +136,7 @@ export async function handleOpenVote(ctx: any) {
     `🗳️ *${escapeMd(ballot.title)}*\n\n` +
     `Quel créateur ${getClubName()} devrait-il acquérir ensuite?\n\n` +
     `⏳ *Clôture du vote :* ${closesDate}\n` +
-    `⚠️ *Règles :* 1 vote irrévocable par membre payant. L'ordre des candidats est aléatoire.\n\n` +
+    `⚠️ *Règles :* 1 vote irrévocable par membre actif. L'ordre des candidats est aléatoire.\n\n` +
     `Faites votre choix ci-dessous :`;
 
   if (ctx.callbackQuery) {

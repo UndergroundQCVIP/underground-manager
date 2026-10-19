@@ -15,6 +15,9 @@ export const DEFAULT_SETTINGS: SystemSettings = {
   nominationLimitPerCycle: 1,
   digestEnabled: false,
   turnoutObjectivePct: 20,
+  membershipMode: "contribution_only",
+  contributionDefaultDays: 30,
+  contributionRewardsInStarsMode: false,
 };
 
 export async function getSystemSettings(): Promise<SystemSettings> {
@@ -32,6 +35,7 @@ export async function getSystemSettings(): Promise<SystemSettings> {
         ? config.VOTING_SHORTLIST_SIZE
         : DEFAULT_SETTINGS.votingShortlistSize,
     digestEnabled: config.DIGEST_ENABLED,
+    membershipMode: config.MEMBERSHIP_MODE,
   };
   return { ...envDefaults, ...(res.value ?? {}) };
 }

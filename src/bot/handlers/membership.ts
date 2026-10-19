@@ -12,6 +12,7 @@ import { messages } from "../messages.ts";
 import { plansKeyboard, spacesKeyboard } from "../keyboards.ts";
 import { MembershipPlanId, SpaceId } from "../../types.ts";
 import { getPlan } from "../../plans/plans.ts";
+import { getMembershipMode, starsCheckoutEnabled } from "../../membership/mode.ts";
 import { confirmDowngrade, confirmUpgradeIntent, quoteDowngrade, quoteUpgrade } from "../../plans/changes.ts";
 
 export const membershipComposer = new Composer();
@@ -25,10 +26,11 @@ async function showPlans(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
   if (!userId) return;
   const summary = await getMembershipSummary(userId);
+  const mode = await getMembershipMode();
   await ctx.answerCallbackQuery();
-  await ctx.editMessageText(messages.plansOverview(summary), {
+  await ctx.editMessageText(messages.plansOverview(summary, mode), {
     parse_mode: "Markdown",
-    reply_markup: plansKeyboard(summary.plan),
+    reply_markup: plansKeyboard(summary.hasPaid ? summary.plan : "none", mode),
   });
 }
 
@@ -43,6 +45,15 @@ async function sendPlanInvoice(ctx: Context, planId: MembershipPlanId): Promise<
   const config = getConfig();
   const club = getClubName();
   const plan = getPlan(planId);
+
+  // Contribution Only: no NEW Stars checkout (existing subscriptions are untouched).
+  if (!(await starsCheckoutEnabled())) {
+    await ctx.reply(
+      "ℹ️ Les abonnements par Étoiles ne sont pas offerts pour le moment. Vous pouvez gagner l'accès en contribuant du contenu.",
+      { reply_markup: new InlineKeyboard().text("➕ Contribuer", "contrib:start").row().text("⬅️ Menu principal", "member:home") }
+    );
+    return;
+  }
 
   if (!plan.enabled) {
     await ctx.reply(`⏳ La facturation du forfait ${plan.label} n'est pas encore disponible.`);
@@ -122,6 +133,10 @@ membershipComposer.callbackQuery("member:pay:retro_plus", async (ctx) => {
 async function showUpgradeQuote(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
   if (!userId) return;
+  if (!(await starsCheckoutEnabled())) {
+    await ctx.answerCallbackQuery({ text: "Les abonnements par Étoiles ne sont pas offerts pour le moment.", show_alert: true });
+    return;
+  }
   const q = await quoteUpgrade(userId);
   await ctx.answerCallbackQuery();
   if (!q.ok) {
@@ -158,6 +173,10 @@ membershipComposer.callbackQuery("member:upgrade", showUpgradeQuote);
 membershipComposer.callbackQuery(/^member:upg_cfm:([01])$/, async (ctx) => {
   const userId = ctx.from?.id;
   if (!userId) return;
+  if (!(await starsCheckoutEnabled())) {
+    await ctx.answerCallbackQuery({ text: "Les abonnements par Étoiles ne sont pas offerts pour le moment.", show_alert: true });
+    return;
+  }
   const cancelRegular = ctx.match[1] === "1";
   const q = await confirmUpgradeIntent(userId, cancelRegular);
   if (!q.ok) {
@@ -230,13 +249,15 @@ membershipComposer.callbackQuery("member:status", async (ctx) => {
   if (!userId) return;
 
   const summary = await getMembershipSummary(userId);
+  const mode = await getMembershipMode();
   const kb = new InlineKeyboard();
 
   if (summary.isMember) {
     kb.text("🔓 Accéder à mes canaux", "member:channels").row();
-    if (summary.plan === "regular" && getPlan("retro_plus").enabled) {
+    if (summary.plan === "regular" && getPlan("retro_plus").enabled && mode !== "contribution_only") {
       kb.text("⬆️ Passer à Retro Plus", "member:upgrade").row();
     }
+    if (mode !== "stars_only") kb.text("➕ Contribuer", "contrib:start").row();
     if (summary.activeEntitlements.some((e) => e.source === "telegram_stars" && e.plan === "retro_plus")) {
       kb.text("⬇️ Revenir à Regular", "member:downgrade").row();
     }
@@ -246,7 +267,7 @@ membershipComposer.callbackQuery("member:status", async (ctx) => {
   kb.text("⬅️ Menu principal", "member:home");
 
   await ctx.answerCallbackQuery();
-  await ctx.editMessageText(messages.membershipStatus(summary), {
+  await ctx.editMessageText(messages.membershipStatus(summary, mode), {
     parse_mode: "Markdown",
     reply_markup: kb,
   });
@@ -277,7 +298,7 @@ membershipComposer.callbackQuery("member:channels", async (ctx) => {
     await ctx.answerCallbackQuery();
     await ctx.editMessageText(messages.accessChannels([]), {
       parse_mode: "Markdown",
-      reply_markup: plansKeyboard("none"),
+      reply_markup: plansKeyboard("none", await getMembershipMode()),
     });
     return;
   }
@@ -310,7 +331,7 @@ membershipComposer.callbackQuery("member:general_chat", async (ctx) => {
     await ctx.answerCallbackQuery();
     await ctx.editMessageText(
       `🔒 *Clavardage général de ${getClubName()}* est réservé aux membres.\nConsultez les forfaits pour vous joindre :`,
-      { parse_mode: "Markdown", reply_markup: plansKeyboard(summary.plan) }
+      { parse_mode: "Markdown", reply_markup: plansKeyboard(summary.hasPaid ? summary.plan : "none", await getMembershipMode()) }
     );
     return;
   }

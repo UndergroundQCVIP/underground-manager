@@ -18,6 +18,7 @@ import { treasuryComposer } from "./handlers/treasury.ts";
 import { migrationComposer } from "./handlers/migration.ts";
 import { directoryComposer } from "./handlers/directory.ts";
 import { contributeComposer } from "./handlers/contribute.ts";
+import { adminSettingsComposer } from "./handlers/admin_settings.ts";
 
 export function createBot(token?: string): Bot {
   const config = getConfig();
@@ -46,6 +47,7 @@ export function createBot(token?: string): Bot {
   bot.use(joinReqComposer);
   bot.use(adminComposer);
   bot.use(migrationComposer);
+  bot.use(adminSettingsComposer);
   bot.use(directoryComposer);
   bot.use(contributeComposer);
   bot.use(forumComposer);

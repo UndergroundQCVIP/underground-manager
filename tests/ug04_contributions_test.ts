@@ -43,7 +43,8 @@ Deno.test("UG04 CONTRIB — Nothing is published before admin approval; admins g
     assertEquals(api.copyCalls.filter((x) => x.to === REGULAR_CHAT).length, 0); // topic untouched
     // Preview copied to each admin, with review buttons
     assertEquals(api.copyCalls.map((x) => x.to).sort(), [111111, 222222]);
-    assertStringIncludes(JSON.stringify(api.sentMessages[0].options), `cadm:ok:${sub.id}`);
+    // UG-05: three explicit decisions (reward / no reward / reject)
+    for (const code of ["rw", "nr", "no"]) assertStringIncludes(JSON.stringify(api.sentMessages[0].options), `cadm:${code}:${sub.id}`);
   } finally {
     await kv.close();
   }
@@ -192,6 +193,8 @@ Deno.test("UG04 CONTRIB — End-to-end through the bot: any user contributes, on
 
     // Any user (no membership) sees the creator list
     await bot.handleUpdate(cb(MEMBER, "contrib:start") as never);
+    assertStringIncludes(JSON.stringify(calls.filter((x) => x.method === "editMessageText")), "Nouveau créateur");
+    await bot.handleUpdate(cb(MEMBER, "contrib:existing") as never);
     assertStringIncludes(JSON.stringify(calls.filter((x) => x.method === "editMessageText")), "Aria (Regular)");
 
     await bot.handleUpdate(cb(MEMBER, `contrib:pick:${c.id}`) as never);

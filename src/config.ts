@@ -13,6 +13,16 @@ export interface AppConfig {
   /** UG-04: private RETRO | LA CONFRÉRIE forum (0 = not configured). */
   TELEGRAM_RETRO_FORUM_CHAT_ID: number;
   PUBLIC_DIRECTORY_CHAT_ID: number;
+  /** UG-05: optional public t.me link of the directory channel (used by navigation buttons). */
+  PUBLIC_DIRECTORY_URL: string;
+  /** UG-05: public info group "LA CONFRÉRIE | ACCUEIL" (0 = not configured). Never access-controlled. */
+  TELEGRAM_PUBLIC_LOBBY_CHAT_ID: number;
+  /** UG-05: public invite/t.me link to the lobby ("" = not configured). */
+  TELEGRAM_PUBLIC_LOBBY_URL: string;
+  /** UG-05: public welcome channel that carries the bot-managed welcome menu (0 = none). */
+  TELEGRAM_PUBLIC_WELCOME_CHAT_ID: number;
+  /** UG-05: initial membership acquisition mode before an admin changes it in Settings. */
+  MEMBERSHIP_MODE: "contribution_only" | "contributions_and_stars" | "stars_only";
   WANTED_LIST_CHAT_ID: number;
   GENERAL_CHAT_ID: number;
   /** UG-04: public club name used in all user-facing text. */
@@ -71,6 +81,11 @@ export function loadConfig(envOverride?: Record<string, string>): AppConfig {
     VIP_COLLECTIONS_CHAT_ID: Number(getEnv("VIP_COLLECTIONS_CHAT_ID", "0")),
     TELEGRAM_RETRO_FORUM_CHAT_ID: Number(getEnv("TELEGRAM_RETRO_FORUM_CHAT_ID", "0")),
     PUBLIC_DIRECTORY_CHAT_ID: Number(getEnv("PUBLIC_DIRECTORY_CHAT_ID", "0")),
+    PUBLIC_DIRECTORY_URL: getEnv("PUBLIC_DIRECTORY_URL", "").trim(),
+    TELEGRAM_PUBLIC_LOBBY_CHAT_ID: Number(getEnv("TELEGRAM_PUBLIC_LOBBY_CHAT_ID", "0")) || 0,
+    TELEGRAM_PUBLIC_LOBBY_URL: getEnv("TELEGRAM_PUBLIC_LOBBY_URL", "").trim(),
+    TELEGRAM_PUBLIC_WELCOME_CHAT_ID: Number(getEnv("TELEGRAM_PUBLIC_WELCOME_CHAT_ID", "0")) || 0,
+    MEMBERSHIP_MODE: parseMembershipMode(getEnv("MEMBERSHIP_MODE", "")),
     WANTED_LIST_CHAT_ID: Number(getEnv("WANTED_LIST_CHAT_ID", "0")),
     GENERAL_CHAT_ID: Number(getEnv("GENERAL_CHAT_ID", "0")),
     CLUB_DISPLAY_NAME: getEnv("CLUB_DISPLAY_NAME", "").trim() || "LA CONFRÉRIE",
@@ -111,6 +126,10 @@ export function loadConfig(envOverride?: Record<string, string>): AppConfig {
 
   activeConfig = config;
   return config;
+}
+
+function parseMembershipMode(raw: string): AppConfig["MEMBERSHIP_MODE"] {
+  return raw === "contributions_and_stars" || raw === "stars_only" ? raw : "contribution_only";
 }
 
 export function getClubName(config: AppConfig = getConfig()): string {
@@ -157,6 +176,15 @@ export function validateConfig(config: AppConfig): string[] {
 
   if (config.TELEGRAM_RETRO_FORUM_CHAT_ID === config.VIP_COLLECTIONS_CHAT_ID && config.TELEGRAM_RETRO_FORUM_CHAT_ID !== 0) {
     errors.push("TELEGRAM_RETRO_FORUM_CHAT_ID must differ from VIP_COLLECTIONS_CHAT_ID.");
+  }
+
+  if (
+    config.TELEGRAM_PUBLIC_LOBBY_CHAT_ID !== 0 &&
+    [config.VIP_COLLECTIONS_CHAT_ID, config.TELEGRAM_RETRO_FORUM_CHAT_ID, config.WANTED_LIST_CHAT_ID, config.GENERAL_CHAT_ID].includes(
+      config.TELEGRAM_PUBLIC_LOBBY_CHAT_ID
+    )
+  ) {
+    errors.push("TELEGRAM_PUBLIC_LOBBY_CHAT_ID must be a separate PUBLIC group, never one of the private member spaces.");
   }
 
   if (config.RETRO_PLUS_STARS_PRICE_AMOUNT < 0 || !Number.isInteger(config.RETRO_PLUS_STARS_PRICE_AMOUNT)) {

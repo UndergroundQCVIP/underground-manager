@@ -20,7 +20,7 @@ import {
   updateWantedStatus,
 } from "../db/wanted.ts";
 import {
-  countActivePaidSubscribers,
+  countEligibleParticipants,
   getMembershipSummary,
 } from "../db/entitlements.ts";
 import { logAuditEvent } from "../db/audit.ts";
@@ -131,12 +131,12 @@ export async function castVote(
 ): Promise<{ success: boolean; error?: string }> {
   const { userId, ballotId, candidateId } = params;
 
-  // 1. Eligibility Check: Active PAYING subscriber only!
+  // 1. Eligibility Check: active paid OR contribution-earned member (complimentary excluded).
   const summary = await getMembershipSummary(userId);
-  if (!summary.hasPaid) {
+  if (!summary.canParticipate) {
     return {
       success: false,
-      error: "Seuls les abonnés payants actifs peuvent voter. Les membres ayant un accès gracieux sont exclus du vote.",
+      error: "Seuls les abonnés payants actifs ou les membres ayant gagné leur accès par contribution peuvent voter. Les membres ayant un accès gracieux sont exclus du vote.",
     };
   }
 
@@ -197,7 +197,7 @@ export async function closeAndFinalizeBallot(
     return summary;
   }
 
-  const totalEligible = await countActivePaidSubscribers();
+  const totalEligible = await countEligibleParticipants();
   const summary = await tallyBallot(ballotId, totalEligible);
 
   const closed: Ballot = {

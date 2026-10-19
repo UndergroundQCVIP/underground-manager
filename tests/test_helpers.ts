@@ -33,6 +33,12 @@ export const MOCK_CONFIG: AppConfig = {
   DEFAULT_STARS_REWARD_VALUATION_USD: 0.013,
   TREASURY_REPORT_CHANNEL_ID: -1001002,
   EXCHANGE_RATE_API_URL: "", // disabled in tests: no network, deterministic built-in rates
+  PUBLIC_DIRECTORY_URL: "https://t.me/test_directory",
+  TELEGRAM_PUBLIC_LOBBY_CHAT_ID: 0,
+  TELEGRAM_PUBLIC_LOBBY_URL: "",
+  TELEGRAM_PUBLIC_WELCOME_CHAT_ID: 0,
+  // Existing suites exercise Stars checkout; UG-05 tests switch modes explicitly.
+  MEMBERSHIP_MODE: "contributions_and_stars",
   MIGRATION_BATCH_SIZE: 30,
   MIGRATION_BATCH_DELAY_MS: 0,
 };
@@ -110,6 +116,13 @@ export class MockTelegramApi {
   }
 
   async pinChatMessage(chatId: number | string, messageId: number) {
+    return true;
+  }
+
+  public editedMarkups: { chatId: number | string; messageId: number; options?: unknown }[] = [];
+
+  async editMessageReplyMarkup(chatId: number | string, messageId: number, options?: unknown) {
+    this.editedMarkups.push({ chatId, messageId, options });
     return true;
   }
 }

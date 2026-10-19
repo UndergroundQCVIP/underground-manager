@@ -181,6 +181,31 @@ async function main() {
   }
   console.log();
 
+  // 4c. UG-05 public discovery (read-only)
+  console.log("4c. Public lobby / welcome channel (UG-05, optional):");
+  console.log(`     • Membership mode default: ${config.MEMBERSHIP_MODE} (admins can change it in Settings)`);
+  for (const [label, chatId] of [
+    ["Public lobby group", config.TELEGRAM_PUBLIC_LOBBY_CHAT_ID],
+    ["Public welcome channel", config.TELEGRAM_PUBLIC_WELCOME_CHAT_ID],
+  ] as const) {
+    if (!chatId) {
+      console.log(`  ⚪ ${label}: not configured (the bot's info pages are used instead).`);
+      continue;
+    }
+    try {
+      const chat = await bot.api.getChat(chatId);
+      const m = await bot.api.getChatMember(chatId, botId);
+      // deno-lint-ignore no-explicit-any
+      const rights = m as any;
+      const need = ["can_post_messages", "can_edit_messages", "can_pin_messages"].filter((k) => rights[k] === false);
+      console.log(`  ${m.status === "administrator" && need.length === 0 ? "✅" : "⚠️ "} ${label}: ${"title" in chat ? chat.title : chatId}` +
+        (m.status !== "administrator" ? " — bot is not an administrator" : need.length ? ` — missing: ${need.join(", ")}` : ""));
+    } catch (err) {
+      console.log(`  ❌ ${label} (${chatId}): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  console.log();
+
   // 5. Webhook Status Check
   console.log("5. Telegram Webhook Status:");
   try {

@@ -484,7 +484,7 @@ At the end of each calendar month (or on-demand via `/treasury_report`):
 
 ## 12. Complete Testing & Verification Matrix
 
-LA CONFRÉRIE's bot features a comprehensive automated test suite consisting of **193 tests** (the UG-01…UG-03 suites plus the post-audit E2E/regression suites, and 59 for UG-04) running on Deno's native test runner (`deno test -A`):
+LA CONFRÉRIE's bot features a comprehensive automated test suite consisting of **234 tests** (UG-01…UG-03, the post-audit E2E/regression suites, 59 for UG-04 and 41 for UG-05) running on Deno's native test runner (`deno test -A`):
 
 | Test Suite File | Tests | Domain / Coverage |
 |---|:---:|---|
@@ -508,12 +508,14 @@ LA CONFRÉRIE's bot features a comprehensive automated test suite consisting of 
 | `tests/ug04_migration_test.ts` | 21 | Dry-run, protected content, albums, partial failure, resume, rate limits, leases, finalization, deletion safeguards. |
 | `tests/ug04_bot_routing_test.ts` | 6 | Real bot wiring: menus, admin-only routes, tier-gated deep links, disabled Retro checkout. |
 | `tests/ug04_contributions_test.ts` | 8 | Admin-reviewed member contributions: review gate, single publish, partial failure, migration hold, bot wiring. |
-| **Total** | **193** | **All 193 Tests Passing** |
+| `tests/ug05_contributions_test.ts` | 27 | Reward / no-reward approval, scopes, durations, accumulation, idempotency, partial/failed publication, new creators, admin UI wiring. |
+| `tests/ug05_navigation_test.ts` | 14 | Acquisition modes, welcome/lobby/directory navigation, deep links, private-space safety. |
+| **Total** | **234** | **All 234 Tests Passing** |
 
 To run the full suite:
 ```bash
 deno task check  # Strict TypeScript type check
-deno task test   # Runs all 193 unit, integration and security tests
+deno task test   # Runs all 234 unit, integration and security tests
 ```
 
 ---
@@ -628,3 +630,29 @@ The bot must be an **administrator** of the Retro forum with: *Invite users via 
 ### 14.7 Member contributions (admin-reviewed)
 
 Main menu → **➕ Contribute** → pick a creator → send photos/videos (albums OK, no item cap) → **Finish**. Open to any bot user, no credit tracking. Admins receive a preview plus **Approve & publish / Reject** buttons (also under Admin → **📥 Contributions**). On approval the *bot* copies the items into the creator's topic (`copyMessages`), so the posts are the bot's and cannot be deleted by the contributor; the media inventory and the creator's last-update date are updated. Only message IDs are stored. Approval is single-use, held while that creator is being migrated, and reported as *needs review* if originals were deleted before approval.
+
+---
+
+## 15. UG-05 — Community Contributions, Earned Memberships & Public Discovery
+
+### 15.1 Earned access (`contribution` entitlement source)
+* Anyone using the bot can contribute (no membership needed). Submitting never grants access.
+* For every submission an administrator makes **two separate decisions**: (1) publish or reject, (2) reward or not.
+  * **Approve & Reward** → choose access *Regular only / Retro only / Both* (never preselected — a Retro creator does **not** imply Retro access) and duration *7 / 15 / 30 (default) / 60 / 90 / custom* days.
+  * **Approve Without Reward** → publish only; nothing is granted.
+  * **Reject** → optional reason; nothing is published or granted; message references are purged (only a count is kept).
+* The reward is applied **only after the publication fully succeeded**. Partial publication → `needs review`, no reward until an admin verifies the topic and resolves it (the stored decision is then applied once). A failed publication can be retried safely.
+* Rewards live in the existing entitlement engine: one `contribution` entitlement **per scope** (Regular / Retro), `new_expiration = max(now, existing) + days`, never shortening anything, never touching Stars/complimentary entitlements or cancelling a subscription. One finalized reward per submission (ledger keyed by submission id; double clicks and concurrent approvals cannot duplicate it).
+* A contribution entitlement for a forum also includes **Wanted List + General Chat** and **voting/nomination eligibility** (complimentary stays excluded). Expiry uses the existing hourly reconciliation (removes only what is no longer authorized) and a ~3-day reminder is sent.
+
+### 15.2 New creator proposals
+Contribute → *Nouveau créateur*: name → optional profile URL → Regular/Retro → media → Finish. Similar names are flagged (contributor may switch to the existing creator). **Nothing is created until approval.** The admin can correct the name, switch classification, select an existing creator for a duplicate, and must explicitly **attest the creator identity and publication rights**. On approval the bot creates the forum topic in the chosen forum (the bot must be admin with *Manage topics*), registers the creator through the normal UG-02 path, publishes, and the daily directory sync picks it up. A retry reuses the created creator/topic.
+
+### 15.3 Membership acquisition mode (Settings → Mode d'adhésion)
+`contribution_only` (**default**) · `contributions_and_stars` · `stars_only`. It only changes what is *offered*: Contribution Only hides new Stars checkout (and declines stale invoices at pre-checkout) but existing subscriptions, renewals, payments and history are untouched. In Stars Only, contribution rewards are disabled unless explicitly enabled in the same screen. `MEMBERSHIP_MODE` sets the initial value.
+
+### 15.4 Public discovery
+* Welcome menu (bot-managed post in `TELEGRAM_PUBLIC_WELCOME_CHAT_ID`) and a pinned info post in the **public lobby** `TELEGRAM_PUBLIC_LOBBY_CHAT_ID` (`LA CONFRÉRIE | ACCUEIL`). Buttons are plain URL buttons to official deep links `t.me/<bot>?start=explore|directory|regular|retro|how|contribute|join|rules`; Regular/Retro pages hand out a normal approval-gated join link **only** to members entitled to it. The lobby is informational and never access-controlled; it must differ from every private space (validated).
+* Public directory posts now carry navigation buttons (Explore · How to join · Contribute · Membership options), re-sent on every edit so daily updates keep them. Admin → Settings → Navigation publique: update welcome menu / directory buttons / synchronize all (hash-compared; unchanged content is not re-sent).
+* **Telegram bots cannot create groups.** Create the lobby by hand, add the bot as admin (post, edit, pin), set the env vars, then synchronize (exact steps are shown in Navigation publique → Paramètres du groupe public).
+

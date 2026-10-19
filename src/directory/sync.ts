@@ -13,6 +13,7 @@ import {
 import { logAuditEvent } from "../db/audit.ts";
 import { CollectionCategory, Creator } from "../types.ts";
 import { escapeMd } from "../util/markdown.ts";
+import { directoryNavKeyboard } from "../navigation/service.ts";
 import { formatTorontoDate } from "../util/time.ts";
 import { isMessageGone, isMessageNotModified, sha256Hex } from "../wanted/service.ts";
 
@@ -206,7 +207,13 @@ export async function syncPublicDirectory(
   try {
     for (let i = 0; i < chunks.length; i++) {
       const chunkText = chunks[i];
-      const options = { parse_mode: "Markdown", disable_web_page_preview: true };
+      // The navigation keyboard is re-sent with every edit: editing a message without
+      // a reply_markup would otherwise strip its buttons on the daily update.
+      const options = {
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+        reply_markup: directoryNavKeyboard(),
+      };
 
       if (i < existingIds.length) {
         const msgId = existingIds[i];

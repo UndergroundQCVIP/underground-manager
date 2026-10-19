@@ -10,6 +10,9 @@
 import { Bot } from "grammy";
 import { reconcileAllMembers } from "../access/sync.ts";
 import { processComplimentaryReminders } from "../complimentary/service.ts";
+import { processContributionReminders } from "../contributions/rewards.ts";
+import { syncNavigationMessages } from "../navigation/service.ts";
+import { getChatId } from "../access/spaces.ts";
 import { syncPublicDirectory } from "../directory/sync.ts";
 import { syncWantedListChannel } from "../wanted/service.ts";
 import { getActiveBallot } from "../db/voting.ts";
@@ -77,6 +80,16 @@ export async function runHourlyReconciliation(bot: Bot): Promise<{
   console.log(
     `[Cron] Complimentary reminders sent: ${reminders.remindedCount}, errors ${reminders.errors.length}`
   );
+
+  // 3b. UG-05: same 3-day heads-up for contribution-earned access (no promise of an extension)
+  try {
+    const earned = await processContributionReminders(bot.api);
+    reminders.remindedCount += earned.remindedCount;
+    reminders.errors.push(...earned.errors);
+    console.log(`[Cron] Contribution reminders sent: ${earned.remindedCount}, errors ${earned.errors.length}`);
+  } catch (err) {
+    console.error("[Cron Error] Contribution reminders failed:", err);
+  }
 
   // 4. Check for expired acquisition voting ballot
   let ballotClosed = false;
@@ -159,6 +172,15 @@ export async function runDailySynchronization(bot: Bot): Promise<{
   const wantedResult = await syncWantedListChannel(bot.api);
   console.log(`[Cron] Wanted List sync: success=${wantedResult.success}`);
 
+  // 2b. UG-05: keep the bot-managed public information messages current (hash-compared: cheap
+  //     when nothing changed, and the directory navigation buttons are re-applied if lost).
+  try {
+    const nav = await syncNavigationMessages(bot.api);
+    console.log(`[Cron] Navigation sync: welcome=${nav.welcome.outcome}, lobby=${nav.lobby.outcome}, directory=${nav.directory.outcome}`);
+  } catch (err) {
+    console.error("[Cron Error] Navigation sync failed:", err);
+  }
+
   // 3. Pull Telegram's own Stars ledger (refunds, withdrawals, missed payments)
   try {
     const { reconcileStarTransactionsFromApi } = await import("../treasury/stars_tracking.ts");
@@ -176,6 +198,7 @@ export async function runDailySynchronization(bot: Bot): Promise<{
   // 4. Verify the bot still holds the permissions it needs in every space
   try {
     for (const spaceId of SPACE_IDS) {
+      if (!getChatId(spaceId)) continue; // optional space (e.g. Retro) not configured
       const check = await checkBotPermissions(bot.api, spaceId);
       if (!check.ok) {
         await notifyAdmins(

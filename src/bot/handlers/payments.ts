@@ -6,6 +6,7 @@ import { Composer, InlineKeyboard } from "grammy";
 import { TelegramStarsProvider } from "../../payments/stars.ts";
 import { messages } from "../messages.ts";
 import { applyPlanChangeAfterPayment } from "../../plans/changes.ts";
+import { starsCheckoutEnabled } from "../../membership/mode.ts";
 
 export const paymentsComposer = new Composer();
 const starsProvider = new TelegramStarsProvider();
@@ -15,6 +16,15 @@ paymentsComposer.on("pre_checkout_query", async (ctx) => {
   const query = ctx.preCheckoutQuery;
 
   try {
+    // UG-05 Contribution Only: no NEW Stars checkout. (Recurring renewals of existing
+    // subscriptions never pass through pre-checkout, so they are unaffected.)
+    if (!(await starsCheckoutEnabled())) {
+      await ctx.answerPreCheckoutQuery(false, {
+        error_message: "Les abonnements par Étoiles ne sont pas offerts pour le moment. Vous pouvez gagner l'accès en contribuant.",
+      });
+      return;
+    }
+
     const validation = await TelegramStarsProvider.validatePreCheckout({
       id: query.id,
       from: query.from,

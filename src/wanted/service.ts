@@ -54,11 +54,11 @@ export async function submitCreatorNomination(
   // 1. Eligibility Check: Active PAYING subscriber required!
   // Complimentary members cannot nominate or support by default.
   const summary = await getMembershipSummary(userId);
-  if (!summary.hasPaid) {
+  if (!summary.canParticipate) {
     return {
       success: false,
       isExistingCandidate: false,
-      error: "Seuls les abonnés payants actifs peuvent suggérer des créateurs. Les membres ayant un accès gracieux ne sont pas admissibles aux suggestions.",
+      error: "Seuls les abonnés payants actifs ou les membres ayant gagné leur accès par contribution peuvent suggérer des créateurs. Les membres ayant un accès gracieux ne sont pas admissibles aux suggestions.",
     };
   }
 
@@ -163,10 +163,10 @@ export async function supportExistingCandidate(
 ): Promise<{ success: boolean; candidate?: WantedCandidate; error?: string }> {
   // 1. Eligibility Check
   const summary = await getMembershipSummary(userId);
-  if (!summary.hasPaid) {
+  if (!summary.canParticipate) {
     return {
       success: false,
-      error: "Seuls les abonnés payants actifs peuvent appuyer des créateurs.",
+      error: "Seuls les abonnés payants actifs ou les membres ayant gagné leur accès par contribution peuvent appuyer des créateurs.",
     };
   }
 

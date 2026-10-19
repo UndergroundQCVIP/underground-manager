@@ -50,7 +50,7 @@ wantedComposer.callbackQuery("wanted:menu", async (ctx) => {
     `Dites-nous quels créateurs nous devrions acquérir ensuite!\n\n` +
     `• *Suggérer :* soumettez de nouvelles demandes de créateurs\n` +
     `• *Appuyer :* appuyez les suggestions existantes de la communauté\n` +
-    `• *Règles :* 1 suggestion ou appui par membre payant par cycle mensuel\n\n` +
+    `• *Règles :* 1 suggestion ou appui par membre actif par cycle mensuel\n\n` +
     `Choisissez une option ci-dessous :`,
     {
       parse_mode: "Markdown",
@@ -97,9 +97,9 @@ wantedComposer.callbackQuery("wanted:suggest_prompt", async (ctx) => {
   if (!userId) return;
 
   const summary = await getMembershipSummary(userId);
-  if (!summary.hasPaid) {
+  if (!summary.canParticipate) {
     await ctx.answerCallbackQuery({
-      text: "Le vote et les suggestions sont réservés aux abonnés payants.",
+      text: "Le vote et les suggestions sont réservés aux abonnés payants et aux membres ayant gagné leur accès par contribution.",
       show_alert: true,
     });
     return;
@@ -197,9 +197,9 @@ wantedComposer.callbackQuery("wanted:support_list", async (ctx) => {
   if (!userId) return;
 
   const summary = await getMembershipSummary(userId);
-  if (!summary.hasPaid) {
+  if (!summary.canParticipate) {
     await ctx.answerCallbackQuery({
-      text: "Seuls les abonnés payants actifs peuvent appuyer des créateurs.",
+      text: "Seuls les abonnés payants actifs ou les membres ayant gagné leur accès par contribution peuvent appuyer des créateurs.",
       show_alert: true,
     });
     return;
