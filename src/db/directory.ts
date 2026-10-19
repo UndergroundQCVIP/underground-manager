@@ -60,7 +60,8 @@ export async function markDirectoryDirty(): Promise<void> {
 export async function clearDirectoryDirty(
   newContentHash: string,
   publishedMessageIds: number[],
-  seqAtStart?: number
+  seqAtStart?: number,
+  newKey?: string
 ): Promise<void> {
   const kv = await getKv();
   for (let attempt = 0; attempt < 8; attempt++) {
@@ -74,6 +75,7 @@ export async function clearDirectoryDirty(
       publishedMessageIds,
       isDirty: changedDuringSync,
       dirtySeq: seqNow,
+      lastNewKey: newKey ?? current?.lastNewKey,
     };
     const commit = await kv.atomic().check(res).set(DIRECTORY_STATE_KEY, state).commit();
     if (commit.ok) return;

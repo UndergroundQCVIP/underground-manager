@@ -234,6 +234,7 @@ export interface DirectorySyncState {
   lastContentHash?: string; // Hash to detect actual changes and avoid redundant edits
   publishedMessageIds: number[]; // Channel message IDs for directory sections
   isDirty: boolean; // Flag set whenever creator name/media changes
+  lastNewKey?: string; // creators flagged 🆕 at the last sync
   dirtySeq?: number; // Bumped on every change so an in-flight sync cannot clear a newer one
 }
 

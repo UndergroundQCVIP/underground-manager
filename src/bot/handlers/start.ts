@@ -149,3 +149,21 @@ startComposer.callbackQuery("member:support", async (ctx) => {
     reply_markup: supportKeyboard(),
   });
 });
+
+// Diagnostic: shows the numeric ID the bot sees, whether it is in ADMIN_USER_IDS and
+// the membership the database holds for it. Private chats only; reveals nothing sensitive.
+startComposer.command("whoami", async (ctx) => {
+  const userId = ctx.from?.id;
+  if (!userId || ctx.chat?.type !== "private") return;
+
+  const summary = await getMembershipSummary(userId);
+  const lines = [
+    `Votre identifiant Telegram : ${userId}`,
+    `Administrateur : ${isAdministrator(userId) ? "oui" : "non (cet identifiant n'est pas dans ADMIN_USER_IDS)"}`,
+    `Membre actif : ${summary.isMember ? "oui" : "non"}`,
+    `Type : ${summary.primaryType}`,
+    `Espaces accessibles : ${summary.accessibleSpaces.join(", ") || "aucun"}`,
+    `Expiration : ${summary.effectiveExpiry ?? "—"}`,
+  ];
+  await ctx.reply(lines.join("\n"));
+});

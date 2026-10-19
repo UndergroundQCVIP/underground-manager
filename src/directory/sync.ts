@@ -40,9 +40,24 @@ export function formatCreatorDate(isoString?: string): string {
   return formatTorontoDate(isoString, { month: "short", day: "numeric", year: "numeric" });
 }
 
+/** Creators whose first content appeared in the last 7 days are flagged 🆕 in the list. */
+export const NEW_CREATOR_DAYS = 7;
+
+export function isNewCreator(c: Creator, now: Date = new Date()): boolean {
+  if (!c.firstContentDetectedAt) return false;
+  const age = now.getTime() - new Date(c.firstContentDetectedAt).getTime();
+  return age >= -60_000 && age < NEW_CREATOR_DAYS * 86_400_000;
+}
+
+/** Stable key of which creators are currently flagged new (used to detect flag changes). */
+export function newCreatorsKey(creators: Creator[], now: Date = new Date()): string {
+  return creators.filter((c) => isNewCreator(c, now)).map((c) => c.id).sort().join(",");
+}
+
 export function buildDirectorySections(
   creators: Creator[],
-  botUsername: string
+  botUsername: string,
+  now: Date = new Date()
 ): string[] {
   if (creators.length === 0) {
     return [
@@ -52,7 +67,8 @@ export function buildDirectorySections(
     ];
   }
 
-  const nowFormatted = formatTorontoDate(new Date(), {
+  const anyNew = creators.some((c) => isNewCreator(c, now));
+  const nowFormatted = formatTorontoDate(now, {
     month: "long",
     day: "numeric",
     year: "numeric",
@@ -76,21 +92,24 @@ export function buildDirectorySections(
     `💎 *UNDERGROUND | RÉPERTOIRE DES CRÉATEURS*\n` +
     `_Archives sélectionnées dans TOKEBEC VIP COLLECTIONS_\n` +
     `📅 *Répertoire mis à jour :* ${nowFormatted}\n` +
-    `🔒 _Abonnez-vous via Underground Manager pour un accès instantané_\n\n`;
+    `🔒 _Abonnez-vous via Underground Manager pour un accès instantané_\n` +
+    (anyNew ? `🆕 _= ajout récent (${NEW_CREATOR_DAYS} derniers jours)_\n` : "") +
+    `\n`;
 
   for (const letter of sortedLetters) {
     let sectionText = `*${letter}*\n`;
     for (const c of grouped[letter]) {
       const updateStr = formatCreatorDate(c.lastContentUpdatedAt);
       const deepLink = `https://t.me/${botUsername}?start=creator_${c.id}`;
-      sectionText += `• *${escapeMd(c.name)}* — ${updateStr} [🔍 Voir](${deepLink})\n`;
+      const badge = isNewCreator(c, now) ? "🆕 " : "• ";
+      sectionText += `${badge}*${escapeMd(c.name)}* — ${updateStr} [🔍 Voir](${deepLink})\n`;
     }
     sectionText += "\n";
 
     // If adding this section exceeds Telegram safe chunk size (3500 chars), push and start new chunk
     if (currentChunk.length + sectionText.length > 3500) {
       chunks.push(currentChunk.trim());
-      currentChunk = `💎 *UNDERGROUND | CREATOR DIRECTORY (suite)*\n\n${sectionText}`;
+      currentChunk = `💎 *UNDERGROUND | RÉPERTOIRE DES CRÉATEURS (suite)*\n\n${sectionText}`;
     } else {
       currentChunk += sectionText;
     }
@@ -127,10 +146,6 @@ export async function syncPublicDirectory(
 
   const syncState = await getDirectorySyncState();
 
-  // If not forced and not dirty, skip to preserve low API consumption
-  if (!force && !syncState.isDirty) {
-    return { updated: false, publishedCount: 0, reason: "not_dirty" };
-  }
   const seqAtStart = syncState.dirtySeq ?? 0;
 
   // Fetch only active creators with confirmed media content
@@ -138,6 +153,12 @@ export async function syncPublicDirectory(
     status: "active",
     hasContentOnly: true,
   });
+  const newKey = newCreatorsKey(creators);
+
+  // Skip (no Telegram calls) unless forced, changed, or a 🆕 flag has just expired.
+  if (!force && !syncState.isDirty && (syncState.lastNewKey ?? "") === newKey) {
+    return { updated: false, publishedCount: 0, reason: "not_dirty" };
+  }
 
   const chunks = buildDirectorySections(creators, config.BOT_USERNAME);
   // Hash the creator-driven content, not the "Updated: <today>" header, so a
@@ -148,7 +169,7 @@ export async function syncPublicDirectory(
 
   if (!force && syncState.lastContentHash === contentHash) {
     // Content is identical, clear dirty flag and skip editing
-    await clearDirectoryDirty(contentHash, syncState.publishedMessageIds, seqAtStart);
+    await clearDirectoryDirty(contentHash, syncState.publishedMessageIds, seqAtStart, newKey);
     return { updated: false, publishedCount: 0, reason: "content_identical" };
   }
 
@@ -201,7 +222,7 @@ export async function syncPublicDirectory(
       }
     }
 
-    await clearDirectoryDirty(contentHash, publishedIds, seqAtStart);
+    await clearDirectoryDirty(contentHash, publishedIds, seqAtStart, newKey);
 
     await logAuditEvent(
       "directory_synced",

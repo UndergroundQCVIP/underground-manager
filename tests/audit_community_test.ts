@@ -313,3 +313,34 @@ Deno.test("AUDIT CREATORS — only administrators drive the public directory; un
 Deno.test("AUDIT MARKDOWN — user text cannot break message formatting", () => {
   assertEquals(escapeMd("a_b*c`d[e]"), "a\\_b\\*c\\`d\\[e\\]");
 });
+
+Deno.test("AUDIT DIRECTORY — recently added creators are flagged 🆕 in the full list, and the flag expires", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    const api = new FlakyApi();
+    await makeCreators(["Alpha"]);
+    await syncPublicDirectory(api);
+    await makeCreators(["Beta"]);
+    await syncPublicDirectory(api);
+
+    // the whole list is re-published (edited in place), with both names present
+    const text = String(api.editedMessages.at(-1)?.text ?? api.sentMessages.at(-1)?.text);
+    assert(text.includes("*Alpha*") && text.includes("*Beta*"));
+    assert(text.includes("🆕 *Beta*"), "new creator is flagged");
+
+    // once the 7-day window has passed the flag disappears on the next sync
+    const k = await getKv();
+    for await (const e of k.list({ prefix: ["creators"] })) {
+      const c = e.value as { firstContentDetectedAt?: string };
+      if (c?.firstContentDetectedAt) {
+        await k.set(e.key, { ...c, firstContentDetectedAt: new Date(Date.now() - 8 * 86400000).toISOString() });
+      }
+    }
+    const res = await syncPublicDirectory(api); // not dirty, but the 🆕 set changed
+    assertEquals(res.updated, true);
+    assert(!String(api.editedMessages.at(-1)!.text).includes("🆕"));
+    assertEquals((await syncPublicDirectory(api)).reason, "not_dirty");
+  } finally {
+    await kv.close();
+  }
+});
