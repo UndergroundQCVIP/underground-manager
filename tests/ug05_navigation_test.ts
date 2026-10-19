@@ -419,3 +419,40 @@ Deno.test("UG05 NAV — Admin menus expose Contributions, Settings → Membershi
     await kv.close();
   }
 });
+
+Deno.test("UG05 ROSTER — Admin sees active members, their source and days left; non-admins cannot", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    const { upsertMember } = await import("../src/db/members.ts");
+    await upsertMember({ id: 8101, username: "alice", first_name: "Alice" });
+    await pay(8101, "regular", "ch_r1", { expiresInDays: 10 });
+    await upsertMember({ id: 8102, first_name: "Bob" });
+    const api = new MockMigrationApi();
+    const c = await seedCreator({ name: "Aria", topicId: 101 });
+    assert((await startContribution(8102, c.id)).ok);
+    await addContributionItem(8102, { messageId: 1, kind: "photo" });
+    await finishContribution(api, 8102);
+    const { listContributions } = await import("../src/db/contributions.ts");
+    await approveContribution(api, (await listContributions("pending"))[0].id, ADMIN, { type: "reward", scopes: ["retro"], days: 3 });
+    await pay(8103, "regular", "ch_gone", { expiresInDays: 5 });
+    const { grantComplimentaryAccess } = await import("../src/complimentary/service.ts");
+    await grantComplimentaryAccess({ adminId: ADMIN, userId: 8104, durationDays: 7, reason: "partnership", level: "vip_only" });
+
+    const { bot, calls } = makeBot();
+    await bot.handleUpdate(cb(ADMIN, "admin:roster:0") as never);
+    const t = String((calls.filter((x) => x.method === "editMessageText").at(-1)!.payload as { text: string }).text);
+    assertStringIncludes(t, "MEMBRES ACTIFS* (4)");
+    assertStringIncludes(t, "@alice");
+    assertStringIncludes(t, "Étoiles · Regular : *10 j*");
+    assertStringIncludes(t, "Bob");
+    assertStringIncludes(t, "Contribution · Retro : *3 j*");
+    assertStringIncludes(t, "Gracieux : *7 j*");
+    assert(t.indexOf("*3 j*") < t.indexOf("*10 j*")); // soonest expiry first
+
+    calls.length = 0;
+    await bot.handleUpdate(cb(5555, "admin:roster:0") as never);
+    assertEquals(calls.filter((x) => x.method === "editMessageText").length, 0);
+  } finally {
+    await kv.close();
+  }
+});

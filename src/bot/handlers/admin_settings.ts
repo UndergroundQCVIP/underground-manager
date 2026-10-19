@@ -13,6 +13,9 @@ import { MODE_LABELS, setMembershipMode } from "../../membership/mode.ts";
 import { MembershipMode } from "../../types.ts";
 import { LOBBY_SETUP_INSTRUCTIONS, syncNavigationMessages, SyncOutcome } from "../../navigation/service.ts";
 import { getNavigationState } from "../../db/navigation.ts";
+import { buildRoster } from "../../membership/roster.ts";
+import { formatTorontoDate } from "../../util/time.ts";
+import { escapeMd } from "../../util/markdown.ts";
 
 export const adminSettingsComposer = new Composer();
 adminSettingsComposer.use(adminRouteGuard({ callbackPrefixes: ["admin:"], commands: [] }));
@@ -149,4 +152,31 @@ adminSettingsComposer.callbackQuery(/^admin:nav_sync:(welcome|directory|all)$/, 
     `• Boutons du répertoire : ${OUTCOME[res.directory.outcome]}${res.directory.error ? ` — ${res.directory.error}` : ""}`,
     { parse_mode: "Markdown", reply_markup: new InlineKeyboard().text("⬅️ Navigation publique", "admin:nav") }
   );
+});
+
+// ---- Active member roster: who has access and for how many more days --------------------------------
+
+const ROSTER_PAGE = 10;
+
+adminSettingsComposer.callbackQuery(/^admin:roster:(\d+)$/, async (ctx) => {
+  const page = Number(ctx.match[1]);
+  const roster = await buildRoster();
+  const slice = roster.slice(page * ROSTER_PAGE, page * ROSTER_PAGE + ROSTER_PAGE);
+  const pages = Math.max(1, Math.ceil(roster.length / ROSTER_PAGE));
+
+  let text = `👥 *MEMBRES ACTIFS* (${roster.length}) — page ${page + 1}/${pages}\n_Triés par expiration la plus proche._\n\n`;
+  if (roster.length === 0) text += "_Aucun membre n'a d'accès valide pour le moment._";
+  for (const r of slice) {
+    text += `• *${escapeMd(r.label)}* — \`${r.userId}\`\n`;
+    for (const l of r.lines) {
+      text += `   ${l.text} : *${l.daysLeft} j* (jusqu'au ${formatTorontoDate(l.expiresAt, { month: "short", day: "numeric", year: "numeric" })})\n`;
+    }
+  }
+
+  const kb = new InlineKeyboard();
+  if (page > 0) kb.text("◀️ Préc.", `admin:roster:${page - 1}`);
+  if ((page + 1) * ROSTER_PAGE < roster.length) kb.text("Suiv. ▶️", `admin:roster:${page + 1}`);
+  kb.row().text("👤 Tous les utilisateurs du robot", "admin:members_list").row().text("⬅️ Menu administrateur", "admin:menu");
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText(text.slice(0, 3900), { parse_mode: "Markdown", reply_markup: kb });
 });

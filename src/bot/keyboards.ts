@@ -104,7 +104,7 @@ export function supportKeyboard(): InlineKeyboard {
 
 export function adminMenuKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
-    .text("👥 Membres", "admin:members_list")
+    .text("👥 Membres", "admin:roster:0")
     .text("🎁 Accès gracieux", "admin:grant_wizard")
     .row()
     .text("💎 Forfaits", "admin:plans")
