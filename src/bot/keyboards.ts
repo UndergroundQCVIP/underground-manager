@@ -1,34 +1,48 @@
 /**
- * Underground Manager — Inline Keyboards
+ * LA CONFRÉRIE — Inline Keyboards
  */
 
 import { InlineKeyboard } from "grammy";
-import { getConfig } from "../config.ts";
 import {
   COMPLIMENTARY_REASONS,
   ComplimentaryAccessLevel,
   ComplimentaryReason,
+  MembershipPlanId,
   SpaceId,
 } from "../types.ts";
+import { getPlan } from "../plans/plans.ts";
 import { getSpaceTitle } from "../access/spaces.ts";
 
-export function mainMenuKeyboard(isMember: boolean, isAdmin: boolean): InlineKeyboard {
-  const config = getConfig();
+export function mainMenuKeyboard(
+  isMember: boolean,
+  isAdmin: boolean,
+  plan: MembershipPlanId | "none" = "none"
+): InlineKeyboard {
   const kb = new InlineKeyboard();
 
-  if (!isMember) {
-    kb.text(`🌟 Join Underground (${config.STARS_PRICE_AMOUNT} Stars)`, "member:join").row();
-  }
-
-  kb.text("📋 My Membership", "member:status")
-    .text("🔓 Access My Channels", "member:channels")
+  kb.text("💎 Membership Plans", "member:plans")
+    .text("📋 My Membership", "member:status")
     .row();
 
-  kb.text("🎯 Wanted List", "wanted:menu")
+  if (plan === "regular" && getPlan("retro_plus").enabled) {
+    kb.text("⬆️ Upgrade to Retro Plus", "member:upgrade").row();
+  }
+
+  kb.text("📚 Creator Directory", "dir:all")
+    .text("🎯 Wanted List", "wanted:menu")
+    .row();
+
+  kb.text("➕ Contribute", "contrib:start").row();
+
+  kb.text("💬 General Chat", "member:general_chat")
     .text("🗳️ Monthly Vote", "vote:open")
     .row();
 
-  kb.text("💬 Help & Support", "member:support");
+  if (isMember) {
+    kb.text("🔓 Access My Channels", "member:channels").row();
+  }
+
+  kb.text("🆘 Support", "member:support");
 
   if (isAdmin) {
     kb.row().text("🛠️ Administration", "admin:menu");
@@ -37,12 +51,26 @@ export function mainMenuKeyboard(isMember: boolean, isAdmin: boolean): InlineKey
   return kb;
 }
 
+/** Plan picker. Buttons adapt to the member's current plan. */
+export function plansKeyboard(plan: MembershipPlanId | "none"): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  const regular = getPlan("regular");
+  const retro = getPlan("retro_plus");
+
+  if (plan === "none") {
+    if (regular.enabled) kb.text(`🌟 Regular — ${regular.priceStars} Stars`, "member:pay:regular").row();
+    if (retro.enabled) kb.text(`🎞️ Retro Plus — ${retro.priceStars} Stars`, "member:pay:retro_plus").row();
+  } else if (plan === "regular") {
+    if (retro.enabled) kb.text(`⬆️ Upgrade to Retro Plus — ${retro.priceStars} Stars`, "member:upgrade").row();
+  } else {
+    kb.text("⬇️ Switch to Regular at renewal", "member:downgrade").row();
+  }
+  kb.text("⬅️ Main Menu", "member:home");
+  return kb;
+}
+
 export function subscribeKeyboard(): InlineKeyboard {
-  const config = getConfig();
-  return new InlineKeyboard()
-    .text(`🌟 Pay ${config.STARS_PRICE_AMOUNT} Stars (30 Days)`, "member:pay_stars")
-    .row()
-    .text("⬅️ Main Menu", "member:home");
+  return plansKeyboard("none");
 }
 
 export function spacesKeyboard(
@@ -58,7 +86,7 @@ export function spacesKeyboard(
 
 export function supportKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
-    .text("🌟 Join Underground", "member:join")
+    .text("💎 Membership Plans", "member:plans")
     .row()
     .text("⬅️ Main Menu", "member:home");
 }
@@ -68,13 +96,20 @@ export function adminMenuKeyboard(): InlineKeyboard {
     .text("👥 Members", "admin:members_list")
     .text("🎁 Complimentary", "admin:grant_wizard")
     .row()
-    .text("👩‍🎤 Creator Directory", "admin:creators_menu")
+    .text("💎 Membership Plans", "admin:plans")
+    .text("👩‍🎤 Creators", "admin:creators_menu")
+    .row()
+    .text("🎞️ Move to Retro", "mig:pick")
+    .text("🚚 Migration Status", "mig:list")
+    .row()
+    .text("📚 Directory", "admin:sync_dir_menu")
+    .text("💰 Treasury", "admin:treasury_menu")
+    .row()
     .text("🎯 Wanted List", "admin:wanted_menu")
-    .row()
     .text("🗳️ Monthly Voting", "admin:voting_menu")
-    .text("💰 Treasury & Budget", "admin:treasury_menu")
     .row()
-    .text("⚙️ System Status", "admin:status")
+    .text("📥 Contributions", "cadm:queue")
+    .text("⚙️ Settings", "admin:status")
     .text("⬅️ User Menu", "member:home");
 }
 
@@ -125,6 +160,11 @@ export function grantSpacesKeyboard(
     .text(
       "Full Access (VIP + Chat + Wanted List)",
       `admin:grant_spc:${userId}:${duration}:${reason}:full`
+    )
+    .row()
+    .text(
+      "Full Access + Retro Vault",
+      `admin:grant_spc:${userId}:${duration}:${reason}:full_retro`
     )
     .row()
     .text("❌ Cancel", "admin:menu");

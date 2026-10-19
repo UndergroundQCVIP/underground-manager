@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Access Synchronization & Removal Logic
+ * LA CONFRÉRIE — Access Synchronization & Removal Logic
  */
 
 import { SPACE_IDS, SpaceId } from "../types.ts";
@@ -21,6 +21,7 @@ export interface SyncApiLike {
     status: string;
     can_invite_users?: boolean;
     can_restrict_members?: boolean;
+    can_manage_topics?: boolean;
   }>;
   banChatMember(
     chatId: number | string,
@@ -60,6 +61,10 @@ export async function checkBotPermissions(
       }
       if (member.can_restrict_members === false) {
         missing.push("can_restrict_members");
+      }
+      // The Retro forum is also managed (topics created by the migration service).
+      if (spaceId === "retro_collections" && member.can_manage_topics === false) {
+        missing.push("can_manage_topics");
       }
     }
 

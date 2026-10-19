@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Expense Management & Journal Automated Tests
+ * LA CONFRÉRIE — Expense Management & Journal Automated Tests
  * Phase UG-03: Treasury, Expenses & Final Automation
  */
 

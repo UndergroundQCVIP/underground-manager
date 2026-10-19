@@ -1,7 +1,8 @@
 /**
- * Underground Manager — Chat Join Request Handler
+ * LA CONFRÉRIE — Chat Join Request Handler
  */
 
+import { getClubName } from "../../config.ts";
 import { Composer, InlineKeyboard } from "grammy";
 import { processChatJoinRequest } from "../../access/join_requests.ts";
 import { getSpaceTitle } from "../../access/spaces.ts";
@@ -34,7 +35,7 @@ joinReqComposer.on("chat_join_request", async (ctx) => {
           {
             parse_mode: "Markdown",
             reply_markup: new InlineKeyboard().text(
-              "🌟 Join Underground VIP",
+              "🌟 Join " + getClubName(),
               "member:join"
             ),
           }

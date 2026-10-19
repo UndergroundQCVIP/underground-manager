@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Creator & Forum Topic Service
+ * LA CONFRÉRIE — Creator & Forum Topic Service
  * Orchestrates topic detection, media upload tracking, and wanted list linking.
  */
 
@@ -20,7 +20,18 @@ import {
   updateWantedStatus,
 } from "../db/wanted.ts";
 import { logAuditEvent } from "../db/audit.ts";
-import { Creator } from "../types.ts";
+import { recordMediaIndex } from "../db/media_index.ts";
+import { Creator, MediaIndexEntry } from "../types.ts";
+
+/** Which collection a managed creator forum belongs to (null = unmanaged chat). */
+export function collectionForChat(chatId: number): "regular" | "retro" | null {
+  const config = getConfig();
+  if (chatId === config.VIP_COLLECTIONS_CHAT_ID) return "regular";
+  if (config.TELEGRAM_RETRO_FORUM_CHAT_ID && chatId === config.TELEGRAM_RETRO_FORUM_CHAT_ID) {
+    return "retro";
+  }
+  return null;
+}
 
 // System / General topics that must never be registered as creators
 const EXCLUDED_TOPIC_NAMES = new Set([
@@ -39,10 +50,9 @@ export async function handleForumTopicCreated(
   topicId: number,
   rawName: string
 ): Promise<Creator | null> {
-  const config = getConfig();
-
-  // Only manage topics in TOKEBEC VIP COLLECTIONS
-  if (chatId !== config.VIP_COLLECTIONS_CHAT_ID) {
+  // Only manage topics in the Regular or Retro creator forums
+  const collection = collectionForChat(chatId);
+  if (!collection) {
     return null;
   }
 
@@ -63,6 +73,14 @@ export async function handleForumTopicCreated(
   // Check if creator with same normalized name exists
   let creatorId: string = crypto.randomUUID();
   const existingByName = await getCreatorByName(name);
+
+  // UG-04: ONE unified directory. A same-named topic appearing in the Retro
+  // forum (e.g. created by the migration service, or pre-created by an admin
+  // before a move) must never create a duplicate or overwrite the existing
+  // creator record. Only the migration finalization step relocates a creator.
+  if (collection === "retro" && existingByName) {
+    return existingByName;
+  }
   if (existingByName) {
     creatorId = existingByName.id;
   }
@@ -77,6 +95,10 @@ export async function handleForumTopicCreated(
     topicCreatedAt: now,
     hasContent: false,
     status: "active",
+    collection,
+    rightsStatus: "unverified",
+    // Tracked from the moment the topic was created, so uploads are all indexed.
+    inventoryStatus: "complete",
     createdAt: now,
     updatedAt: now,
   };
@@ -124,8 +146,7 @@ export async function handleForumTopicEdited(
   topicId: number,
   rawNewName: string
 ): Promise<Creator | null> {
-  const config = getConfig();
-  if (chatId !== config.VIP_COLLECTIONS_CHAT_ID) {
+  if (!collectionForChat(chatId)) {
     return null;
   }
 
@@ -151,15 +172,21 @@ export async function handleForumTopicEdited(
   return updated;
 }
 
+export interface UploadedMediaInfo {
+  messageId: number;
+  kind: "photo" | "video";
+  mediaGroupId?: string;
+  hasCaption: boolean;
+}
+
 export async function handleMediaUpload(
   chatId: number,
   topicId: number,
-  senderUserId: number
+  senderUserId: number,
+  media?: UploadedMediaInfo
 ): Promise<Creator | null> {
-  const config = getConfig();
-
-  // Only monitor media uploads inside TOKEBEC VIP COLLECTIONS
-  if (chatId !== config.VIP_COLLECTIONS_CHAT_ID) {
+  // Only monitor media uploads inside the Regular and Retro creator forums
+  if (!collectionForChat(chatId)) {
     return null;
   }
 
@@ -179,6 +206,23 @@ export async function handleMediaUpload(
 
   const wasEmpty = !creator.hasContent;
   const updated = await recordCreatorMediaUpload(chatId, topicId);
+
+  // UG-04: keep the minimum necessary message inventory (IDs only) so this
+  // collection can be copied between forums later.
+  if (updated && media) {
+    const entry: MediaIndexEntry = {
+      creatorId: updated.id,
+      chatId,
+      topicId,
+      messageId: media.messageId,
+      kind: media.kind,
+      mediaGroupId: media.mediaGroupId,
+      hasCaption: media.hasCaption,
+      source: "live",
+      recordedAt: new Date().toISOString(),
+    };
+    await recordMediaIndex(entry);
+  }
 
   if (updated) {
     await logAuditEvent(
@@ -221,6 +265,9 @@ export async function registerOrRepairTopic(
       topicCreatedAt: now,
       hasContent: true, // Manually repaired by admin
       status: "active",
+      collection: collectionForChat(chatId) ?? "regular",
+      rightsStatus: "unverified",
+      inventoryStatus: "partial", // Pre-existing media is not indexed
       createdAt: now,
       updatedAt: now,
     };

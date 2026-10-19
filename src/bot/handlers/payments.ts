@@ -1,10 +1,11 @@
 /**
- * Underground Manager — Telegram Stars Payment Event Handlers
+ * LA CONFRÉRIE — Telegram Stars Payment Event Handlers
  */
 
 import { Composer, InlineKeyboard } from "grammy";
 import { TelegramStarsProvider } from "../../payments/stars.ts";
 import { messages } from "../messages.ts";
+import { applyPlanChangeAfterPayment } from "../../plans/changes.ts";
 
 export const paymentsComposer = new Composer();
 const starsProvider = new TelegramStarsProvider();
@@ -80,8 +81,26 @@ paymentsComposer.on("message:successful_payment", async (ctx) => {
       return;
     }
 
+    const planId = result.payment?.planId ?? "regular";
+
+    // Plan upgrade: the new payment is VERIFIED at this point, so it is now safe
+    // to stop the old plan's renewal — but only if the user authorized it.
+    let upgradeNote = "";
+    try {
+      const change = await applyPlanChangeAfterPayment(ctx.api, userId, planId);
+      if (change?.cancelOutcome === "cancelled") {
+        upgradeNote =
+          `\n\n🔁 Your Regular subscription will no longer renew; the access you already paid for remains until it ends.`;
+      } else if (change?.cancelOutcome === "failed") {
+        upgradeNote =
+          `\n\n⚠️ We could not cancel your Regular renewal automatically. To avoid a double charge, cancel it in Telegram Settings > Stars.`;
+      }
+    } catch (err) {
+      console.error("Plan change post-processing failed:", err);
+    }
+
     // Success! Congratulate member and show channels button
-    await ctx.reply(messages.paymentSuccess(result.entitlement.expiresAt), {
+    await ctx.reply(messages.paymentSuccess(result.entitlement.expiresAt, planId) + upgradeNote, {
       parse_mode: "Markdown",
       reply_markup: new InlineKeyboard()
         .text("🔓 Access My Channels", "member:channels")

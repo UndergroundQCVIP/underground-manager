@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Cached Invite Links
+ * LA CONFRÉRIE — Cached Invite Links
  */
 
 import { getKv } from "./kv.ts";

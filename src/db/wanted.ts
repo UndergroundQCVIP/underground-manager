@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Wanted List Repository
+ * LA CONFRÉRIE — Wanted List Repository
  * Manages creator acquisition nominations, supporter counts, and statuses.
  */
 

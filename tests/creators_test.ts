@@ -1,5 +1,5 @@
 /**
- * Underground Manager — UG-02 Pre-Publish Test Suite: CREATORS & FORUM TOPICS
+ * LA CONFRÉRIE — UG-02 Pre-Publish Test Suite: CREATORS & FORUM TOPICS
  */
 
 import { assertEquals, assertNotEquals } from "@std/assert";

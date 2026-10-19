@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Treasury, Stars & Financial Journal Repository
+ * LA CONFRÉRIE — Treasury, Stars & Financial Journal Repository
  * Phase UG-03: Treasury, Expenses & Final Automation
  */
 

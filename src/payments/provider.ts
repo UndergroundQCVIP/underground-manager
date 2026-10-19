@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Generic Payment Provider Interface
+ * LA CONFRÉRIE — Generic Payment Provider Interface
  * Supports V1 Telegram Stars and prepares cleanly for future verified providers.
  */
 

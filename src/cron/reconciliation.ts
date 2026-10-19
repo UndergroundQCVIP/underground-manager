@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Scheduled Reconciliation & Expiry Processing
+ * LA CONFRÉRIE — Scheduled Reconciliation & Expiry Processing
  */
 
 import { Bot } from "grammy";
@@ -101,6 +101,17 @@ export function registerCronJobs(bot: Bot): void {
         }
       });
       console.log(`[Cron] Daily synchronization job registered for schedule '${config.DIRECTORY_UPDATE_CRON}'.`);
+
+      // UG-04: continue approved, running Regular → Retro migrations in small, rate-limited steps.
+      Deno.cron("LaConfrerie Migration Worker", "*/5 * * * *", async () => {
+        try {
+          const { runAllCopyingMigrations } = await import("../migration/service.ts");
+          await runAllCopyingMigrations(bot.api);
+        } catch (err) {
+          console.error("[Cron Fatal] Error running migration worker:", err);
+        }
+      });
+      console.log("[Cron] Migration worker registered (every 5 minutes; only runs jobs an administrator started).");
     } else {
       console.warn("[Cron] Deno.cron is not available in this runtime environment.");
     }

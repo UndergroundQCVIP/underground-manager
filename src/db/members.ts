@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Member Repository
+ * LA CONFRÉRIE — Member Repository
  */
 
 import { getKv } from "./kv.ts";

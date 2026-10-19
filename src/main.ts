@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Main Application Entry Point
+ * LA CONFRÉRIE — Main Application Entry Point
  * Supports Deno Deploy (webhook + Deno.cron) and local development (polling).
  */
 
@@ -13,11 +13,15 @@ async function main() {
   const config = loadConfig();
 
   console.log("=========================================");
-  console.log("   UNDERGROUND MANAGER — PHASE UG-01    ");
+  console.log(`   ${config.CLUB_DISPLAY_NAME} — PHASE UG-04    `);
   console.log("=========================================");
   console.log(`Environment: ${config.DENO_ENV}`);
   console.log(`Bot Mode:    ${config.BOT_MODE}`);
-  console.log(`Stars Price: ${config.STARS_PRICE_AMOUNT} XTR / 30 days`);
+  console.log(`Regular:     ${config.STARS_PRICE_AMOUNT} XTR / 30 days`);
+  console.log(
+    `Retro Plus:  ${config.RETRO_PLUS_STARS_PRICE_AMOUNT > 0 ? `${config.RETRO_PLUS_STARS_PRICE_AMOUNT} XTR / 30 days` : "billing disabled (price not configured)"}`
+  );
+  console.log(`Retro forum: ${config.TELEGRAM_RETRO_FORUM_CHAT_ID ? "configured" : "NOT configured"}`);
 
   const errors = validateConfig(config);
   if (errors.length > 0) {
@@ -70,7 +74,7 @@ async function main() {
           JSON.stringify({
             status: "ok",
             app: "underground-manager",
-            phase: "UG-01",
+            phase: "UG-04",
             env: config.DENO_ENV,
             timestamp: new Date().toISOString(),
           }),

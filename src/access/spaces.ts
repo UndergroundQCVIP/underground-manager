@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Protected Telegram Spaces
+ * LA CONFRÉRIE — Protected Telegram Spaces
  */
 
 import { getConfig, getChatIdForSpace, getSpaceIdForChatId } from "../config.ts";

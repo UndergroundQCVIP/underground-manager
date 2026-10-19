@@ -1,9 +1,10 @@
 /**
- * Underground Manager — Administrator Handlers & Controls
+ * LA CONFRÉRIE — Administrator Handlers & Controls
  */
 
 import { Composer, InlineKeyboard } from "grammy";
-import { adminOnlyMiddleware } from "../middleware/auth.ts";
+import { getClubName } from "../../config.ts";
+import { adminRouteGuard } from "../middleware/auth.ts";
 import {
   adminMenuKeyboard,
   grantConfirmKeyboard,
@@ -37,12 +38,19 @@ import {
   ComplimentaryReason,
   SPACE_IDS,
 } from "../../types.ts";
-import { getSpaceTitle } from "../../access/spaces.ts";
+import { getChatId, getSpaceTitle } from "../../access/spaces.ts";
 
 export const adminComposer = new Composer();
 
-// Apply admin authentication to all routes in this composer
-adminComposer.use(adminOnlyMiddleware);
+// Apply admin authentication to administrator routes only, so ordinary members'
+// updates keep flowing to the Wanted List / Voting handlers registered after this composer.
+export const ADMIN_COMMANDS = [
+  "admin", "lookup", "grant", "register_creator",
+  "index_media", "attest_inventory", "retire_creator", "move_to_retro", "relink_creator",
+];
+adminComposer.use(
+  adminRouteGuard({ callbackPrefixes: ["admin:", "mig:"], commands: ADMIN_COMMANDS })
+);
 
 // Admin Main Menu
 adminComposer.command("admin", async (ctx) => {
@@ -451,8 +459,12 @@ adminComposer.callbackQuery("admin:status", async (ctx) => {
   let text = `⚙️ *SYSTEM STATUS & BOT PERMISSIONS*\n\n`;
 
   for (const spaceId of SPACE_IDS) {
-    const perm = await checkBotPermissions(ctx.api, spaceId);
     const title = getSpaceTitle(spaceId);
+    if (!getChatId(spaceId)) {
+      text += `⚪ *${title}:* not configured\n`;
+      continue;
+    }
+    const perm = await checkBotPermissions(ctx.api, spaceId);
     if (perm.ok) {
       text += `🟢 *${title}:* OK (Admin permissions verified)\n`;
     } else {
@@ -505,38 +517,170 @@ adminComposer.callbackQuery("admin:resync", async (ctx) => {
 
 // Creator Management Menu
 adminComposer.callbackQuery("admin:creators_menu", async (ctx) => {
-  const { listCreators } = await import("../../db/creators.ts");
+  const { listCreators, creatorCollection } = await import("../../db/creators.ts");
   const creators = await listCreators();
   const withContent = creators.filter((c) => c.hasContent).length;
+  const retro = creators.filter((c) => creatorCollection(c) === "retro").length;
 
-  let text =
-    `👩‍🎤 *CREATOR DIRECTORY MANAGEMENT*\n\n` +
-    `*Total Registered Creators:* ${creators.length}\n` +
-    `*Available in Directory (with media):* ${withContent}\n\n` +
-    `*Recent Creators:*\n`;
-
-  if (creators.length === 0) {
-    text += `_No creators registered yet. Topics created in TOKEBEC VIP COLLECTIONS will appear here._\n\n`;
-  } else {
-    for (const c of creators.slice(0, 10)) {
-      const statusIcon = c.status === "archived" ? "📦" : (c.hasContent ? "🟢" : "⚪");
-      text += `${statusIcon} *${c.name}* (Thread: \`${c.topicId}\`)\n`;
-    }
-    text += "\n";
-  }
-
-  text += `💡 _To manually pair an existing topic:_ \`/register_creator <thread_id> <name>\``;
+  const text =
+    `👩‍🎤 *CREATORS — ${getClubName()}*\n\n` +
+    `*Total Registered Creators:* ${creators.length} (Regular ${creators.length - retro} · Retro ${retro})\n` +
+    `*Listed in Directory (with media):* ${withContent}\n\n` +
+    `💡 _Pair an existing topic:_ \`/register_creator <thread_id> <name>\`\n` +
+    `💡 _Retire/unretire:_ \`/retire_creator <name> <YYYY-MM-DD|clear>\``;
 
   const kb = new InlineKeyboard()
-    .text("🔄 Sync Public Directory Now", "admin:sync_dir")
+    .text("👀 View Creators", "admin:creators_list:0")
+    .text("📝 Register Creator", "admin:creator_register_help")
+    .row()
+    .text("✏️ Edit Creator", "admin:creator_edit_help")
+    .text("🎞️ Move to Retro", "mig:pick")
+    .row()
+    .text("🚚 Migration Status", "mig:list")
+    .text("🛠️ Repair Directory", "admin:repair_dir")
     .row()
     .text("⬅️ Admin Menu", "admin:menu");
 
   await ctx.answerCallbackQuery();
-  await ctx.editMessageText(text, {
-    parse_mode: "Markdown",
-    reply_markup: kb,
-  });
+  await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: kb });
+});
+
+// View Creators (paged, with collection labels)
+adminComposer.callbackQuery(/^admin:creators_list:(\d+)$/, async (ctx) => {
+  const { listCreators, creatorCollection } = await import("../../db/creators.ts");
+  const page = Number(ctx.match[1]);
+  const pageSize = 8;
+  const creators = await listCreators();
+  const slice = creators.slice(page * pageSize, page * pageSize + pageSize);
+
+  let text = `👀 *CREATORS* (page ${page + 1}/${Math.max(1, Math.ceil(creators.length / pageSize))})\n\n`;
+  const kb = new InlineKeyboard();
+  if (slice.length === 0) text += "_No creators registered yet._\n";
+  for (const c of slice) {
+    const icon = c.status === "archived" ? "📦" : c.hasContent ? "🟢" : "⚪";
+    const label = creatorCollection(c) === "retro" ? "Retro" : "Regular";
+    text += `${icon} *${c.name}* — ${label}\n`;
+    kb.text(`${c.name} (${label})`, `admin:creator_view:${c.id}`).row();
+  }
+  if (page > 0) kb.text("◀️ Prev", `admin:creators_list:${page - 1}`);
+  if ((page + 1) * pageSize < creators.length) kb.text("Next ▶️", `admin:creators_list:${page + 1}`);
+  kb.row().text("⬅️ Creators", "admin:creators_menu");
+
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: kb });
+});
+
+adminComposer.callbackQuery(/^admin:creator_view:([a-zA-Z0-9-]+)$/, async (ctx) => {
+  const { getCreator, creatorCollection } = await import("../../db/creators.ts");
+  const { listMediaIndex } = await import("../../db/media_index.ts");
+  const { getActiveMigrationForCreator } = await import("../../db/migrations.ts");
+  const creator = await getCreator(ctx.match[1]);
+  await ctx.answerCallbackQuery();
+  if (!creator) {
+    await ctx.editMessageText("⚠️ Creator not found.", {
+      reply_markup: new InlineKeyboard().text("⬅️ Creators", "admin:creators_menu"),
+    });
+    return;
+  }
+  const collection = creatorCollection(creator);
+  const indexed = (await listMediaIndex(creator.id, { chatId: creator.chatId, topicId: creator.topicId })).length;
+  const job = await getActiveMigrationForCreator(creator.id);
+  const text =
+    `👩‍🎤 *${creator.name}*\n\n` +
+    `*Collection:* ${collection === "retro" ? "Retro" : "Regular"}\n` +
+    `*Forum / Topic:* \`${creator.chatId}\` / \`${creator.topicId}\`\n` +
+    `*Last content update:* ${creator.lastContentUpdatedAt ? new Date(creator.lastContentUpdatedAt).toLocaleDateString("en-US") : "—"}\n` +
+    `*Publication rights:* ${creator.rightsStatus === "verified" ? "✅ verified" : "⚠️ unverified"}\n` +
+    `*Indexed media messages:* ${indexed} (${creator.inventoryStatus === "complete" ? "inventory complete" : "inventory NOT confirmed complete"})\n` +
+    (creator.retiredAt ? `*Retirement:* ${new Date(creator.retiredAt).toLocaleDateString("en-US")}\n` : "") +
+    (job ? `*Migration:* ${job.status.replace(/_/g, " ")}\n` : "");
+  const kb = new InlineKeyboard();
+  if (collection === "regular") kb.text("🎞️ Move to Retro", `mig:sel:${creator.id}`).row();
+  if (job) kb.text("🚚 Open Migration", `mig:view:${job.id}`).row();
+  kb.text("⬅️ Creators", "admin:creators_list:0");
+  await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: kb });
+});
+
+adminComposer.callbackQuery("admin:creator_register_help", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText(
+    `📝 *REGISTER CREATOR*\n\n` +
+    `New topics created in the Regular or Retro forum register automatically.\n` +
+    `To pair an existing topic in the Regular forum:\n\`/register_creator <thread_id> <name>\``,
+    { parse_mode: "Markdown", reply_markup: new InlineKeyboard().text("⬅️ Creators", "admin:creators_menu") }
+  );
+});
+
+adminComposer.callbackQuery("admin:creator_edit_help", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText(
+    `✏️ *EDIT CREATOR*\n\n` +
+    `• *Rename:* rename the forum topic in Telegram — the bot follows it.\n` +
+    `• *Retire:* \`/retire_creator <name> <YYYY-MM-DD>\` (or \`clear\`)\n` +
+    `• *Index older media:* \`/index_media <name> <topic message links…>\`\n` +
+    `• *Attest inventory complete:* \`/attest_inventory <name>\`\n\n` +
+    `The internal creator ID never changes.`,
+    { parse_mode: "Markdown", reply_markup: new InlineKeyboard().text("⬅️ Creators", "admin:creators_menu") }
+  );
+});
+
+adminComposer.callbackQuery("admin:repair_dir", async (ctx) => {
+  const { repairDirectory } = await import("../../creators/admin.ts");
+  const { syncPublicDirectory } = await import("../../directory/sync.ts");
+  await ctx.answerCallbackQuery({ text: "Repairing directory..." });
+  const report = await repairDirectory();
+  const sync = await syncPublicDirectory(ctx.api, true);
+  await ctx.editMessageText(
+    `🛠️ *DIRECTORY REPAIRED*\n\n` +
+    `• Creators checked: ${report.checked}\n` +
+    `• Lookup indexes repaired: ${report.indexesRepaired}\n` +
+    `• Duplicate names: ${report.duplicateNames.length ? report.duplicateNames.join(", ") : "none"}\n` +
+    `• Public directory: ${sync.updated ? `republished (${sync.publishedCount} message(s))` : sync.reason ?? sync.error ?? "unchanged"}`,
+    { parse_mode: "Markdown", reply_markup: new InlineKeyboard().text("⬅️ Creators", "admin:creators_menu") }
+  );
+});
+
+// Directory menu
+adminComposer.callbackQuery("admin:sync_dir_menu", async (ctx) => {
+  const { getDirectorySyncState } = await import("../../db/directory.ts");
+  const { listCreators, creatorCollection } = await import("../../db/creators.ts");
+  const state = await getDirectorySyncState();
+  const listed = await listCreators({ status: "active", hasContentOnly: true });
+  const retro = listed.filter((c) => creatorCollection(c) === "retro").length;
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText(
+    `📚 *DIRECTORY*\n\n` +
+    `• Listed creators: ${listed.length} (Regular ${listed.length - retro} · Retro ${retro})\n` +
+    `• Last sync: ${state.lastSyncAt ? new Date(state.lastSyncAt).toLocaleString() : "never"}\n` +
+    `• Pending changes: ${state.isDirty ? "yes" : "no"}`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: new InlineKeyboard()
+        .text("🔄 Sync Public Directory Now", "admin:sync_dir")
+        .row()
+        .text("🛠️ Repair Directory", "admin:repair_dir")
+        .row()
+        .text("⬅️ Admin Menu", "admin:menu"),
+    }
+  );
+});
+
+// Membership Plans (admin overview; prices are configured via environment, never hardcoded)
+adminComposer.callbackQuery("admin:plans", async (ctx) => {
+  const { getPlan } = await import("../../plans/plans.ts");
+  const { computeTierRevenue, formatTierRevenueLines } = await import("../../treasury/tiers.ts");
+  const regular = getPlan("regular");
+  const retro = getPlan("retro_plus");
+  const tiers = await computeTierRevenue();
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText(
+    `💎 *MEMBERSHIP PLANS*\n\n` +
+    `*Regular:* ${regular.priceStars} Stars / 30 days — ${regular.enabled ? "🟢 on sale" : "🔴 disabled"}\n` +
+    `*Retro Plus:* ${retro.priceStars > 0 ? `${retro.priceStars} Stars / 30 days` : "price not configured"} — ${retro.enabled ? "🟢 on sale" : "🔴 billing disabled"}\n\n` +
+    `*Revenue by tier (this month):*\n${formatTierRevenueLines(tiers)}\n` +
+    `_Prices are set with STARS_PRICE_AMOUNT and RETRO_PLUS_STARS_PRICE_AMOUNT. Retro Plus stays disabled while its price is 0 or the Retro forum is unset._`,
+    { parse_mode: "Markdown", reply_markup: new InlineKeyboard().text("⬅️ Admin Menu", "admin:menu") }
+  );
 });
 
 // Trigger Public Directory Sync

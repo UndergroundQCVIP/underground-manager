@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Currency Conversion & Exchange Rate Service
+ * LA CONFRÉRIE — Currency Conversion & Exchange Rate Service
  * Phase UG-03: Treasury, Expenses & Final Automation
  */
 

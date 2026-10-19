@@ -1,5 +1,5 @@
 /**
- * Underground Manager — UG-02 Pre-Publish Test Suite: ACQUISITION WORKFLOW
+ * LA CONFRÉRIE — UG-02 Pre-Publish Test Suite: ACQUISITION WORKFLOW
  */
 
 import { assertEquals, assertNotEquals } from "@std/assert";

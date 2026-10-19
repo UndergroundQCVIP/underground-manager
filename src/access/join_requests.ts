@@ -1,7 +1,8 @@
 /**
- * Underground Manager — Chat Join Request Verification & Processing
+ * LA CONFRÉRIE — Chat Join Request Verification & Processing
  */
 
+import { getClubName } from "../config.ts";
 import { SpaceId } from "../types.ts";
 import { getSpaceFromChatId } from "./spaces.ts";
 import { hasAccessToSpace } from "../db/entitlements.ts";
@@ -39,7 +40,7 @@ export async function processChatJoinRequest(
       approved: false,
       spaceId: null,
       userId,
-      error: `Chat ID ${chatId} is not a managed Underground space.`,
+      error: `Chat ID ${chatId} is not a managed ${getClubName()} space.`,
     };
   }
 

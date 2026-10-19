@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Audit Event Logging
+ * LA CONFRÉRIE — Audit Event Logging
  */
 
 import { getKv } from "./kv.ts";

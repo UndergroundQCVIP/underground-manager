@@ -1,8 +1,10 @@
-# UNDERGROUND MANAGER — Complete Platform: UG-01, UG-02 & UG-03
+# LA CONFRÉRIE — Complete Platform: UG-01 → UG-04
+
+> **Rebrand note (UG-04):** the club, formerly "Underground", is now **LA CONFRÉRIE** in every user-facing string (`CLUB_DISPLAY_NAME`). Internal identifiers, KV keys, cron job names, the repository name and the live BotFather username are intentionally unchanged. See [§14](#14-ug-04--la-confrérie-retro-vault-membership-tiers--migration).
 
 A simple, secure, and reliable Telegram-native membership, creator directory, community voting, and treasury management bot built with TypeScript, [grammY](https://grammy.dev/), Deno 2, Deno KV, and Deno Cron for Deno Deploy.
 
-Underground Manager automatically manages recurring Telegram Stars subscriptions, join request approvals for private spaces, automated member removals upon subscription expiration, administrator-granted complimentary memberships, public creator directory synchronization from private forum topics, member-governed acquisition voting, multi-currency treasury tracking with 21-day Stars holding periods, and subscriber-funded acquisition budgets.
+LA CONFRÉRIE's bot automatically manages recurring Telegram Stars subscriptions, join request approvals for private spaces, automated member removals upon subscription expiration, administrator-granted complimentary memberships, public creator directory synchronization from private forum topics, member-governed acquisition voting, multi-currency treasury tracking with 21-day Stars holding periods, and subscriber-funded acquisition budgets.
 
 ---
 
@@ -42,7 +44,7 @@ In strict compliance with the UG-01, UG-02, and UG-03 Implementation Contracts:
 
 ## 2. Protected Telegram Architecture
 
-Underground Manager manages access and synchronization across four Telegram spaces:
+LA CONFRÉRIE's bot manages access and synchronization across five Telegram spaces (four since UG-01, plus the UG-04 Retro forum):
 
 | Name | Type | Access | Purpose |
 |---|---|---|---|
@@ -50,14 +52,14 @@ Underground Manager manages access and synchronization across four Telegram spac
 | **Public Creator Directory** (`PUBLIC_DIRECTORY_CHAT_ID`) | Channel | Public | Alphabetical directory of available creators and update dates |
 | **TOKEBEC VIP COLLECTIONS** (`VIP_COLLECTIONS_CHAT_ID`) | Forum Supergroup | Paid / Private | Primary creator media library (one topic per creator) |
 | **Wanted List** (`WANTED_LIST_CHAT_ID`) | Channel | Paid / Private | Creator nominations, community rankings, and ballot announcements |
-| **Underground General Chat** (`GENERAL_CHAT_ID`) | Supergroup | Paid / Private | Member conversations and optional weekly update digests |
-| **Underground Manager** | Bot | Hybrid | Automation, subscriptions, access gates, nominations, and voting |
+| **LA CONFRÉRIE General Chat** (`GENERAL_CHAT_ID`) | Supergroup | Paid / Private | Member conversations and optional weekly update digests |
+| **LA CONFRÉRIE bot** | Bot | Hybrid | Automation, subscriptions, access gates, nominations, and voting |
 
 ### Access Levels
 - **Paid Stars Subscription:** Full access to all 3 private spaces (`vip_collections`, `general_chat`, `wanted_list`) + nomination and voting rights.
 - **Complimentary Access Levels:**
   - `vip_only`: Access to TOKEBEC VIP COLLECTIONS only (default).
-  - `vip_and_chat`: Access to TOKEBEC VIP COLLECTIONS + Underground General Chat.
+  - `vip_and_chat`: Access to TOKEBEC VIP COLLECTIONS + LA CONFRÉRIE General Chat.
   - `full`: Full access to all 3 spaces (read-only in Wanted List; nominations and voting are strictly reserved for paying Stars subscribers).
 
 
@@ -170,7 +172,7 @@ underground-manager/
 4. Configure Bot Commands:
    - Send `/setcommands` -> Select your bot -> Paste:
      ```text
-     start - Open Underground Manager main menu
+     start - Open LA CONFRÉRIE bot main menu
      help - How to use the bot and access channels
      wanted - Browse Wanted List & support creators
      suggest - Propose a new creator for the Wanted List
@@ -201,7 +203,7 @@ Add your bot as an **Administrator** in all 4 spaces:
      - `can_manage_chat`
      - `can_post_messages`
      - `can_edit_messages`
-4. **Underground General Chat** (Group):
+4. **LA CONFRÉRIE General Chat** (Group):
    - Administrator Permissions Required:
      - `can_invite_users`
      - `can_restrict_members`
@@ -233,11 +235,16 @@ Create a `.env` file for local development or set the following in Deno Deploy:
 | `BOT_USERNAME` | Bot username without `@` (used for deep linking) | `UndergroundManagerBot` | `UndergroundManagerBot` |
 | `WEBHOOK_SECRET` | Secret token for webhook verification (`X-Telegram-Bot-Api-Secret-Token`) | `f7a29...` | *Required in Prod* |
 | `ADMIN_USER_IDS` | Comma-separated numeric Telegram user IDs of administrators | `12345678,87654321` | *Required* |
-| `VIP_COLLECTIONS_CHAT_ID` | Numeric Chat ID for VIP Collections forum | `-1001234567890` | *Required* |
+| `VIP_COLLECTIONS_CHAT_ID` | Numeric Chat ID for the Regular forum (TOKEBEC VIP COLLECTIONS) | `-1001234567890` | *Required* |
+| `TELEGRAM_RETRO_FORUM_CHAT_ID` | **UG-04** Chat ID for the private `RETRO \| LA CONFRÉRIE` forum | `-1003975562920` | `0` (Retro tier off) |
+| `CLUB_DISPLAY_NAME` | **UG-04** Public club name used in all user-facing text | `LA CONFRÉRIE` | `LA CONFRÉRIE` |
+| `RETRO_PLUS_STARS_PRICE_AMOUNT` | **UG-04** Retro Plus price in Stars. Never defaulted: `0`/unset keeps Retro Plus billing **disabled** | *(owner decides)* | `0` (disabled) |
+| `MIGRATION_BATCH_SIZE` | **UG-04** Max message IDs per `copyMessages` call (1–100) | `30` | `30` |
+| `MIGRATION_BATCH_DELAY_MS` | **UG-04** Pause between copy batches (rate-limit friendly) | `3000` | `3000` |
 | `PUBLIC_DIRECTORY_CHAT_ID` | Numeric Chat ID for Public Creator Directory channel | `-1001234567893` | `0` |
 | `WANTED_LIST_CHAT_ID` | Numeric Chat ID for Wanted List channel | `-1001234567891` | *Required* |
 | `GENERAL_CHAT_ID` | Numeric Chat ID for General Chat | `-1001234567892` | *Required* |
-| `STARS_PRICE_AMOUNT` | Price in Telegram Stars for recurring subscription | `750` | `750` |
+| `STARS_PRICE_AMOUNT` | Price in Telegram Stars for the **Regular** recurring subscription | `750` | `750` |
 | `STARS_SUBSCRIPTION_PERIOD_SECONDS` | Recurring subscription duration in seconds | `2592000` (30 days) | `2592000` |
 | `CURRENCY` | Currency code for Stars | `XTR` | `XTR` |
 | `DIRECTORY_UPDATE_CRON` | Daily Directory & Wanted List sync cron expression | `0 3 * * *` | `0 3 * * *` |
@@ -334,7 +341,7 @@ Send `/lookup <userId>` or `/lookup @username`:
 - The bot checks each member against active database entitlements. If expired, it kicks them without permanently banning them, allowing seamless re-entry upon future payment.
 
 ### Creator Registration & Topic Repair
-Underground Manager automatically detects new forum topics and topic renames in `TOKEBEC VIP COLLECTIONS`. If a topic was created prior to bot installation or an event was missed:
+LA CONFRÉRIE bot automatically detects new forum topics and topic renames in `TOKEBEC VIP COLLECTIONS`. If a topic was created prior to bot installation or an event was missed:
 - Command: `/register_creator <Creator Name> <Topic Thread ID>`
 - Example: `/register_creator Aria 42`
 - Or use `/admin` > **Creator Management** to view all registered creators and trigger an immediate directory refresh.
@@ -477,7 +484,7 @@ At the end of each calendar month (or on-demand via `/treasury_report`):
 
 ## 12. Complete Testing & Verification Matrix
 
-Underground Manager features a comprehensive automated test suite consisting of **78 tests across 16 test suites** running on Deno's native test runner (`deno test -A`):
+LA CONFRÉRIE's bot features a comprehensive automated test suite consisting of **137 tests across 21 test files** (78 from UG-01…UG-03 plus 59 for UG-04) running on Deno's native test runner (`deno test -A`):
 
 | Test Suite File | Tests | Domain / Coverage |
 |---|:---:|---|
@@ -496,12 +503,17 @@ Underground Manager features a comprehensive automated test suite consisting of 
 | [`tests/treasury_allocations_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/treasury_allocations_test.ts) | 4 | Strict 100% allocation validation, zero unvested Stars leak into cash, 60/25/15 fund credit, double-spend prevention. |
 | [`tests/treasury_acquisitions_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/treasury_acquisitions_test.ts) | 2 | Candidate pricing in foreign currencies, affordability checks against available budget, commitment to paid lifecycle. |
 | [`tests/treasury_reports_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/treasury_reports_test.ts) | 4 | Monthly report generation, member transparency formatting, admin audit breakdown, channel publication. |
-| **Total** | **78** | **All 78 Tests Passing (100% Success Rate)** |
+| `tests/ug04_membership_test.ts` | 15 | Rebrand, two tiers, plan-aware billing, invite-link gating, upgrade/downgrade, legacy subscriptions, tier revenue. |
+| `tests/ug04_directory_test.ts` | 9 | Unified directory, labels/filters, retro topic registration, no duplicates, media-ID inventory, repair. |
+| `tests/ug04_migration_test.ts` | 21 | Dry-run, protected content, albums, partial failure, resume, rate limits, leases, finalization, deletion safeguards. |
+| `tests/ug04_bot_routing_test.ts` | 6 | Real bot wiring: menus, admin-only routes, tier-gated deep links, disabled Retro checkout. |
+| `tests/ug04_contributions_test.ts` | 8 | Admin-reviewed member contributions: review gate, single publish, partial failure, migration hold, bot wiring. |
+| **Total** | **137** | **All 137 Tests Passing** |
 
 To run the full suite:
 ```bash
 deno task check  # Strict TypeScript type check
-deno task test   # Runs all 78 unit, integration and security tests
+deno task test   # Runs all 137 unit, integration and security tests
 ```
 
 ---
@@ -552,5 +564,67 @@ deno task test   # Runs all 78 unit, integration and security tests
    - **Operations Fund (25%):** +$43.88 CAD
    - **Emergency Reserve (15%):** +$26.32 CAD
 
+---
 
-# underground-manager
+## 14. UG-04 — LA CONFRÉRIE: Retro Vault, Membership Tiers & Migration
+
+### 14.1 Plans
+
+| | Regular | Retro Plus |
+|---|:---:|:---:|
+| Regular vault (TOKEBEC VIP COLLECTIONS) | ✅ | ✅ |
+| **RETRO \| LA CONFRÉRIE** vault | ❌ | ✅ |
+| Wanted List · General Chat · Nominations & voting | ✅ | ✅ |
+| Price | `STARS_PRICE_AMOUNT` (unchanged) | `RETRO_PLUS_STARS_PRICE_AMOUNT` |
+
+* Both are recurring 30-day Telegram Stars subscriptions handled by the existing payment engine. The purchased plan is stored on the payment and entitlement (`planId` / `plan`); records without it are **Regular** (legacy-safe).
+* **Retro Plus billing is OFF** until `RETRO_PLUS_STARS_PRICE_AMOUNT` is set to a positive number *and* `TELEGRAM_RETRO_FORUM_CHAT_ID` is set. The plans screen shows "Coming soon" and pre-checkout rejects Retro Plus invoices. No price is hardcoded anywhere.
+* Access is still decided only by entitlement `spaces`. Every invite link is a **join-request link**: the bot approves a request only if the user holds an active entitlement for that space, so an old or shared Retro link is useless to a Regular member. Hourly reconciliation covers the Retro forum and removes a user from Retro only, leaving valid Regular access intact.
+* Complimentary grants keep their existing levels; a new optional level **Full Access + Retro Vault** exists for admins.
+
+### 14.2 Upgrades and downgrades (no invented proration)
+
+Telegram Stars cannot prorate, so plan changes are a transparent cancel-and-resubscribe:
+
+* **Regular → Retro Plus:** the member sees the full Retro price, that Retro starts the moment Telegram confirms payment, and that already-paid Regular access is kept. They choose whether to cancel Regular's renewal. The bot cancels it (Bot API `editUserStarSubscription`) **only after the Retro Plus payment is verified** and **only if they chose that**. If the API call fails they are told to cancel in *Settings → Stars*.
+* **Retro Plus → Regular:** on confirmation the Retro renewal is cancelled; Retro stays until the paid-through date, then expires. A Regular purchase is blocked while Retro Plus is active (prevents overlapping charges).
+* Nothing is ever cancelled without the member's explicit confirmation.
+
+### 14.3 Unified directory
+
+One `creators` collection. Each creator has a stable internal ID, `collection` (`regular`/`retro`), forum chat + topic ID, last content update, optional `retiredAt`, `rightsStatus`, and an inventory state. Public listing is alphabetical across both tiers, e.g. `Aria — Regular — Oct 18, 2026`. Members can filter **All / Regular / Retro** in the bot. The public directory contains only bot deep links; the protected topic link is given by `/start creator_<id>` **after** checking the tier (Retro needs Retro Plus).
+
+### 14.4 Regular → Retro migration
+
+Admin menu → **Move to Retro** (or Creators → *View Creators* → creator → *Move to Retro*).
+
+1. **Prepare (dry-run)** – you confirm the club holds publication/distribution rights. The bot checks source mapping, Retro configuration, content protection and bot rights, counts the indexed messages/albums and estimates batches. **Nothing is copied or created.**
+2. **Start copying** – creates the Retro topic once, then copies in album-safe batches with `copyMessages` (≤ `MIGRATION_BATCH_SIZE` ids, ascending, captions kept) into it. Source→destination message mappings are stored. A cron worker (every 5 min) and the *Copy next batches* button continue running jobs; 429 rate limits back off automatically. Pause/resume/cancel any time; retries skip verified copies; a per-job lease stops duplicate runs.
+3. **Verify** – inventory vs copies, album contiguity, destination topic, rights. Any unaccounted item ⇒ **Needs review**; a migration with unaccounted media can never finalize.
+4. **Approve finalization** – re-verifies, then points the *existing* creator record at the Retro topic (ID, nominations, acquisition links and last-update timestamp unchanged; no duplicate) and refreshes the directory.
+5. **Remove old Regular topic** (optional, separate, destructive) – step 1: you attest you manually reviewed the Retro topic (exact source forum/topic/results are shown); step 2 (valid 10 min): final delete. Refused if any discrepancy remains. Who/when is audited. **Never automatic.**
+
+Until step 5, Regular members can still open the original Regular topic — **exclusive Retro access is not achieved until the original content is removed or otherwise secured.** The bot warns about this on every migration screen.
+
+#### What Telegram does and does not allow
+* **Restrict Saving Content** blocks `copyMessages`. The bot detects it (preflight `getChat.has_protected_content`, and the API refusal) and stops. It never disables protection and never downloads/scrapes. **Fallback (administrator-controlled republishing):** upload the media from authorized source files into the creator's Retro topic yourself, then link it with `/relink_creator <creator> <retro topic id>` (same creator record, rights must be verified).
+* The Bot API **cannot list a topic's history**. The bot only knows messages it saw an admin upload since UG-04 (IDs only, no media stored). Creators registered before UG-04 are flagged *inventory not confirmed complete* and **blocked** until you index older media with `/index_media <creator> <t.me/c/…/topic/msg links…>` (the topic in each link must match the creator's topic) and attest with `/attest_inventory <creator>`.
+* `copyMessages` returns only the new message IDs. If any message in a batch was skipped (e.g. deleted), Telegram doesn't say which, so those items are marked **ambiguous**, are *not* retried (duplicate risk) and need your review (*Exclude unresolved…* records your acceptance).
+* Admin commands: `/move_to_retro`, `/index_media`, `/attest_inventory`, `/retire_creator`, `/relink_creator`.
+
+### 14.5 Treasury
+
+One consolidated treasury. Reports add **Subscription revenue by tier** from completed, de-duplicated payments (an upgrade is a new Retro Plus charge — the earlier Regular charge is never moved or re-counted; refunds and complimentary grants are excluded; active subscribers are counted once, under their highest tier). Pending-Stars, expense, conversion and allocation rules are untouched.
+
+### 14.6 Live setup checklist for `RETRO | LA CONFRÉRIE` (`-1003975562920`)
+
+The bot must be an **administrator** of the Retro forum with: *Invite users via link*, *Ban users* (restrict members), *Manage topics*, *Post messages*, and *Delete messages* (only needed if you later use deletion cleanup). The forum must have **Topics** enabled. Then run `deno task verify` (read-only). Also:
+
+* Set `TELEGRAM_RETRO_FORUM_CHAT_ID=-1003975562920` in Deno Deploy (Project → Settings → Environment Variables); keep `.env` out of Git.
+* **BotFather (only if you want a new public bot name):** `/setname` → pick the bot → `LA CONFRÉRIE`; optionally `/setdescription`, `/setabouttext`, `/setuserpic`. Do **not** change the username (`/setusername`) unless you also update `BOT_USERNAME` and accept that existing `t.me/<bot>` links stop working.
+* Do not rename live channels/groups unless you want to; the bot reads titles only for display.
+
+
+### 14.7 Member contributions (admin-reviewed)
+
+Main menu → **➕ Contribute** → pick a creator → send photos/videos (albums OK, no item cap) → **Finish**. Open to any bot user, no credit tracking. Admins receive a preview plus **Approve & publish / Reject** buttons (also under Admin → **📥 Contributions**). On approval the *bot* copies the items into the creator's topic (`copyMessages`), so the posts are the bot's and cannot be deleted by the contributor; the media inventory and the creator's last-update date are updated. Only message IDs are stored. Approval is single-use, held while that creator is being migrated, and reported as *needs review* if originals were deleted before approval.

@@ -1,11 +1,12 @@
 /**
- * Underground Manager — Entitlement Repository
+ * LA CONFRÉRIE — Entitlement Repository
  */
 
 import { getKv } from "./kv.ts";
 import {
   Entitlement,
   EntitlementStatus,
+  MembershipPlanId,
   MembershipSummary,
   SpaceId,
 } from "../types.ts";
@@ -81,6 +82,17 @@ export async function getActiveUserEntitlements(userId: number): Promise<Entitle
   return active;
 }
 
+/** Active Stars-paid entitlements, optionally limited to one plan (legacy = regular). */
+export async function getActivePaidEntitlements(
+  userId: number,
+  plan?: MembershipPlanId
+): Promise<Entitlement[]> {
+  const active = await getActiveUserEntitlements(userId);
+  return active.filter(
+    (e) => e.source === "telegram_stars" && (!plan || (e.plan ?? "regular") === plan)
+  );
+}
+
 export async function hasAccessToSpace(userId: number, spaceId: SpaceId): Promise<boolean> {
   const active = await getActiveUserEntitlements(userId);
   return active.some((ent) => ent.spaces.includes(spaceId));
@@ -112,9 +124,13 @@ export async function getMembershipSummary(userId: number): Promise<MembershipSu
     primaryType = "Complimentary";
   }
 
+  const hasRetroAccess = accessibleSpaceSet.has("retro_collections");
+
   return {
     userId,
     isMember,
+    plan: hasRetroAccess ? "retro_plus" : isMember ? "regular" : "none",
+    hasRetroAccess,
     hasPaid,
     hasComplimentary,
     primaryType,

@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Exchange Rate Repository
+ * LA CONFRÉRIE — Exchange Rate Repository
  * Phase UG-03: Treasury, Expenses & Final Automation
  */
 

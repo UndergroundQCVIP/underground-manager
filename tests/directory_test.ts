@@ -1,5 +1,5 @@
 /**
- * Underground Manager — UG-02 Pre-Publish Test Suite: PUBLIC CREATOR DIRECTORY
+ * LA CONFRÉRIE — UG-02 Pre-Publish Test Suite: PUBLIC CREATOR DIRECTORY
  */
 
 import { assertEquals } from "@std/assert";

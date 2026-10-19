@@ -1,14 +1,19 @@
 /**
- * Underground Manager — Creator Repository
- * Manages forum topics representing creators in TOKEBEC VIP COLLECTIONS.
+ * LA CONFRÉRIE — Creator Repository
+ * One unified directory of creators across the Regular and Retro forums.
  */
 
 import { getKv } from "./kv.ts";
-import { Creator } from "../types.ts";
+import { CollectionCategory, Creator } from "../types.ts";
 import { markDirectoryDirty } from "./directory.ts";
 
 export function normalizeCreatorName(name: string): string {
   return name.trim().toLowerCase();
+}
+
+/** Legacy creators carry no collection and are Regular. */
+export function creatorCollection(creator: Pick<Creator, "collection">): CollectionCategory {
+  return creator.collection ?? "regular";
 }
 
 export async function saveCreator(creator: Creator): Promise<void> {
@@ -54,6 +59,7 @@ export async function getCreatorByName(name: string): Promise<Creator | null> {
 export async function listCreators(filter?: {
   status?: "active" | "archived";
   hasContentOnly?: boolean;
+  collection?: CollectionCategory;
 }): Promise<Creator[]> {
   const kv = await getKv();
   const iter = kv.list<Creator>({ prefix: ["creators"] });
@@ -67,6 +73,9 @@ export async function listCreators(filter?: {
       continue;
     }
     if (filter?.hasContentOnly && !creator.hasContent) {
+      continue;
+    }
+    if (filter?.collection && creatorCollection(creator) !== filter.collection) {
       continue;
     }
     results.push(creator);
@@ -166,4 +175,58 @@ export async function linkCreatorToWantedList(
   };
 
   await kv.set(["creators", creatorId], updated);
+}
+
+/**
+ * UG-04: Re-point an EXISTING creator at a new forum/topic and collection.
+ * The internal creator ID, name, nomination/acquisition links and
+ * lastContentUpdatedAt are all preserved; only the location changes.
+ * Atomic, so there is never a window with two creator entries.
+ */
+export async function relocateCreator(
+  id: string,
+  target: { chatId: number; topicId: number; collection: CollectionCategory }
+): Promise<Creator | null> {
+  const kv = await getKv();
+  const current = await getCreator(id);
+  if (!current) return null;
+
+  const updated: Creator = {
+    ...current,
+    chatId: target.chatId,
+    topicId: target.topicId,
+    collection: target.collection,
+    updatedAt: new Date().toISOString(),
+  };
+
+  const atomic = kv.atomic();
+  atomic.set(["creators", id], updated);
+  atomic.delete(["creators_by_topic", current.chatId, current.topicId]);
+  atomic.set(["creators_by_topic", target.chatId, target.topicId], id);
+  const res = await atomic.commit();
+  if (!res.ok) throw new Error(`Failed to relocate creator ${id}`);
+
+  await markDirectoryDirty();
+  return updated;
+}
+
+export async function patchCreator(
+  id: string,
+  patch: Partial<Pick<
+    Creator,
+    | "rightsStatus"
+    | "rightsVerifiedBy"
+    | "rightsVerifiedAt"
+    | "inventoryStatus"
+    | "inventoryAttestedBy"
+    | "retiredAt"
+  >>
+): Promise<Creator | null> {
+  const kv = await getKv();
+  const current = await getCreator(id);
+  if (!current) return null;
+  const updated: Creator = { ...current, ...patch, updatedAt: new Date().toISOString() };
+  await kv.set(["creators", id], updated);
+  await markDirectoryDirty();
+  return updated;
 }

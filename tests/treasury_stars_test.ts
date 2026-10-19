@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Treasury Stars Tracking & Holding Period Automated Tests
+ * LA CONFRÉRIE — Treasury Stars Tracking & Holding Period Automated Tests
  * Phase UG-03: Treasury, Expenses & Final Automation
  */
 

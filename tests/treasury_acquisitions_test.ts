@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Voting & Acquisition Treasury Integration Automated Tests
+ * LA CONFRÉRIE — Voting & Acquisition Treasury Integration Automated Tests
  * Phase UG-03: Treasury, Expenses & Final Automation
  */
 

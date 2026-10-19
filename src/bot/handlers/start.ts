@@ -1,9 +1,11 @@
 /**
- * Underground Manager — Start & Main Menu Handlers
+ * LA CONFRÉRIE — Start & Main Menu Handlers
  */
 
 import { Composer } from "grammy";
-import { isAdministrator } from "../../config.ts";
+import { getClubName, isAdministrator } from "../../config.ts";
+import { creatorCollection } from "../../db/creators.ts";
+import { getPlan } from "../../plans/plans.ts";
 import { getMembershipSummary } from "../../db/entitlements.ts";
 import { messages } from "../messages.ts";
 import { mainMenuKeyboard, supportKeyboard } from "../keyboards.ts";
@@ -11,7 +13,6 @@ import { mainMenuKeyboard, supportKeyboard } from "../keyboards.ts";
 import { getCreator } from "../../db/creators.ts";
 import { formatCreatorDate } from "../../directory/sync.ts";
 import { InlineKeyboard } from "grammy";
-import { getConfig } from "../../config.ts";
 
 export const startComposer = new Composer();
 
@@ -21,7 +22,6 @@ startComposer.command("start", async (ctx) => {
 
   const match = ctx.match?.trim();
   const summary = await getMembershipSummary(userId);
-  const config = getConfig();
 
   // 1. Deep Link: Creator details / directory entry
   if (match && match.startsWith("creator_")) {
@@ -36,8 +36,14 @@ startComposer.command("start", async (ctx) => {
     }
 
     const updatedStr = formatCreatorDate(creator.lastContentUpdatedAt);
+    const collection = creatorCollection(creator);
+    const club = getClubName();
+    const forumName = collection === "retro" ? `RETRO | ${club}` : "TOKEBEC VIP COLLECTIONS";
+    const requiredSpace = collection === "retro" ? "retro_collections" : "vip_collections";
 
-    if (summary.isMember && summary.accessibleSpaces.includes("vip_collections")) {
+    // The protected topic link is ONLY ever handed to members whose active
+    // entitlements include the creator's vault (Retro needs Retro Plus).
+    if (summary.isMember && summary.accessibleSpaces.includes(requiredSpace)) {
       const cleanChatId = String(creator.chatId).replace(/^-100/, "");
       const topicUrl = `https://t.me/c/${cleanChatId}/${creator.topicId}`;
 
@@ -47,25 +53,30 @@ startComposer.command("start", async (ctx) => {
         .text("⬅️ Main Menu", "member:home");
 
       await ctx.reply(
-        `💎 *${creator.name}* is available in *TOKEBEC VIP COLLECTIONS*!\n\n` +
+        `💎 *${creator.name}* is available in *${forumName}*!\n\n` +
         `📅 *Last Content Update:* ${updatedStr}\n\n` +
-        `As an active VIP member, you can jump directly to this creator's topic:`,
+        `As an active member, you can jump directly to this creator's topic:`,
         {
           parse_mode: "Markdown",
           reply_markup: kb,
         }
       );
     } else {
-      const kb = new InlineKeyboard()
-        .text(`🌟 Join Underground (${config.STARS_PRICE_AMOUNT} Stars)`, "member:join")
-        .row()
-        .text("⬅️ Main Menu", "member:home");
+      const retroLocked = collection === "retro" && summary.isMember;
+      const kb = new InlineKeyboard();
+      if (retroLocked && getPlan("retro_plus").enabled) {
+        kb.text("⬆️ Upgrade to Retro Plus", "member:upgrade").row();
+      } else {
+        kb.text("💎 Membership Plans", "member:plans").row();
+      }
+      kb.text("⬅️ Main Menu", "member:home");
 
       await ctx.reply(
-        `💎 *${creator.name}* is available in *TOKEBEC VIP COLLECTIONS*!\n\n` +
+        `💎 *${creator.name}* is part of *${forumName}*.\n\n` +
         `📅 *Last Content Update:* ${updatedStr}\n\n` +
-        `🔒 This collection is exclusive to Underground VIP members.\n` +
-        `Subscribe with Telegram Stars to unlock instant access to all creator archives!`,
+        (collection === "retro"
+          ? `🔒 This collection is exclusive to *${club} Retro Plus* members.`
+          : `🔒 This collection is exclusive to ${club} members.\nSubscribe with Telegram Stars to unlock instant access to the creator archives!`),
         {
           parse_mode: "Markdown",
           reply_markup: kb,
@@ -82,7 +93,7 @@ startComposer.command("start", async (ctx) => {
     const activeBallot = await getActiveBallot();
 
     await ctx.reply(
-      `🎯 *UNDERGROUND | WANTED LIST*\n\n` +
+      `🎯 *${getClubName()} | WANTED LIST*\n\n` +
       `Tell us which creators we should acquire next!\n\n` +
       `• *Suggest:* Submit new creator requests\n` +
       `• *Support:* Vote on existing community nominations\n` +
@@ -106,9 +117,9 @@ startComposer.command("start", async (ctx) => {
   const firstName = ctx.from?.first_name || "Member";
   const isAdmin = isAdministrator(userId);
 
-  await ctx.reply(messages.welcome(firstName, summary.isMember), {
+  await ctx.reply(messages.welcome(firstName, summary.isMember, summary.plan), {
     parse_mode: "Markdown",
-    reply_markup: mainMenuKeyboard(summary.isMember, isAdmin),
+    reply_markup: mainMenuKeyboard(summary.isMember, isAdmin, summary.plan),
   });
 });
 
@@ -121,9 +132,9 @@ startComposer.callbackQuery("member:home", async (ctx) => {
   const isAdmin = isAdministrator(userId);
 
   await ctx.answerCallbackQuery();
-  await ctx.editMessageText(messages.welcome(firstName, summary.isMember), {
+  await ctx.editMessageText(messages.welcome(firstName, summary.isMember, summary.plan), {
     parse_mode: "Markdown",
-    reply_markup: mainMenuKeyboard(summary.isMember, isAdmin),
+    reply_markup: mainMenuKeyboard(summary.isMember, isAdmin, summary.plan),
   });
 });
 

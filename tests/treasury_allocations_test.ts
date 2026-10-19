@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Treasury Allocation Rules & Budget Calculations
+ * LA CONFRÉRIE — Treasury Allocation Rules & Budget Calculations
  * Phase UG-03: Treasury, Expenses & Final Automation
  */
 

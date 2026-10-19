@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Expense & Budget Repository
+ * LA CONFRÉRIE — Expense & Budget Repository
  * Phase UG-03: Treasury, Expenses & Final Automation
  */
 

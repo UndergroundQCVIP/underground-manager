@@ -1,6 +1,6 @@
 /**
- * Underground Manager — Forum Topics Event Handlers
- * Detects creator topic creation, renames, and authorized media uploads in TOKEBEC VIP COLLECTIONS.
+ * LA CONFRÉRIE — Forum Topics Event Handlers
+ * Detects creator topic creation, renames, and authorized media uploads in the Regular and Retro forums.
  */
 
 import { Composer } from "grammy";
@@ -47,7 +47,13 @@ forumComposer.on(["message:photo", "message:video"], async (ctx) => {
 
   if (threadId && senderId) {
     try {
-      await handleMediaUpload(ctx.chat.id, threadId, senderId);
+      const msg = ctx.message;
+      await handleMediaUpload(ctx.chat.id, threadId, senderId, {
+        messageId: msg.message_id,
+        kind: msg.photo ? "photo" : "video",
+        mediaGroupId: msg.media_group_id,
+        hasCaption: !!msg.caption,
+      });
     } catch (err) {
       console.error("Error handling creator media upload:", err);
     }

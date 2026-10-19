@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Currency Conversion Automated Tests
+ * LA CONFRÉRIE — Currency Conversion Automated Tests
  * Phase UG-03: Treasury, Expenses & Final Automation
  */
 

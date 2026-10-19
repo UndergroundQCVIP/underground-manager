@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Access Synchronization State
+ * LA CONFRÉRIE — Access Synchronization State
  */
 
 import { getKv } from "./kv.ts";

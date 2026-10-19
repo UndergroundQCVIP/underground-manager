@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Core Treasury Service & Financial Workflows
+ * LA CONFRÉRIE — Core Treasury Service & Financial Workflows
  * Phase UG-03: Treasury, Expenses & Final Automation
  */
 

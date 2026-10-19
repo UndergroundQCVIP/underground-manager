@@ -1,7 +1,8 @@
 /**
- * Underground Manager — Secure Join Link Management
+ * LA CONFRÉRIE — Secure Join Link Management
  */
 
+import { getClubName } from "../config.ts";
 import { SpaceId } from "../types.ts";
 import { getChatId, getSpaceTitle } from "./spaces.ts";
 import { getInviteLink, saveInviteLink } from "../db/links.ts";
@@ -27,7 +28,7 @@ export async function getOrCreateJoinLink(
 
   // Generate a new secure link requiring bot approval
   const linkObj = await api.createChatInviteLink(chatId, {
-    name: `Underground VIP — ${getSpaceTitle(spaceId)}`,
+    name: `${getClubName()} — ${getSpaceTitle(spaceId)}`,
     creates_join_request: true,
   });
 

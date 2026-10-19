@@ -1,13 +1,33 @@
 /**
- * Underground Manager — Core Domain Types and Data Contracts
+ * LA CONFRÉRIE — Core Domain Types and Data Contracts
  * Phase UG-01: Foundation & Memberships
  * Phase UG-02: Creator Directory & Voting
  */
 
-export type SpaceId = "vip_collections" | "wanted_list" | "general_chat";
+export type SpaceId =
+  | "vip_collections"
+  | "retro_collections"
+  | "wanted_list"
+  | "general_chat";
 
 export const SPACE_IDS: readonly SpaceId[] = [
   "vip_collections",
+  "retro_collections",
+  "wanted_list",
+  "general_chat",
+] as const;
+
+/** Spaces included in the Regular plan (the original UG-01 paid bundle). */
+export const REGULAR_SPACE_IDS: readonly SpaceId[] = [
+  "vip_collections",
+  "wanted_list",
+  "general_chat",
+] as const;
+
+/** Spaces included in Retro Plus: everything in Regular plus the Retro vault. */
+export const RETRO_PLUS_SPACE_IDS: readonly SpaceId[] = [
+  "vip_collections",
+  "retro_collections",
   "wanted_list",
   "general_chat",
 ] as const;
@@ -17,7 +37,11 @@ export interface SpaceDefinition {
   name: string;
   type: "forum_group" | "channel" | "group";
   description: string;
-  envVar: "VIP_COLLECTIONS_CHAT_ID" | "WANTED_LIST_CHAT_ID" | "GENERAL_CHAT_ID";
+  envVar:
+    | "VIP_COLLECTIONS_CHAT_ID"
+    | "TELEGRAM_RETRO_FORUM_CHAT_ID"
+    | "WANTED_LIST_CHAT_ID"
+    | "GENERAL_CHAT_ID";
 }
 
 export const SPACE_DEFINITIONS: Record<SpaceId, SpaceDefinition> = {
@@ -28,6 +52,13 @@ export const SPACE_DEFINITIONS: Record<SpaceId, SpaceDefinition> = {
     description: "Main creator content library with topic support",
     envVar: "VIP_COLLECTIONS_CHAT_ID",
   },
+  retro_collections: {
+    id: "retro_collections",
+    name: "RETRO | LA CONFRÉRIE",
+    type: "forum_group",
+    description: "Retro creator vault (Retro Plus only)",
+    envVar: "TELEGRAM_RETRO_FORUM_CHAT_ID",
+  },
   wanted_list: {
     id: "wanted_list",
     name: "Wanted List",
@@ -37,20 +68,39 @@ export const SPACE_DEFINITIONS: Record<SpaceId, SpaceDefinition> = {
   },
   general_chat: {
     id: "general_chat",
-    name: "Underground General Chat",
+    name: "LA CONFRÉRIE General Chat",
     type: "group",
     description: "VIP member discussions and community",
     envVar: "GENERAL_CHAT_ID",
   },
 };
 
-export type ComplimentaryAccessLevel = "vip_only" | "vip_and_chat" | "full";
+export type ComplimentaryAccessLevel =
+  | "vip_only"
+  | "vip_and_chat"
+  | "full"
+  | "full_retro";
 
 export const COMPLIMENTARY_SPACES: Record<ComplimentaryAccessLevel, SpaceId[]> = {
   vip_only: ["vip_collections"],
   vip_and_chat: ["vip_collections", "general_chat"],
   full: ["vip_collections", "wanted_list", "general_chat"],
+  full_retro: ["vip_collections", "retro_collections", "wanted_list", "general_chat"],
 };
+
+// ==============================================================================
+// UG-04 Membership Plans
+// ==============================================================================
+
+export type MembershipPlanId = "regular" | "retro_plus";
+
+/** Invoice payload plan identifiers. "vip_monthly" is the legacy Regular id. */
+export const PLAN_PAYLOAD_IDS: Record<MembershipPlanId, string> = {
+  regular: "vip_monthly",
+  retro_plus: "retro_plus_monthly",
+};
+
+export type CollectionCategory = "regular" | "retro";
 
 export type ComplimentaryReason =
   | "content_contribution"
@@ -83,6 +133,8 @@ export interface Entitlement {
   userId: number; // Telegram numeric user ID
   source: EntitlementSource;
   spaces: SpaceId[];
+  /** UG-04: purchased plan. Absent on legacy records (treated as "regular"). */
+  plan?: MembershipPlanId;
   startsAt: string; // ISO 8601
   expiresAt: string; // ISO 8601
   status: EntitlementStatus;
@@ -112,6 +164,8 @@ export interface Payment {
   amount: number; // e.g. 750
   currency: string; // e.g. "XTR"
   invoicePayload: string;
+  /** UG-04: purchased plan. Absent on legacy records (treated as "regular"). */
+  planId?: MembershipPlanId;
   subscriptionPeriodSeconds: number; // e.g. 2592000
   subscriptionExpirationDate?: string; // Confirmed Telegram expiration timestamp
   isRecurring: boolean;
@@ -173,7 +227,25 @@ export type AuditEventType =
   | "allocations_updated"
   | "treasury_report_generated"
   | "candidate_priced"
-  | "acquisition_approved";
+  | "acquisition_approved"
+  // UG-04 Audit Events:
+  | "plan_change_requested"
+  | "plan_renewal_cancelled"
+  | "plan_renewal_cancel_failed"
+  | "creator_rights_verified"
+  | "creator_collection_changed"
+  | "media_indexed"
+  | "migration_prepared"
+  | "migration_started"
+  | "migration_paused"
+  | "migration_cancelled"
+  | "migration_needs_review"
+  | "migration_finalized"
+  | "migration_source_deletion_requested"
+  | "migration_source_deleted"
+  | "contribution_submitted"
+  | "contribution_approved"
+  | "contribution_rejected";
 
 export interface AuditEvent {
   id: string;
@@ -192,6 +264,9 @@ export interface MembershipSummary {
   primaryType: "Paid" | "Complimentary" | "None";
   activeEntitlements: Entitlement[];
   accessibleSpaces: SpaceId[];
+  /** UG-04: highest purchased/granted tier. */
+  plan: MembershipPlanId | "none";
+  hasRetroAccess: boolean;
   effectiveExpiry?: string;
   isRecurring: boolean;
   canRejoin: boolean;
@@ -222,6 +297,20 @@ export interface Creator {
   coverFileId?: string; // Optional administrator-approved cover photo
   status: "active" | "archived";
   wantedListId?: string; // Associated Wanted List candidate ID
+  /** UG-04: collection category. Absent on legacy records (treated as "regular"). */
+  collection?: CollectionCategory;
+  retiredAt?: string; // Optional retirement date (ISO)
+  /** UG-04: publication/distribution rights verification. Absent = unverified. */
+  rightsStatus?: "unverified" | "verified";
+  rightsVerifiedBy?: number;
+  rightsVerifiedAt?: string;
+  /**
+   * UG-04: whether the media message inventory is known to be complete.
+   * "complete" only for topics tracked from creation, or after admin attestation.
+   * Absent = older collection whose media may not be indexed.
+   */
+  inventoryStatus?: "complete" | "partial";
+  inventoryAttestedBy?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -372,6 +461,8 @@ export interface StarTransactionRecord {
   estimatedRewardUsdCents: number; // Based on configured valuation (e.g. 1.3c/Star)
   estimatedRewardCadCents: number; // Converted to CAD reporting currency
   source: "telegram_api" | "webhook_event" | "manual_adjustment";
+  /** UG-04: membership tier this revenue belongs to (absent = regular). */
+  planId?: MembershipPlanId;
   createdAt: string;
 }
 
@@ -546,6 +637,8 @@ export interface TreasuryMonthlyReport {
   period: string; // YYYY-MM
   overview: TreasuryOverview;
   activePaidSubscribersCount: number;
+  /** UG-04: Stars revenue and active subscribers per membership tier (one consolidated treasury). */
+  revenueByTier?: TierRevenueBreakdown;
   complimentaryMembersCount: number;
   creatorsAcquiredThisMonth: string[];
   newNominationsCount: number;
@@ -553,3 +646,152 @@ export interface TreasuryMonthlyReport {
   publishedMessageId?: number;
 }
 
+
+
+// ==============================================================================
+// UG-04 Domain Contracts: Media Inventory & Regular → Retro Migration
+// ==============================================================================
+
+/** Minimal record of an authorized media message (metadata only; never the media itself). */
+export interface MediaIndexEntry {
+  creatorId: string;
+  chatId: number;
+  topicId: number;
+  messageId: number;
+  kind: "photo" | "video" | "unknown";
+  mediaGroupId?: string;
+  hasCaption: boolean;
+  source: "live" | "manual" | "migration" | "contribution";
+  recordedAt: string;
+}
+
+export type MigrationStatus =
+  | "prepared" // Job created, preflight + dry-run report produced, nothing copied
+  | "blocked" // Preflight failed; see blockedReason
+  | "copying" // Authorized to copy; worker may continue it
+  | "paused"
+  | "needs_review" // Copy ended with discrepancies
+  | "ready_to_finalize" // Everything accounted for; awaiting administrator approval
+  | "finalized" // Creator record points to Retro; source topic still exists
+  | "source_deleted"
+  | "cancelled";
+
+export type MigrationBlockReason =
+  | "retro_not_configured"
+  | "source_mismatch"
+  | "protected_content"
+  | "missing_permissions"
+  | "no_inventory"
+  | "incomplete_inventory"
+  | "rights_not_confirmed";
+
+export interface MigrationPreflight {
+  ok: boolean;
+  checkedAt: string;
+  blockers: { reason: MigrationBlockReason; detail: string }[];
+  warnings: string[];
+}
+
+export type MigrationItemStatus =
+  | "pending"
+  | "copied"
+  | "failed"
+  | "ambiguous" // Telegram's response could not be attributed; never auto-retried (duplicate risk)
+  | "excluded"; // Administrator-accepted as not transferable (e.g. source message deleted)
+
+export interface MigrationItem {
+  sourceMessageId: number;
+  kind: "photo" | "video" | "unknown";
+  mediaGroupId?: string;
+  hasCaption: boolean;
+  status: MigrationItemStatus;
+  destMessageId?: number;
+  error?: string;
+  attempts: number;
+  updatedAt: string;
+}
+
+export interface MigrationJob {
+  id: string;
+  creatorId: string;
+  creatorName: string;
+  status: MigrationStatus;
+  blockedReason?: MigrationBlockReason;
+  dryRun: boolean; // true until copying has been explicitly started
+  source: { chatId: number; topicId: number };
+  destination: { chatId: number; topicId?: number; topicName: string };
+  rightsConfirmedBy: number;
+  rightsConfirmedAt: string;
+  createdBy: number;
+  preflight?: MigrationPreflight;
+  totals: {
+    items: number;
+    albums: number;
+    copied: number;
+    excluded: number;
+    failed: number;
+    ambiguous: number;
+    pending: number;
+  };
+  notes: string[]; // Human-readable discrepancy / review notes
+  lockedUntil?: number; // Epoch ms lease preventing duplicate concurrent execution
+  nextRunAfter?: number; // Epoch ms (rate-limit backoff)
+  startedBy?: number;
+  startedAt?: string;
+  finalizedBy?: number;
+  finalizedAt?: string;
+  // Source deletion workflow (separate destructive confirmation)
+  destinationReviewedBy?: number;
+  destinationReviewedAt?: string;
+  deletionRequestedBy?: number;
+  deletionRequestedAt?: string; // Confirmation window starts here
+  sourceDeletedBy?: number;
+  sourceDeletedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TierRevenueLine {
+  periodStars: number; // Completed (non-refunded) payments dated in the report period
+  lifetimeStars: number;
+  periodPayments: number;
+  activeSubscribers: number; // Distinct users whose HIGHEST active paid tier is this one
+}
+
+export type TierRevenueBreakdown = Record<MembershipPlanId, TierRevenueLine>;
+
+// ==============================================================================
+// UG-04 Member Contributions (admin-reviewed)
+// ==============================================================================
+
+export type ContributionStatus =
+  | "collecting" // Member is still sending content
+  | "pending" // Submitted; awaiting administrator review
+  | "publishing" // Administrator approved; copy in progress (claim lock)
+  | "approved" // Published into the creator topic by the bot
+  | "rejected"
+  | "failed" // Nothing was published; can be retried
+  | "needs_review" // Partially published; do not retry blindly
+  | "cancelled";
+
+export interface ContributionItem {
+  messageId: number; // Message ID inside the contributor's private chat with the bot
+  kind: "photo" | "video";
+  mediaGroupId?: string;
+}
+
+export interface Contribution {
+  id: string;
+  userId: number; // Contributor (private chat id == user id)
+  creatorId: string;
+  creatorName: string;
+  items: ContributionItem[];
+  status: ContributionStatus;
+  publishedMessageIds?: number[];
+  note?: string;
+  reviewedBy?: number;
+  reviewedAt?: string;
+  createdAt: string;
+  submittedAt?: string;
+  updatedAt: string;
+}

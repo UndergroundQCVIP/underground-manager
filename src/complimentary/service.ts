@@ -1,7 +1,8 @@
 /**
- * Underground Manager — Complimentary Membership Service
+ * LA CONFRÉRIE — Complimentary Membership Service
  */
 
+import { getClubName } from "../config.ts";
 import {
   COMPLIMENTARY_REASONS,
   COMPLIMENTARY_SPACES,
@@ -178,11 +179,11 @@ export async function processComplimentaryReminders(
         try {
           const daysLeft = Math.max(1, Math.round((expMs - nowMs) / (86400 * 1000)));
           const text =
-            `⏳ *Underground VIP — Membership Expiry Notice*\n\n` +
+            `⏳ *${getClubName()} — Membership Expiry Notice*\n\n` +
             `Your complimentary access expires in approximately *${daysLeft} day${
               daysLeft === 1 ? "" : "s"
             }*.\n\n` +
-            `To maintain uninterrupted access to TOKEBEC VIP COLLECTIONS and the Underground community, you can subscribe using Telegram Stars at any time.\n\n` +
+            `To maintain uninterrupted access to TOKEBEC VIP COLLECTIONS and the ${getClubName()} community, you can subscribe using Telegram Stars at any time.\n\n` +
             `Tap below to subscribe or check your membership.`;
 
           await sender.sendMessage(ent.userId, text, {

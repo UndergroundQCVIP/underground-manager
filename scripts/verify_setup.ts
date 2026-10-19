@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Operational Setup & Live Verification Tool
+ * LA CONFRÉRIE — Operational Setup & Live Verification Tool
  *
  * Runs non-destructive diagnostic checks against Telegram Bot API and Deno KV
  * to verify environment readiness before live deployment.
@@ -16,7 +16,7 @@ import { checkBotPermissions } from "../src/access/sync.ts";
 
 async function main() {
   console.log("=================================================");
-  console.log("   UNDERGROUND MANAGER — LIVE SETUP VERIFICATION ");
+  console.log("   LA CONFRÉRIE — LIVE SETUP VERIFICATION");
   console.log("=================================================\n");
 
   const config = getConfig();
@@ -33,7 +33,10 @@ async function main() {
     console.log("  ✅ Configuration parameters are valid.");
   }
   console.log(`     • Admin User IDs: ${config.ADMIN_USER_IDS.join(", ") || "None"}`);
-  console.log(`     • Stars Price:    ${config.STARS_PRICE_AMOUNT} ${config.CURRENCY} / ${config.STARS_SUBSCRIPTION_PERIOD_SECONDS}s`);
+  console.log(`     • Club name:      ${config.CLUB_DISPLAY_NAME}`);
+  console.log(`     • Regular price:  ${config.STARS_PRICE_AMOUNT} ${config.CURRENCY} / ${config.STARS_SUBSCRIPTION_PERIOD_SECONDS}s`);
+  console.log(`     • Retro Plus:     ${config.RETRO_PLUS_STARS_PRICE_AMOUNT > 0 ? `${config.RETRO_PLUS_STARS_PRICE_AMOUNT} ${config.CURRENCY}` : "billing DISABLED (RETRO_PLUS_STARS_PRICE_AMOUNT not set)"}`);
+  console.log(`     • Retro forum ID: ${config.TELEGRAM_RETRO_FORUM_CHAT_ID || "NOT SET"}`);
   console.log(`     • Runtime Mode:   ${config.BOT_MODE}`);
   console.log(`     • Environment:    ${config.DENO_ENV}\n`);
 
@@ -111,6 +114,51 @@ async function main() {
       console.log(`  ❌ ${def.name} (Chat ID: ${chatId}): Cannot access chat.`);
       console.log(`     Reason: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  // 4b. Migration capability (strictly read-only: no topics are created, nothing is copied)
+  console.log("4b. Regular → Retro Migration Capability (read-only):");
+  if (!config.TELEGRAM_RETRO_FORUM_CHAT_ID) {
+    console.log("  ⚠️  Skipped: TELEGRAM_RETRO_FORUM_CHAT_ID is not set.\n");
+    allSpacesOk = false;
+  } else {
+    for (const [label, chatId] of [
+      ["Regular forum (source)", config.VIP_COLLECTIONS_CHAT_ID],
+      ["Retro forum (destination)", config.TELEGRAM_RETRO_FORUM_CHAT_ID],
+    ] as const) {
+      try {
+        const chat = await bot.api.getChat(chatId);
+        const m = await bot.api.getChatMember(chatId, botId);
+        const isForum = "is_forum" in chat ? chat.is_forum : undefined;
+        const protectedContent = "has_protected_content" in chat ? chat.has_protected_content : undefined;
+        console.log(`  • ${label}: forum topics ${isForum ? "enabled" : "NOT enabled"}; Restrict Saving Content ${protectedContent ? "ON (copying BLOCKED)" : "off"}`);
+        if (!isForum) allSpacesOk = false;
+        if (label.startsWith("Regular") && protectedContent) {
+          console.log("    ⚠️  Copying from the Regular forum will be refused by Telegram. Migration must use the republishing alternative.");
+        }
+        if (m.status === "administrator") {
+          // deno-lint-ignore no-explicit-any
+          const rights = m as any;
+          const need = label.startsWith("Retro")
+            ? ["can_manage_topics", "can_invite_users", "can_restrict_members"]
+            : ["can_delete_messages"];
+          const missing = need.filter((k) => rights[k] === false);
+          if (missing.length) {
+            allSpacesOk = false;
+            console.log(`    ⚠️  Missing bot rights: ${missing.join(", ")} — enable in the group's Administrators settings.`);
+          } else {
+            console.log(`    ✅ Bot rights OK (${need.join(", ")}).`);
+          }
+        } else {
+          allSpacesOk = false;
+          console.log(`    ⚠️  Bot status is "${m.status}"; it must be an administrator.`);
+        }
+      } catch (err) {
+        allSpacesOk = false;
+        console.log(`  ❌ ${label}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    console.log();
   }
 
   // Check Public Creator Directory

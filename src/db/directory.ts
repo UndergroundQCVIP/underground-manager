@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Directory Sync State Repository
+ * LA CONFRÉRIE — Directory Sync State Repository
  */
 
 import { getKv } from "./kv.ts";

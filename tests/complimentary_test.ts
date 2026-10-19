@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Pre-Publish Test Suite: COMPLIMENTARY ACCESS
+ * LA CONFRÉRIE — Pre-Publish Test Suite: COMPLIMENTARY ACCESS
  */
 
 import { assertEquals, assertNotEquals } from "@std/assert";

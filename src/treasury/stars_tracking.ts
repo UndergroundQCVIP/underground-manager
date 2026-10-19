@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Telegram Stars Tracking & Holding Period Engine
+ * LA CONFRÉRIE — Telegram Stars Tracking & Holding Period Engine
  * Phase UG-03: Treasury, Expenses & Final Automation
  */
 
@@ -55,6 +55,7 @@ export async function trackSuccessfulPaymentStarsTx(
     estimatedRewardUsdCents,
     estimatedRewardCadCents,
     source: "webhook_event",
+    planId: payment.planId ?? "regular",
   });
 
   if (res.duplicate && res.record) {

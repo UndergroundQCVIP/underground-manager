@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Treasury Reporting Automated Tests
+ * LA CONFRÉRIE — Treasury Reporting Automated Tests
  * Phase UG-03: Treasury, Expenses & Final Automation
  */
 
@@ -89,7 +89,7 @@ Deno.test("TREASURY REPORTS — Formats clean, transparent member report", async
   const report = await generateMonthlyTreasuryReport("2026-10");
   const memberReport = formatPrivateMemberReport(report);
 
-  assertStringIncludes(memberReport, "UNDERGROUND TREASURY REPORT");
+  assertStringIncludes(memberReport, "LA CONFRÉRIE TREASURY REPORT");
   assertStringIncludes(memberReport, "October 2026");
   assertStringIncludes(memberReport, "Revenue & Inflows");
   assertStringIncludes(memberReport, "Budget & Allocations");
@@ -117,5 +117,5 @@ Deno.test("TREASURY REPORTS — Publishes report to configured Telegram channel"
   const success = await publishMonthlyReportToChannel(mockApi as any, report);
   assertEquals(success, true);
   assertEquals(mockApi.sentMessages.length, 1);
-  assertStringIncludes(mockApi.sentMessages[0].text, "UNDERGROUND TREASURY REPORT");
+  assertStringIncludes(mockApi.sentMessages[0].text, "LA CONFRÉRIE TREASURY REPORT");
 });

@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Payment Repository & Idempotency Storage
+ * LA CONFRÉRIE — Payment Repository & Idempotency Storage
  */
 
 import { getKv } from "./kv.ts";
@@ -139,3 +139,13 @@ export async function updatePaymentStatusByChargeId(
   return await updatePaymentStatus(payment.id, status);
 }
 
+
+/** All payments (no limit) — used for tier revenue reporting. */
+export async function listAllPayments(): Promise<Payment[]> {
+  const kv = await getKv();
+  const payments: Payment[] = [];
+  for await (const entry of kv.list<Payment>({ prefix: ["payments"] })) {
+    if (entry.value) payments.push(entry.value);
+  }
+  return payments;
+}

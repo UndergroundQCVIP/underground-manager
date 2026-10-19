@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Telegram Stars Recurring Subscription Implementation
+ * LA CONFRÉRIE — Telegram Stars Recurring Subscription Implementation
  */
 
 import { getConfig } from "../config.ts";
@@ -7,15 +7,17 @@ import { recordPayment, updatePaymentStatusByChargeId } from "../db/payments.ts"
 import {
   createEntitlement,
   extendEntitlement,
+  getActivePaidEntitlements,
   getActiveUserEntitlements,
   revokeEntitlement,
 } from "../db/entitlements.ts";
+import { getPlan, planFromPayloadId } from "../plans/plans.ts";
 import { logAuditEvent } from "../db/audit.ts";
 import {
   Entitlement,
   InvoicePayloadData,
+  MembershipPlanId,
   Payment,
-  SPACE_IDS,
 } from "../types.ts";
 import { PaymentProcessResult, PaymentProvider } from "./provider.ts";
 import { trackSuccessfulPaymentStarsTx } from "../treasury/stars_tracking.ts";
@@ -46,12 +48,12 @@ export class TelegramStarsProvider implements PaymentProvider {
   /**
    * Generates a tamper-evident payload for recurring Stars invoice.
    */
-  static buildInvoicePayload(userId: number): string {
+  static buildInvoicePayload(userId: number, planId: MembershipPlanId = "regular"): string {
     const config = getConfig();
     const data: InvoicePayloadData = {
       type: "subscription",
       userId,
-      planId: "vip_monthly",
+      planId: getPlan(planId).payloadId, // "vip_monthly" (Regular, legacy id) or "retro_plus_monthly"
       periodSeconds: config.STARS_SUBSCRIPTION_PERIOD_SECONDS,
       timestamp: Date.now(),
     };
@@ -94,20 +96,33 @@ export class TelegramStarsProvider implements PaymentProvider {
       };
     }
 
-    // 2. Verify amount
-    if (query.total_amount !== config.STARS_PRICE_AMOUNT) {
-      return {
-        ok: false,
-        errorMessage: `Invalid price amount. Expected ${config.STARS_PRICE_AMOUNT} Stars, got ${query.total_amount}.`,
-      };
-    }
-
-    // 3. Verify invoice payload and payer match
+    // 2. Identify the purchased plan from the tamper-evident payload
     const payload = TelegramStarsProvider.parseInvoicePayload(query.invoice_payload);
     if (!payload) {
       return {
         ok: false,
         errorMessage: "Malformed or unrecognized invoice payload.",
+      };
+    }
+
+    const planId = planFromPayloadId(payload.planId);
+    if (!planId) {
+      return { ok: false, errorMessage: "Unrecognized membership plan." };
+    }
+    const plan = getPlan(planId);
+
+    if (!plan.enabled) {
+      return {
+        ok: false,
+        errorMessage: `${plan.label} billing is not available yet.`,
+      };
+    }
+
+    // 3. Verify amount against the plan's own configured price
+    if (query.total_amount !== plan.priceStars) {
+      return {
+        ok: false,
+        errorMessage: `Invalid price amount. Expected ${plan.priceStars} Stars, got ${query.total_amount}.`,
       };
     }
 
@@ -128,11 +143,11 @@ export class TelegramStarsProvider implements PaymentProvider {
       };
     }
 
-    // 4. Check for active subscription to prevent accidental immediate duplicate payments
-    const active = await getActiveUserEntitlements(query.from.id);
-    const activeStars = active.find((e) => e.source === "telegram_stars");
-    if (activeStars) {
-      const remainingMs = new Date(activeStars.expiresAt).getTime() - Date.now();
+    // 4. Prevent accidental duplicate / overlapping recurring charges
+    const activePaid = await getActivePaidEntitlements(query.from.id);
+    const samePlan = activePaid.find((e) => (e.plan ?? "regular") === planId);
+    if (samePlan) {
+      const remainingMs = new Date(samePlan.expiresAt).getTime() - Date.now();
       // If user has more than 25 days remaining, warn to avoid duplicate checkout
       if (remainingMs > 25 * 24 * 3600 * 1000) {
         return {
@@ -140,6 +155,13 @@ export class TelegramStarsProvider implements PaymentProvider {
           errorMessage: "You already have an active subscription with ample time remaining.",
         };
       }
+    }
+    if (planId === "regular" && activePaid.some((e) => e.plan === "retro_plus")) {
+      return {
+        ok: false,
+        errorMessage:
+          "You currently hold Retro Plus, which already includes Regular access. Use Membership Plans to downgrade without double billing.",
+      };
     }
 
     return { ok: true };
@@ -173,6 +195,8 @@ export class TelegramStarsProvider implements PaymentProvider {
     }
 
     const payment = recordResult.payment;
+    const planId: MembershipPlanId = payment.planId ?? "regular";
+    const plan = getPlan(planId);
 
     // 2. Determine expiration timestamp
     let expiryIso: string;
@@ -182,8 +206,7 @@ export class TelegramStarsProvider implements PaymentProvider {
     } else {
       // Fallback: calculate from period seconds
       const nowMs = Date.now();
-      const active = await getActiveUserEntitlements(payment.userId);
-      const activePaid = active.find((e) => e.source === "telegram_stars");
+      const activePaid = (await getActivePaidEntitlements(payment.userId, planId))[0];
 
       let baseMs = nowMs;
       if (activePaid) {
@@ -198,9 +221,9 @@ export class TelegramStarsProvider implements PaymentProvider {
       ).toISOString();
     }
 
-    // 3. Grant or extend entitlement for all 3 protected spaces
-    const active = await getActiveUserEntitlements(payment.userId);
-    const existingPaid = active.find((e) => e.source === "telegram_stars");
+    // 3. Grant or extend the entitlement for THIS plan only (a Regular
+    //    renewal never extends Retro Plus and vice versa).
+    const existingPaid = (await getActivePaidEntitlements(payment.userId, planId))[0];
 
     let entitlement: Entitlement;
     if (existingPaid) {
@@ -217,6 +240,7 @@ export class TelegramStarsProvider implements PaymentProvider {
           chargeId: payment.chargeId,
           newExpiresAt: entitlement.expiresAt,
           source: "telegram_stars",
+          plan: planId,
         },
         0,
         payment.userId
@@ -226,7 +250,8 @@ export class TelegramStarsProvider implements PaymentProvider {
       entitlement = await createEntitlement({
         userId: payment.userId,
         source: "telegram_stars",
-        spaces: [...SPACE_IDS], // VIP Collections, Wanted List, General Chat
+        spaces: [...plan.spaces],
+        plan: planId,
         startsAt: new Date().toISOString(),
         expiresAt: expiryIso,
         status: "active",
@@ -242,6 +267,7 @@ export class TelegramStarsProvider implements PaymentProvider {
           chargeId: payment.chargeId,
           expiresAt: entitlement.expiresAt,
           source: "telegram_stars",
+          plan: planId,
         },
         0,
         payment.userId
@@ -257,6 +283,7 @@ export class TelegramStarsProvider implements PaymentProvider {
         amount: payment.amount,
         currency: payment.currency,
         isRecurring: payment.isRecurring,
+        plan: planId,
         expiresAt: entitlement.expiresAt,
       },
       0,
@@ -287,7 +314,7 @@ export class TelegramStarsProvider implements PaymentProvider {
   ): Promise<PaymentProcessResult> {
     const config = getConfig();
 
-    // Validate currency and amount
+    // Validate currency
     if (payment.currency !== config.CURRENCY) {
       return {
         success: false,
@@ -296,21 +323,26 @@ export class TelegramStarsProvider implements PaymentProvider {
       };
     }
 
-    if (payment.total_amount !== config.STARS_PRICE_AMOUNT) {
-      return {
-        success: false,
-        isDuplicate: false,
-        error: `Unexpected payment amount ${payment.total_amount}`,
-      };
-    }
-
-    // Validate payload
+    // Validate payload, payer and the plan it names
     const payload = TelegramStarsProvider.parseInvoicePayload(payment.invoice_payload);
     if (!payload || payload.userId !== userId) {
       return {
         success: false,
         isDuplicate: false,
         error: "Invalid or mismatched invoice payload",
+      };
+    }
+    const planId = planFromPayloadId(payload.planId);
+    if (!planId) {
+      return { success: false, isDuplicate: false, error: "Unrecognized membership plan" };
+    }
+
+    // Validate amount against the plan's own price
+    if (payment.total_amount !== getPlan(planId).priceStars) {
+      return {
+        success: false,
+        isDuplicate: false,
+        error: `Unexpected payment amount ${payment.total_amount}`,
       };
     }
 
@@ -326,6 +358,7 @@ export class TelegramStarsProvider implements PaymentProvider {
       amount: payment.total_amount,
       currency: payment.currency,
       invoicePayload: payment.invoice_payload,
+      planId,
       subscriptionPeriodSeconds: config.STARS_SUBSCRIPTION_PERIOD_SECONDS,
       subscriptionExpirationDate: expirationDateIso,
       isRecurring: payment.is_recurring ?? true,

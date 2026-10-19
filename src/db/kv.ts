@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Deno KV Connection Management
+ * LA CONFRÉRIE — Deno KV Connection Management
  */
 
 let kvInstance: Deno.Kv | null = null;

@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Bot Assembly & Error Handling
+ * LA CONFRÉRIE — Bot Assembly & Error Handling
  */
 
 import { Bot } from "grammy";
@@ -15,6 +15,9 @@ import { forumComposer } from "./handlers/forum.ts";
 import { wantedComposer } from "./handlers/wanted.ts";
 import { votingComposer } from "./handlers/voting.ts";
 import { treasuryComposer } from "./handlers/treasury.ts";
+import { migrationComposer } from "./handlers/migration.ts";
+import { directoryComposer } from "./handlers/directory.ts";
+import { contributeComposer } from "./handlers/contribute.ts";
 
 export function createBot(token?: string): Bot {
   const config = getConfig();
@@ -42,6 +45,9 @@ export function createBot(token?: string): Bot {
   bot.use(paymentsComposer);
   bot.use(joinReqComposer);
   bot.use(adminComposer);
+  bot.use(migrationComposer);
+  bot.use(directoryComposer);
+  bot.use(contributeComposer);
   bot.use(forumComposer);
   bot.use(wantedComposer);
   bot.use(votingComposer);

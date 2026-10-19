@@ -1,10 +1,11 @@
 /**
- * Underground Manager — Treasury, Expenses & Financial Automation Handlers
+ * LA CONFRÉRIE — Treasury, Expenses & Financial Automation Handlers
  * Phase UG-03: Treasury, Expenses & Final Automation
  */
 
 import { Composer, InlineKeyboard } from "grammy";
-import { adminOnlyMiddleware } from "../middleware/auth.ts";
+import { getClubName } from "../../config.ts";
+import { adminRouteGuard } from "../middleware/auth.ts";
 import {
   treasuryAllocationsKeyboard,
   treasuryExpenseCategoryKeyboard,
@@ -48,7 +49,12 @@ import { getWantedCandidate } from "../../db/wanted.ts";
 export const treasuryComposer = new Composer();
 
 // All treasury routes require administrator authorization
-treasuryComposer.use(adminOnlyMiddleware);
+treasuryComposer.use(
+  adminRouteGuard({
+    callbackPrefixes: ["admin:"],
+    commands: ["treasury", "record_expense", "record_withdrawal", "price"],
+  })
+);
 
 // In-memory pending draft cache for expense confirmations
 interface ExpenseDraft {
@@ -70,7 +76,7 @@ async function renderTreasuryOverviewText(): Promise<string> {
   const o = await getTreasuryOverview();
 
   return (
-    `💰 *UNDERGROUND TREASURY OVERVIEW*\n\n` +
+    `💰 *${getClubName()} TREASURY OVERVIEW*\n\n` +
     `*1. Telegram Stars Holdings:*\n` +
     `• Total Stars Received: *${o.totalStarsReceived.toLocaleString()} ⭐*\n` +
     `• Pending Holding (< 21 days): *${o.pendingStars.toLocaleString()} ⭐* (~${formatMoney(o.estimatedPendingRewardsCadMinor, "CAD")} est.)\n` +

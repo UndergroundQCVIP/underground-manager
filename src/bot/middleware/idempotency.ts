@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Update Idempotency Middleware
+ * LA CONFRÉRIE — Update Idempotency Middleware
  */
 
 import { Context, NextFunction } from "grammy";

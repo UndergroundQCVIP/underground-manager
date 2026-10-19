@@ -1,8 +1,9 @@
 /**
- * Underground Manager — Private Wanted List Service
+ * LA CONFRÉRIE — Private Wanted List Service
  * Handles member nominations, supporter tracking, eligibility checks, and channel synchronization.
  */
 
+import { getClubName } from "../config.ts";
 import { getConfig } from "../config.ts";
 import { getCreatorByName } from "../db/creators.ts";
 import {
@@ -225,12 +226,12 @@ export async function syncWantedListChannel(
   });
 
   let text =
-    `🎯 *UNDERGROUND | WANTED LIST*\n` +
+    `🎯 *${getClubName()} | WANTED LIST*\n` +
     `_Upcoming creator acquisition requests & rankings_\n` +
     `📅 *Updated:* ${nowFormatted}\n\n`;
 
   if (activeCandidates.length === 0) {
-    text += `_No active creator requests yet. Be the first to suggest one in Underground Manager!_\n\n`;
+    text += `_No active creator requests yet. Be the first to suggest one in the ${getClubName()} bot!_\n\n`;
   } else {
     activeCandidates.slice(0, 25).forEach((c, index) => {
       const statusLabel = WANTED_STATUS_LABELS[c.status] || c.status;

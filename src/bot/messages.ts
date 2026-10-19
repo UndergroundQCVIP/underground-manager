@@ -1,59 +1,85 @@
 /**
- * Underground Manager — Message Templates & Strings
+ * LA CONFRÉRIE — Message Templates & Strings
  * Organized cleanly to facilitate future localization (e.g. French/English).
+ * Every club-facing name comes from CLUB_DISPLAY_NAME (see config.ts).
  */
 
-import { getConfig } from "../config.ts";
-import { MembershipSummary, SpaceId } from "../types.ts";
+import { getClubName, getConfig } from "../config.ts";
+import { MembershipPlanId, MembershipSummary, SpaceId } from "../types.ts";
 import { getSpaceTitle } from "../access/spaces.ts";
+import { getPlan } from "../plans/plans.ts";
+
+function fmtDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function planLine(planId: MembershipPlanId): string {
+  const plan = getPlan(planId);
+  const price = plan.enabled ? `${plan.priceStars} Stars / 30 days` : "Coming soon";
+  return `*${plan.label}* — ${price}`;
+}
 
 export const messages = {
-  welcome: (firstName: string, isMember: boolean) => {
-    const config = getConfig();
+  welcome: (firstName: string, isMember: boolean, plan: MembershipPlanId | "none" = "none") => {
+    const club = getClubName();
     if (isMember) {
+      const planName = plan === "retro_plus" ? "Retro Plus" : plan === "regular" ? "Regular" : "";
       return (
         `👋 *Welcome back, ${escapeMarkdown(firstName)}!*\n\n` +
-        `You have an active *Underground VIP* membership.\n` +
+        `You have an active *${club}*${planName ? ` *${planName}*` : ""} membership.\n` +
         `Manage your subscription or access your private spaces below.`
       );
     }
     return (
-      `👋 *Welcome to Underground Manager, ${escapeMarkdown(firstName)}.*\n\n` +
-      `Underground is an exclusive private community featuring curated creator archives, private collections, and VIP discussions.\n\n` +
-      `🌟 *VIP Membership:* ${config.STARS_PRICE_AMOUNT} Telegram Stars / 30 days\n` +
-      `Recurring subscription billed via official Telegram Stars.\n\n` +
+      `👋 *Welcome to ${club}, ${escapeMarkdown(firstName)}.*\n\n` +
+      `${club} is an exclusive private community featuring curated creator archives, private collections, and member discussions.\n\n` +
+      `🌟 ${planLine("regular")}\n` +
+      `🎞️ ${planLine("retro_plus")}\n` +
+      `Recurring subscriptions billed via official Telegram Stars.\n\n` +
       `Select an option below to join or manage your account:`
     );
   },
 
-  nonMemberInfo: () => {
-    const config = getConfig();
-    return (
-      `💎 *UNDERGROUND VIP MEMBERSHIP*\n\n` +
-      `Your subscription grants exclusive access to:\n` +
-      `• *TOKEBEC VIP COLLECTIONS* — Curated creator library\n` +
-      `• *Underground General Chat* — Private member conversations\n` +
-      `• *Wanted List* — Creator requests and nominations\n\n` +
-      `💳 *Price:* ${config.STARS_PRICE_AMOUNT} Stars / 30 days\n` +
-      `🔄 *Type:* Recurring subscription, cancel anytime via Telegram Settings\n\n` +
-      `Tap below to subscribe instantly:`
-    );
+  plansOverview: (summary?: MembershipSummary) => {
+    const club = getClubName();
+    const retro = getPlan("retro_plus");
+    let text =
+      `💎 *${club} — MEMBERSHIP PLANS*\n\n` +
+      `*Regular* — ${getPlan("regular").priceStars} Stars / 30 days\n` +
+      `• TOKEBEC VIP COLLECTIONS (Regular vault)\n` +
+      `• Private Wanted List\n` +
+      `• ${club} General Chat\n` +
+      `• Creator nominations & voting\n\n` +
+      `*Retro Plus* — ${retro.enabled ? `${retro.priceStars} Stars / 30 days` : "Coming soon"}\n` +
+      `• Everything in Regular\n` +
+      `• RETRO | ${club} (Retro vault)\n\n` +
+      `Both plans have identical voting rights. Retro Plus only adds the Retro collection.\n` +
+      `🔄 Recurring 30-day Telegram Stars subscriptions — cancel anytime in Telegram Settings > Stars.`;
+    if (summary?.plan === "regular" && retro.enabled) {
+      text += `\n\n⬆️ You can upgrade to Retro Plus below.`;
+    }
+    return text;
   },
 
+  nonMemberInfo: () => messages.plansOverview(),
+
   membershipStatus: (summary: MembershipSummary) => {
-    const config = getConfig();
     if (!summary.isMember) {
       return (
         `📋 *MY MEMBERSHIP*\n\n` +
         `*Status:* ⚪ Inactive / No Subscription\n` +
-        `*Price:* ${config.STARS_PRICE_AMOUNT} Stars every 30 days\n\n` +
-        `You do not currently have an active membership. Tap below to subscribe.`
+        `*Regular:* ${getPlan("regular").priceStars} Stars every 30 days\n` +
+        `*Retro Plus:* ${getPlan("retro_plus").enabled ? `${getPlan("retro_plus").priceStars} Stars every 30 days` : "Coming soon"}\n\n` +
+        `You do not currently have an active membership. Tap below to see the plans.`
       );
     }
 
-    const typeStr = summary.hasPaid
-      ? "🌟 Paid (Telegram Stars)"
-      : "🎁 Complimentary";
+    const typeStr = summary.hasPaid ? "🌟 Paid (Telegram Stars)" : "🎁 Complimentary";
+    const planStr = summary.plan === "retro_plus" ? "🎞️ Retro Plus" : "Regular";
 
     const expiryStr = summary.effectiveExpiry
       ? new Date(summary.effectiveExpiry).toLocaleDateString("en-US", {
@@ -73,13 +99,21 @@ export const messages = {
       ? "Automatic renewal every 30 days via Telegram Stars"
       : "Non-renewing (Complimentary grant)";
 
+    // Per-entitlement paid-through dates make plan changes transparent.
+    const lines = summary.activeEntitlements
+      .filter((e) => e.source === "telegram_stars")
+      .map((e) => `  • ${getPlan(e.plan ?? "regular").label}: paid through ${fmtDate(e.expiresAt)}`)
+      .join("\n");
+
     return (
       `📋 *MY MEMBERSHIP*\n\n` +
+      `*Plan:* ${planStr}\n` +
       `*Type:* ${typeStr}\n` +
       `*Status:* 🟢 Active\n` +
       `*Valid Until:* ${expiryStr}\n` +
-      `*Renewal:* ${renewalStr}\n\n` +
-      `*Accessible Spaces:*\n${spacesList}\n\n` +
+      `*Renewal:* ${renewalStr}\n` +
+      (lines ? `${lines}\n` : "") +
+      `\n*Accessible Spaces:*\n${spacesList}\n\n` +
       `_Manage recurring Telegram subscriptions anytime in Telegram Settings > Stars._`
     );
   },
@@ -89,7 +123,7 @@ export const messages = {
       return (
         `🔒 *ACCESS PRIVATE CHANNELS*\n\n` +
         `You do not have access to any private spaces.\n` +
-        `Please purchase a subscription to unlock Underground spaces.`
+        `Please purchase a subscription to unlock ${getClubName()} spaces.`
       );
     }
 
@@ -103,7 +137,7 @@ export const messages = {
   paySupport: () => {
     const config = getConfig();
     return (
-      `💬 *UNDERGROUND SUPPORT & BILLING*\n\n` +
+      `💬 *${getClubName()} SUPPORT & BILLING*\n\n` +
       `Need help with your subscription or payment?\n\n` +
       `• *Telegram Stars:* Managed directly by Telegram. You can view, manage, or cancel active subscriptions in Telegram Settings > Stars.\n` +
       `• *Bot Support:* Contact ${config.SUPPORT_USERNAME} with your Telegram ID for billing inquiries.\n` +
@@ -111,19 +145,16 @@ export const messages = {
     );
   },
 
-  paymentSuccess: (expiresAt: string) => {
-    const dateStr = new Date(expiresAt).toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-
+  paymentSuccess: (expiresAt: string, planId: MembershipPlanId = "regular") => {
+    const club = getClubName();
+    const retroLine = planId === "retro_plus" ? `• RETRO | ${club}\n` : "";
     return (
       `🎉 *PAYMENT CONFIRMED!*\n\n` +
-      `Thank you! Your Underground VIP subscription is now *active* until *${dateStr}*.\n\n` +
-      `You now have full access to:\n` +
+      `Thank you! Your ${club} *${getPlan(planId).label}* subscription is now *active* until *${fmtDate(expiresAt)}*.\n\n` +
+      `You now have access to:\n` +
       `• TOKEBEC VIP COLLECTIONS\n` +
-      `• Underground General Chat\n` +
+      retroLine +
+      `• ${club} General Chat\n` +
       `• Wanted List\n\n` +
       `Tap *Access My Channels* below to enter your spaces!`
     );
@@ -131,7 +162,7 @@ export const messages = {
 
   adminMenu: () => {
     return (
-      `🛠️ *UNDERGROUND MANAGER — ADMINISTRATION*\n\n` +
+      `🛠️ *${getClubName()} | ADMIN*\n\n` +
       `Select an administrative module:`
     );
   },

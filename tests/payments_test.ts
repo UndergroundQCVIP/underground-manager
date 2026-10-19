@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Pre-Publish Test Suite: PAYMENTS
+ * LA CONFRÉRIE — Pre-Publish Test Suite: PAYMENTS
  */
 
 import { assertEquals, assertNotEquals } from "@std/assert";

@@ -1,7 +1,8 @@
 /**
- * Underground Manager — Member Acquisition Voting Handlers
+ * LA CONFRÉRIE — Member Acquisition Voting Handlers
  */
 
+import { getClubName } from "../../config.ts";
 import { Composer, InlineKeyboard } from "grammy";
 import { getActiveBallot, getBallot, hasUserVoted } from "../../db/voting.ts";
 import { getMembershipSummary } from "../../db/entitlements.ts";
@@ -89,7 +90,7 @@ export async function handleOpenVote(ctx: any) {
     const text =
       `✅ *VOTE ALREADY RECORDED*\n\n` +
       `You have already cast your vote in *${ballot.title}*.\n\n` +
-      `🔒 In accordance with Underground voting rules, votes are final, unchangeable, and confidential.\n` +
+      `🔒 In accordance with ${getClubName()} voting rules, votes are final, unchangeable, and confidential.\n` +
       `📅 Results will be announced on *${closesDate}*.`;
 
     const kb = new InlineKeyboard()
@@ -130,7 +131,7 @@ export async function handleOpenVote(ctx: any) {
 
   const text =
     `🗳️ *${ballot.title}*\n\n` +
-    `Which creator should Underground acquire next?\n\n` +
+    `Which creator should ${getClubName()} acquire next?\n\n` +
     `⏳ *Voting Closes:* ${closesDate}\n` +
     `⚠️ *Rules:* 1 irrevocable vote per paid member. Candidate order is randomized.\n\n` +
     `Select your choice below:`;
@@ -208,7 +209,7 @@ votingComposer.callbackQuery(/^vote:exec:([a-f0-9-]+):([a-f0-9-]+)$/, async (ctx
     `🎉 *VOTE SUCCESSFULLY RECORDED!*\n\n` +
     `Your vote has been securely and privately registered.\n\n` +
     `Final results and acquisition decisions will be announced in the Wanted List channel when the voting window closes.\n\n` +
-    `Thank you for shaping the Underground collections!`,
+    `Thank you for shaping the ${getClubName()} collections!`,
     {
       parse_mode: "Markdown",
       reply_markup: new InlineKeyboard()

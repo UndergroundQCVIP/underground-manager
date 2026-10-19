@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Test Helpers & Mock Telegram API
+ * LA CONFRÉRIE — Test Helpers & Mock Telegram API
  */
 
 import { setConfigForTesting, AppConfig } from "../src/config.ts";
@@ -12,10 +12,13 @@ export const MOCK_CONFIG: AppConfig = {
   WEBHOOK_SECRET: "test_secret_token_12345",
   ADMIN_USER_IDS: [111111, 222222],
   VIP_COLLECTIONS_CHAT_ID: -1001001,
+  TELEGRAM_RETRO_FORUM_CHAT_ID: -1001005,
   PUBLIC_DIRECTORY_CHAT_ID: -1001004,
   WANTED_LIST_CHAT_ID: -1001002,
   GENERAL_CHAT_ID: -1001003,
+  CLUB_DISPLAY_NAME: "LA CONFRÉRIE",
   STARS_PRICE_AMOUNT: 750,
+  RETRO_PLUS_STARS_PRICE_AMOUNT: 1500, // test-only value; production price is NOT hardcoded
   STARS_SUBSCRIPTION_PERIOD_SECONDS: 2592000, // 30 days
   CURRENCY: "XTR",
   BOT_MODE: "webhook",
@@ -30,6 +33,8 @@ export const MOCK_CONFIG: AppConfig = {
   DEFAULT_STARS_REWARD_VALUATION_USD: 0.013,
   TREASURY_REPORT_CHANNEL_ID: -1001002,
   EXCHANGE_RATE_API_URL: "https://open.er-api.com/v6/latest/USD",
+  MIGRATION_BATCH_SIZE: 30,
+  MIGRATION_BATCH_DELAY_MS: 0,
 };
 
 export async function setupTestEnvironment(): Promise<Deno.Kv> {

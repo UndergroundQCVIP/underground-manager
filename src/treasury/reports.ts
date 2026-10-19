@@ -1,10 +1,10 @@
 /**
- * Underground Manager — Treasury Reporting Engine
+ * LA CONFRÉRIE — Treasury Reporting Engine
  * Phase UG-03: Treasury, Expenses & Final Automation
  */
 
 import { Api } from "grammy";
-import { getConfig } from "../config.ts";
+import { getClubName, getConfig } from "../config.ts";
 import { logAuditEvent } from "../db/audit.ts";
 import {
   countActiveComplimentaryMembers,
@@ -15,6 +15,7 @@ import { listWantedCandidates } from "../db/wanted.ts";
 import { TreasuryMonthlyReport, WantedCandidate } from "../types.ts";
 import { formatMoney } from "./conversion.ts";
 import { getTreasuryOverview } from "./service.ts";
+import { computeTierRevenue, formatTierRevenueLines } from "./tiers.ts";
 
 /**
  * Generate a complete Treasury Monthly Report.
@@ -25,11 +26,12 @@ export async function generateMonthlyTreasuryReport(
   const currentPeriod = period ?? new Date().toISOString().slice(0, 7); // "YYYY-MM"
   const overview = await getTreasuryOverview();
 
-  const [activePaidSubscribersCount, complimentaryMembersCount, allCandidates] =
+  const [activePaidSubscribersCount, complimentaryMembersCount, allCandidates, revenueByTier] =
     await Promise.all([
       countActivePaidSubscribers(),
       countActiveComplimentaryMembers(),
       listWantedCandidates(),
+      computeTierRevenue(currentPeriod),
     ]);
 
   // Filter creators acquired in this month
@@ -51,6 +53,7 @@ export async function generateMonthlyTreasuryReport(
     period: currentPeriod,
     overview,
     activePaidSubscribersCount,
+    revenueByTier,
     complimentaryMembersCount,
     creatorsAcquiredThisMonth,
     newNominationsCount,
@@ -95,13 +98,17 @@ export function formatPrivateMemberReport(report: TreasuryMonthlyReport): string
       : "None this cycle";
 
   return (
-    `🏛️ *UNDERGROUND TREASURY REPORT*\n` +
+    `🏛️ *${getClubName()} TREASURY REPORT*\n` +
     `📅 *${periodLabel}*\n\n` +
     `💰 *Revenue & Inflows:*\n` +
     `• Stars Received: *${o.totalStarsReceived.toLocaleString()} ⭐*\n` +
     `• Pending Settlement (21-Day Hold): *${o.pendingStars.toLocaleString()} ⭐* (~${formatMoney(o.estimatedPendingRewardsCadMinor, "CAD")} est.)\n` +
     `• Potentially Withdrawable: *${o.potentiallyWithdrawableStars.toLocaleString()} ⭐* (~${formatMoney(o.estimatedWithdrawableRewardsCadMinor, "CAD")} est.)\n` +
-    `• Confirmed Settled Cash: *${formatMoney(o.settledNetCashCadMinor, "CAD")}*\n\n` +
+    `• Confirmed Settled Cash: *${formatMoney(o.settledNetCashCadMinor, "CAD")}*\n` +
+    (report.revenueByTier
+      ? `• Subscription Revenue by Tier:\n${formatTierRevenueLines(report.revenueByTier)}`
+      : "") +
+    `\n` +
     `💸 *Expenses & Commitments:*\n` +
     `• Creator Acquisitions: *${formatMoney(o.paidAcquisitionsCadMinor, "CAD")}*\n` +
     `• Platform Operations & Mktg: *${formatMoney(o.paidOperationsCadMinor, "CAD")}*\n` +
@@ -145,6 +152,9 @@ export function formatDetailedAdminReport(report: TreasuryMonthlyReport): string
     `• Total Paid: ${formatMoney(o.totalPaidExpensesCadMinor, "CAD")}\n` +
     `• Active Commitments: ${formatMoney(o.committedAcquisitionsCadMinor, "CAD")}\n` +
     `• Unreimbursed Admin Outlays: ${formatMoney(o.adminReimbursementsOwedCadMinor, "CAD")}\n\n` +
+    (report.revenueByTier
+      ? `*Subscription revenue by tier (Stars, completed payments only; complimentary excluded):*\n${formatTierRevenueLines(report.revenueByTier)}\n`
+      : "") +
     `*4. Net Acquisition Purchasing Power:*\n` +
     `• Available Acquisition Budget: *${formatMoney(o.availableAcquisitionBudgetCadMinor, "CAD")}*`
   );

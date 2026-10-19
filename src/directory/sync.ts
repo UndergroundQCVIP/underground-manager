@@ -1,16 +1,16 @@
 /**
- * Underground Manager — Public Creator Directory Synchronization
- * Maintains pinned, alphabetically sorted creator listings in the public directory channel.
+ * LA CONFRÉRIE — Public Creator Directory Synchronization
+ * Maintains ONE pinned, alphabetically sorted listing of Regular and Retro creators.
  */
 
-import { getConfig } from "../config.ts";
-import { listCreators } from "../db/creators.ts";
+import { getClubName, getConfig } from "../config.ts";
+import { creatorCollection, listCreators } from "../db/creators.ts";
 import {
   clearDirectoryDirty,
   getDirectorySyncState,
 } from "../db/directory.ts";
 import { logAuditEvent } from "../db/audit.ts";
-import { Creator } from "../types.ts";
+import { CollectionCategory, Creator } from "../types.ts";
 
 export interface DirectoryApiLike {
   sendMessage(
@@ -40,13 +40,31 @@ export function formatCreatorDate(isoString?: string): string {
   });
 }
 
+export const COLLECTION_LABELS: Record<CollectionCategory, string> = {
+  regular: "Regular",
+  retro: "Retro",
+};
+
+/** Creators past an optional retirement date are no longer listed publicly. */
+export function isRetired(c: Creator, nowMs = Date.now()): boolean {
+  return !!c.retiredAt && new Date(c.retiredAt).getTime() <= nowMs;
+}
+
 export function buildDirectorySections(
-  creators: Creator[],
-  botUsername: string
+  allCreators: Creator[],
+  botUsername: string,
+  opts: { collection?: CollectionCategory } = {}
 ): string[] {
+  const club = getClubName();
+  const creators = allCreators
+    .filter((c) => !isRetired(c))
+    .filter((c) => !opts.collection || creatorCollection(c) === opts.collection)
+    // Alphabetical across both categories
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+
   if (creators.length === 0) {
     return [
-      `💎 *UNDERGROUND | CREATOR DIRECTORY*\n\n` +
+      `💎 *${club} | CREATOR DIRECTORY*\n\n` +
       `_No public collections are currently available._\n` +
       `_New collections are added regularly by our curators._`,
     ];
@@ -58,40 +76,48 @@ export function buildDirectorySections(
     year: "numeric",
   });
 
-  // Group creators by initial letter
-  const grouped: Record<string, Creator[]> = {};
-  for (const c of creators) {
-    const letter = (c.name[0] || "#").toUpperCase();
-    if (!grouped[letter]) {
-      grouped[letter] = [];
-    }
-    grouped[letter].push(c);
-  }
-
-  const sortedLetters = Object.keys(grouped).sort();
-  const chunks: string[] = [];
-
+  const filterNote = opts.collection ? ` — ${COLLECTION_LABELS[opts.collection]} only` : "";
   let currentChunk =
-    `💎 *UNDERGROUND | CREATOR DIRECTORY*\n` +
-    `_Curated archives in TOKEBEC VIP COLLECTIONS_\n` +
+    `💎 *${club} | CREATOR DIRECTORY*${filterNote}\n` +
     `📅 *Directory Updated:* ${nowFormatted}\n` +
-    `🔒 _Subscribe via Underground Manager for instant access_\n\n`;
+    `🔒 _Open the ${club} bot to check your access_\n\n`;
 
-  for (const letter of sortedLetters) {
-    let sectionText = `*${letter}*\n`;
-    for (const c of grouped[letter]) {
-      const updateStr = formatCreatorDate(c.lastContentUpdatedAt);
-      const deepLink = `https://t.me/${botUsername}?start=creator_${c.id}`;
-      sectionText += `• *${c.name}* — ${updateStr} [🔍 View](${deepLink})\n`;
-    }
-    sectionText += "\n";
-
-    // If adding this section exceeds Telegram safe chunk size (3500 chars), push and start new chunk
-    if (currentChunk.length + sectionText.length > 3500) {
+  const chunks: string[] = [];
+  const push = (block: string) => {
+    // Keep each Telegram message under the safe chunk size
+    if (currentChunk.length + block.length > 3500) {
       chunks.push(currentChunk.trim());
-      currentChunk = `💎 *UNDERGROUND | CREATOR DIRECTORY (Cont.)*\n\n${sectionText}`;
+      currentChunk = `💎 *${club} | CREATOR DIRECTORY (Cont.)*\n\n${block}`;
     } else {
-      currentChunk += sectionText;
+      currentChunk += block;
+    }
+  };
+
+  // One section per forum, each alphabetical (A–Z) and labelled
+  const sections: { collection: CollectionCategory; heading: string }[] = [
+    { collection: "regular", heading: `📚 *REGULAR — TOKEBEC VIP COLLECTIONS*` },
+    { collection: "retro", heading: `🎞️ *RETRO — RETRO | ${club}*` },
+  ];
+  for (const section of sections) {
+    const inSection = creators.filter((c) => creatorCollection(c) === section.collection);
+    if (inSection.length === 0) continue;
+
+    push(`${section.heading} (${inSection.length})\n\n`);
+
+    const grouped: Record<string, Creator[]> = {};
+    for (const c of inSection) {
+      const letter = (c.name[0] || "#").toUpperCase();
+      (grouped[letter] ??= []).push(c);
+    }
+    for (const letter of Object.keys(grouped).sort()) {
+      let sectionText = `*${letter}*\n`;
+      for (const c of grouped[letter]) {
+        const updateStr = formatCreatorDate(c.lastContentUpdatedAt);
+        const deepLink = `https://t.me/${botUsername}?start=creator_${c.id}`;
+        const label = COLLECTION_LABELS[creatorCollection(c)];
+        sectionText += `• *${c.name}* — ${label} — ${updateStr} [🔍 View](${deepLink})\n`;
+      }
+      push(sectionText + "\n");
     }
   }
 

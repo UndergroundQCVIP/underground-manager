@@ -1,8 +1,9 @@
 /**
- * Underground Manager — Monthly Creator Voting Service
+ * LA CONFRÉRIE — Monthly Creator Voting Service
  * Manages ballot generation, bot-controlled vote casting, closures, turnout calculation, and runoffs.
  */
 
+import { getClubName } from "../config.ts";
 import { getConfig } from "../config.ts";
 import {
   createBallot,
@@ -225,7 +226,7 @@ export async function closeAndFinalizeBallot(
           `⚡ *TIE DETECTED — RUNOFF VOTE OPEN!*\n\n` +
           `The vote ended in a tie between:\n` +
           summary.tiedCandidates.map((c) => `• *${c.creatorName}*`).join("\n") +
-          `\n\nA 5-day runoff ballot is now open inside Underground Manager.`,
+          `\n\nA 5-day runoff ballot is now open inside the ${getClubName()} bot.`,
           {
             parse_mode: "Markdown",
             reply_markup: {

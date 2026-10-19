@@ -1,7 +1,8 @@
 /**
- * Underground Manager — Member Wanted List Handlers
+ * LA CONFRÉRIE — Member Wanted List Handlers
  */
 
+import { getClubName } from "../../config.ts";
 import { Composer, InlineKeyboard } from "grammy";
 import {
   getCurrentMonthCycle,
@@ -44,7 +45,7 @@ wantedComposer.callbackQuery("wanted:menu", async (ctx) => {
   const activeBallot = await getActiveBallot();
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    `🎯 *UNDERGROUND | WANTED LIST*\n\n` +
+    `🎯 *${getClubName()} | WANTED LIST*\n\n` +
     `Tell us which creators we should acquire next!\n\n` +
     `• *Suggest:* Submit new creator requests\n` +
     `• *Support:* Vote on existing community nominations\n` +
@@ -170,7 +171,7 @@ wantedComposer.command("suggest", async (ctx) => {
     await ctx.reply(
       `✅ *${result.candidate.name}* is already on the Wanted List!\n\n` +
       `Your support has been added. Current supporters: *${result.candidate.supportCount}*.\n\n` +
-      `Thank you for helping curate Underground!`,
+      `Thank you for helping curate ${getClubName()}!`,
       {
         parse_mode: "Markdown",
         reply_markup: new InlineKeyboard().text("🎯 View Wanted List", "wanted:view"),
@@ -281,7 +282,7 @@ wantedComposer.callbackQuery(/^wanted:sup_exec:([a-f0-9-]+)$/, async (ctx) => {
     `✅ *SUPPORT CONFIRMED!*\n\n` +
     `You have supported *${result.candidate.name}*.\n` +
     `Total supporters: *${result.candidate.supportCount}*.\n\n` +
-    `Thank you for contributing to Underground acquisitions!`,
+    `Thank you for contributing to ${getClubName()} acquisitions!`,
     {
       parse_mode: "Markdown",
       reply_markup: new InlineKeyboard().text("🎯 View Wanted List", "wanted:view"),

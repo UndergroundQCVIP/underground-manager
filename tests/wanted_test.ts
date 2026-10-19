@@ -1,5 +1,5 @@
 /**
- * Underground Manager — UG-02 Pre-Publish Test Suite: WANTED LIST & NOMINATIONS
+ * LA CONFRÉRIE — UG-02 Pre-Publish Test Suite: WANTED LIST & NOMINATIONS
  */
 
 import { assertEquals, assertNotEquals } from "@std/assert";

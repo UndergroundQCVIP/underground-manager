@@ -1,5 +1,5 @@
 /**
- * Underground Manager — System Settings Repository
+ * LA CONFRÉRIE — System Settings Repository
  */
 
 import { getKv } from "./kv.ts";

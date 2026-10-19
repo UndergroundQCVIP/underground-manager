@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Pre-Publish Test Suite: SECURITY & RESILIENCE
+ * LA CONFRÉRIE — Pre-Publish Test Suite: SECURITY & RESILIENCE
  */
 
 import { assertEquals } from "@std/assert";

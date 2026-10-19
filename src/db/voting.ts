@@ -1,5 +1,5 @@
 /**
- * Underground Manager — Voting Repository
+ * LA CONFRÉRIE — Voting Repository
  * Manages monthly creator acquisition ballots, anonymous vote records, and tallies.
  */
 
