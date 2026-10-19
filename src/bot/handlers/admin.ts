@@ -650,11 +650,19 @@ adminComposer.callbackQuery("admin:sync_dir_menu", async (ctx) => {
   const { listCreators, creatorCollection } = await import("../../db/creators.ts");
   const state = await getDirectorySyncState();
   const listed = await listCreators({ status: "active", hasContentOnly: true });
+  const everyone = await listCreators();
   const retro = listed.filter((c) => creatorCollection(c) === "retro").length;
+  const retroRegistered = everyone.filter((c) => creatorCollection(c) === "retro");
+  const retroHidden = retroRegistered.filter((c) => !c.hasContent || c.status !== "active").length;
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
     `📚 *RÉPERTOIRE*\n\n` +
     `• Créateurs listés : ${listed.length} (Regular ${listed.length - retro} · Retro ${retro})\n` +
+    `• Retro inscrits : ${retroRegistered.length}${retroHidden ? ` (dont ${retroHidden} sans contenu détecté, donc non listés)` : ""}\n` +
+    (state.lastError ? `• ⚠️ Dernière erreur de synchronisation : ${escapeMd(state.lastError)}\n` : "") +
+    (retroRegistered.length === 0
+      ? `\n💡 _Aucun créateur Retro n'est inscrit. Faites publier une photo/vidéo dans le sujet Retro par un administrateur (le sujet s'inscrit tout seul), ou utilisez_ \`/register_creator retro <id_sujet> <nom>\`.\n\n`
+      : "") +
     `• Dernière synchronisation : ${state.lastSyncAt ? new Date(state.lastSyncAt).toLocaleString("fr-CA") : "jamais"}\n` +
     `• Changements en attente : ${state.isDirty ? "oui" : "non"}`,
     {

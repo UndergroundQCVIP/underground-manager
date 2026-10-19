@@ -272,6 +272,12 @@ export async function syncPublicDirectory(
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     console.error("Directory synchronization failed:", errorMsg);
+    // Surface the failure to administrators (Répertoire menu) instead of failing silently.
+    await saveDirectorySyncState({
+      ...(await getDirectorySyncState()),
+      lastAttemptAt: new Date().toISOString(),
+      lastError: errorMsg.slice(0, 300),
+    }).catch(() => {});
     // Keep any messages created before the failure so the retry edits them
     // instead of posting a second copy.
     if (publishedIds.length > 0) {

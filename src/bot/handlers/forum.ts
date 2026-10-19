@@ -20,7 +20,16 @@ export const forumComposer = new Composer();
  */
 function isTopicAuthority(ctx: Context): boolean {
   const id = ctx.from?.id;
-  return id !== undefined && (isAdministrator(id) || id === ctx.me.id);
+  return (id !== undefined && (isAdministrator(id) || id === ctx.me.id)) || isAnonymousGroupAdmin(ctx);
+}
+
+/**
+ * An administrator posting "as the group" (anonymous admin): Telegram sets sender_chat to the
+ * group itself, which only real group administrators can do.
+ */
+function isAnonymousGroupAdmin(ctx: Context): boolean {
+  const msg = ctx.msg;
+  return !!msg && msg.sender_chat !== undefined && msg.sender_chat.id === ctx.chat?.id;
 }
 
 // Detect new forum topics created
@@ -65,17 +74,19 @@ forumComposer.on(["message:photo", "message:video"], async (ctx) => {
         mediaGroupId: msg.media_group_id,
         hasCaption: !!msg.caption,
       };
-      let creator = await handleMediaUpload(ctx.chat.id, threadId, senderId, msg.date, media);
+      const anonymousAdmin = isAnonymousGroupAdmin(ctx);
+      const opts = { trustedAnonymousAdmin: anonymousAdmin };
+      let creator = await handleMediaUpload(ctx.chat.id, threadId, senderId, msg.date, media, opts);
 
       // A topic that existed before the bot was in the forum was never registered. Telegram
       // includes the topic's own name on messages posted inside it, so an ADMINISTRATOR's
       // first upload registers it (Regular or Retro) and is then counted — no manual step.
-      if (!creator && isAdministrator(senderId)) {
+      if (!creator && (isAdministrator(senderId) || anonymousAdmin)) {
         const topicName = msg.reply_to_message?.forum_topic_created?.name;
         if (topicName) {
           const registered = await handleForumTopicCreated(ctx.chat.id, threadId, topicName);
           if (registered) {
-            creator = await handleMediaUpload(ctx.chat.id, threadId, senderId, msg.date, media);
+            creator = await handleMediaUpload(ctx.chat.id, threadId, senderId, msg.date, media, opts);
           }
         }
       }

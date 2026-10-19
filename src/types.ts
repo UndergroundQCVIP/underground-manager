@@ -350,6 +350,8 @@ export interface DirectorySyncState {
   isDirty: boolean; // Flag set whenever creator name/media changes
   lastNewKey?: string; // creators flagged 🆕 at the last sync
   dirtySeq?: number; // Bumped on every change so an in-flight sync cannot clear a newer one
+  lastAttemptAt?: string; // Last time a sync tried to reach Telegram
+  lastError?: string; // Why the last attempt failed (cleared by the next success)
 }
 
 export type WantedCandidateStatus =

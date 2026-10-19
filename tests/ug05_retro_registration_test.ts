@@ -13,7 +13,7 @@ import { syncPublicDirectory } from "../src/directory/sync.ts";
 
 const ADMIN = 111111;
 
-function groupPhoto(chatId: number, userId: number, topicId: number, topicName: string | null, messageId: number) {
+function groupPhoto(chatId: number, userId: number, topicId: number, topicName: string | null, messageId: number, anonymous = false) {
   const chat = { id: chatId, type: "supergroup" as const, title: "Forum", is_forum: true };
   return {
     update_id: 500000 + messageId,
@@ -21,7 +21,10 @@ function groupPhoto(chatId: number, userId: number, topicId: number, topicName: 
       message_id: messageId,
       date: Math.floor(Date.now() / 1000),
       chat,
-      from: { id: userId, is_bot: false, first_name: "U" },
+      from: anonymous
+        ? { id: 1087968824, is_bot: true, first_name: "Group", username: "GroupAnonymousBot" }
+        : { id: userId, is_bot: false, first_name: "U" },
+      ...(anonymous ? { sender_chat: chat } : {}),
       message_thread_id: topicId,
       is_topic_message: true,
       photo: [{ file_id: "f", file_unique_id: "u", width: 1, height: 1 }],
@@ -126,6 +129,65 @@ Deno.test("RETRO — Help text explains how to register Retro topics", async () 
     await bot.handleUpdate(cb(ADMIN, "admin:creator_register_help") as never);
     const t = JSON.stringify(calls.filter((x) => x.method === "editMessageText").at(-1));
     assertStringIncludes(t, "/register_creator retro");
+  } finally {
+    await kv.close();
+  }
+});
+
+Deno.test("RETRO — An administrator posting anonymously (as the group) is recognised; a stranger is not", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    const { bot } = makeBot();
+    await bot.handleUpdate(groupPhoto(RETRO_CHAT, 0, 60, "Luna", 920, true) as never);
+    const c = await getCreatorByTopic(RETRO_CHAT, 60);
+    assert(c, "anonymous admin upload must register the Retro topic");
+    assertEquals(c!.collection, "retro");
+    assertEquals(c!.hasContent, true);
+    // The same shape from a non-anonymous non-admin must still be ignored
+    await bot.handleUpdate(groupPhoto(RETRO_CHAT, 4242, 61, "Intruder", 921) as never);
+    assertEquals(await getCreatorByTopic(RETRO_CHAT, 61), null);
+  } finally {
+    await kv.close();
+  }
+});
+
+Deno.test("DIRECTORY — A failed sync is no longer silent: the error is stored, shown to admins and cleared on success", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    await seedCreator({ name: "Aria", topicId: 1 });
+    await seedCreator({ name: "Maya", topicId: 2, collection: "retro" });
+    const api = new MockTelegramApi();
+    const orig = api.sendMessage.bind(api);
+    api.sendMessage = async () => { throw new Error("Bad Request: can't parse entities"); };
+    const res = await syncPublicDirectory(api, true);
+    assertEquals(res.updated, false);
+    assertStringIncludes(res.error!, "can't parse entities");
+
+    const { bot, calls } = makeBot();
+    await bot.handleUpdate(cb(ADMIN, "admin:sync_dir_menu") as never);
+    const screen = String((calls.filter((x) => x.method === "editMessageText").at(-1)!.payload as { text: string }).text);
+    assertStringIncludes(screen, "Dernière erreur de synchronisation");
+    assertStringIncludes(screen, "Retro 1");
+
+    api.sendMessage = orig;
+    assertEquals((await syncPublicDirectory(api, true)).updated, true);
+    calls.length = 0;
+    await bot.handleUpdate(cb(ADMIN, "admin:sync_dir_menu") as never);
+    assert(!String((calls.filter((x) => x.method === "editMessageText").at(-1)!.payload as { text: string }).text).includes("Dernière erreur"));
+  } finally {
+    await kv.close();
+  }
+});
+
+Deno.test("DIRECTORY — Menu explains how to register Retro when none is registered", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    await seedCreator({ name: "Aria", topicId: 1 });
+    const { bot, calls } = makeBot();
+    await bot.handleUpdate(cb(ADMIN, "admin:sync_dir_menu") as never);
+    const screen = String((calls.filter((x) => x.method === "editMessageText").at(-1)!.payload as { text: string }).text);
+    assertStringIncludes(screen, "Aucun créateur Retro n'est inscrit");
+    assertStringIncludes(screen, "/register_creator retro");
   } finally {
     await kv.close();
   }

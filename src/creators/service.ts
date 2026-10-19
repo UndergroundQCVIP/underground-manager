@@ -185,7 +185,12 @@ export async function handleMediaUpload(
   senderUserId: number,
   /** Telegram message.date (unix seconds): the real upload time. */
   messageDateUnix?: number,
-  media?: UploadedMediaInfo
+  media?: UploadedMediaInfo,
+  /**
+   * The sender is known to be a group administrator posting anonymously ("as the group"):
+   * Telegram then reports the group's anonymous bot as the user, which is not in ADMIN_USER_IDS.
+   */
+  options: { trustedAnonymousAdmin?: boolean } = {}
 ): Promise<Creator | null> {
   // Only monitor media uploads inside the Regular and Retro creator forums
   if (!collectionForChat(chatId)) {
@@ -193,7 +198,7 @@ export async function handleMediaUpload(
   }
 
   // Only authorized administrators or system accounts may update collection status
-  if (!isAdministrator(senderUserId)) {
+  if (!isAdministrator(senderUserId) && !options.trustedAnonymousAdmin) {
     return null;
   }
 
