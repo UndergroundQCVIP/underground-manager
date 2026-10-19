@@ -139,6 +139,11 @@ async function main() {
         if (m.status === "administrator") {
           // deno-lint-ignore no-explicit-any
           const rights = m as any;
+          console.log(
+            rights.is_anonymous
+              ? "    🕶️  Bot posts anonymously (shown under the group's name)."
+              : "    👁  Bot posts under its own name. To hide it: group → Administrators → the bot → enable \"Remain Anonymous\"."
+          );
           const need = label.startsWith("Retro")
             ? ["can_manage_topics", "can_invite_users", "can_restrict_members"]
             : ["can_delete_messages"];
