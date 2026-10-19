@@ -656,3 +656,9 @@ Contribute → *Nouveau créateur*: name → optional profile URL → Regular/Re
 * Public directory posts now carry navigation buttons (Explore · How to join · Contribute · Membership options), re-sent on every edit so daily updates keep them. Admin → Settings → Navigation publique: update welcome menu / directory buttons / synchronize all (hash-compared; unchanged content is not re-sent).
 * **Telegram bots cannot create groups.** Create the lobby by hand, add the bot as admin (post, edit, pin), set the env vars, then synchronize (exact steps are shown in Navigation publique → Paramètres du groupe public).
 
+### 15.5 Referrals (UG-06)
+Main menu → **🤝 Parrainage** gives each user a personal link `t.me/<bot>?start=ref_<code>` (stable, unique) with a share button and stats. A person is attributed to a referrer only on their **first** contact with the bot (permanent; never self; never replaced). Bonuses (same earned-access engine, one ledger entry per source, no cap, no multi-level):
+* **Contribution rewards:** when an admin rewards the referred person's contribution, the referrer gets **50 % of the days, rounded up (minimum 1)** for the **same forums**. The admin's reward screen shows the referrer's bonus before confirming. Nothing happens for no-reward approvals, rejections or unresolved partial publications.
+* **Stars:** **1 day per full 100 Stars** the referred person spends (cumulative, remainders carry over; renewals count). Regular → Regular forum; Retro Plus → Regular + Retro.
+* Follows the contribution-reward switch (disabled in Stars-only mode unless enabled). Refunds do **not** claw back referral days.
+

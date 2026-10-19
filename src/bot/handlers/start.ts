@@ -10,6 +10,8 @@ import { getPlan } from "../../plans/plans.ts";
 import { getMembershipSummary } from "../../db/entitlements.ts";
 import { getMembershipMode } from "../../membership/mode.ts";
 import { renderNavPage } from "../public_pages.ts";
+import { attributeReferral } from "../../referrals/service.ts";
+import { isNewToBot } from "../middleware/auth.ts";
 import { NAV_PAGES, NavPage } from "../../navigation/service.ts";
 import { messages } from "../messages.ts";
 import { mainMenuKeyboard, supportKeyboard } from "../keyboards.ts";
@@ -24,7 +26,16 @@ startComposer.command("start", async (ctx) => {
   const userId = ctx.from?.id;
   if (!userId) return;
 
-  const match = ctx.match?.trim();
+  let match: string | undefined = ctx.match?.trim();
+
+  // Referral link (t.me/<bot>?start=ref_<code>): record the referrer on the very first contact only,
+  // then continue with the normal welcome.
+  if (match?.startsWith("ref_")) {
+    await attributeReferral({ payload: match, refereeId: userId, isNewToBot: isNewToBot(ctx) }).catch((err) =>
+      console.error("[Referrals] attribution failed:", err)
+    );
+    match = undefined;
+  }
   const summary = await getMembershipSummary(userId);
   const mode = await getMembershipMode();
 

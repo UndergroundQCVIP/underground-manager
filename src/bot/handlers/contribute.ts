@@ -31,6 +31,8 @@ import {
 } from "../../contributions/service.ts";
 import { listContributionRewards, scopesLabel, fmtDay, validateRewardParams } from "../../contributions/rewards.ts";
 import { contributionRewardsEnabled } from "../../membership/mode.ts";
+import { getReferralOf } from "../../db/referrals.ts";
+import { referralBonusDays } from "../../referrals/service.ts";
 import { Contribution, ContributionStatus, CollectionCategory } from "../../types.ts";
 
 export const contributeComposer = new Composer();
@@ -404,7 +406,8 @@ async function renderReview(c: Contribution): Promise<{ text: string; kb: Inline
   const isNew = c.kind === "new";
   let text =
     `📥 *Contribution* ${STATUS_ICON[c.status]} ${c.status.replace(/_/g, " ")}\n` +
-    `*Contributeur :* \`${c.userId}\`\n*Éléments :* ${c.itemCount ?? c.items.length}\n`;
+    `*Contributeur :* \`${c.userId}\`\n*Éléments :* ${c.itemCount ?? c.items.length}\n` +
+    ((await getReferralOf(c.userId)) ? `*Parrainé par :* \`${(await getReferralOf(c.userId))!.referrerId}\`\n` : "");
 
   if (isNew && c.proposal) {
     const p = c.proposal;
@@ -562,6 +565,7 @@ async function showRewardConfig(ctx: Context, id: string, asNewMessage = false) 
   const settings = await getSystemSettings();
   const scopes = c.draft?.scopes ?? [];
   const days = c.draft?.days ?? settings.contributionDefaultDays;
+  const referrer = await getReferralOf(c.userId);
   const setKey = scopes.length === 2 ? "bo" : scopes[0] === "retro" ? "rt" : scopes[0] === "regular" ? "rg" : "";
   const mark = (on: boolean, label: string) => (on ? `• ${label}` : label);
 
@@ -584,6 +588,10 @@ async function showRewardConfig(ctx: Context, id: string, asNewMessage = false) 
     `*Envoi :* ${c.items.length} élément(s)\n\n` +
     `*Accès :* ${scopes.length ? scopesLabel(scopes) : "_à choisir — aucun accès Retro n'est accordé automatiquement_"}\n` +
     `*Durée :* ${days} jours\n\n` +
+    (referrer
+      ? `🤝 *Parrain :* \`${referrer.referrerId}\` recevra *+${referralBonusDays(days)} jour${referralBonusDays(days) > 1 ? "s" : ""}* ` +
+        `(50 %, arrondi vers le haut) pour les mêmes forums.\n\n`
+      : "") +
     `Les jours s'ajoutent au temps déjà gagné pour chaque forum, sans jamais raccourcir un autre droit. ` +
     `La récompense n'est accordée qu'après la publication réussie du contenu.`;
   if (asNewMessage || !ctx.callbackQuery) await ctx.reply(text, { parse_mode: "Markdown", reply_markup: kb });

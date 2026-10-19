@@ -265,7 +265,9 @@ export type AuditEventType =
   | "contribution_reward_granted"
   | "contribution_resolved"
   | "membership_mode_changed"
-  | "navigation_synced";
+  | "navigation_synced"
+  | "referral_attributed"
+  | "referral_bonus_granted";
 
 export interface AuditEvent {
   id: string;

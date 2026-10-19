@@ -43,6 +43,7 @@ import {
   Creator,
 } from "../types.ts";
 import { fmtDay, grantContributionReward, scopesLabel, validateRewardParams } from "./rewards.ts";
+import { awardContributionBonus } from "../referrals/service.ts";
 
 export interface ContributionApiLike {
   sendMessage(chatId: number | string, text: string, other?: Record<string, unknown>): Promise<unknown>;
@@ -591,6 +592,13 @@ async function finalizeApproved(api: ContributionApiLike, id: string, adminId: n
       adminId,
     });
     await transitionContribution(id, ["approved"], (x) => { x.rewardStatus = "granted"; });
+    // Referral: the contributor's referrer earns 50% (rounded up) for the same forums. Idempotent per
+    // submission; a failure here must never undo or block the contributor's own reward.
+    try {
+      await awardContributionBonus(api, { id, userId: c.userId }, { scopes: reward.scopes, days: reward.days });
+    } catch (err) {
+      console.error("[Referrals] contribution bonus failed (will be retried by the hourly recovery):", err);
+    }
     if (!alreadyGranted) {
       const dates = reward.scopes.map((s) => ({ s, d: reward.expiresAt[s] }));
       const allSame = new Set(dates.map((x) => x.d)).size === 1;

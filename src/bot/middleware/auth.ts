@@ -4,13 +4,20 @@
 
 import { Context, NextFunction } from "grammy";
 import { isAdministrator } from "../../config.ts";
-import { upsertMember } from "../../db/members.ts";
+import { getMember, upsertMember } from "../../db/members.ts";
 import { logAuditEvent } from "../../db/audit.ts";
 import { messages } from "../messages.ts";
+
+/** Updates whose sender had never contacted the bot before this very update. */
+const NEW_TO_BOT = new WeakSet<object>();
+export function isNewToBot(ctx: Context): boolean {
+  return NEW_TO_BOT.has(ctx);
+}
 
 export async function trackUserMiddleware(ctx: Context, next: NextFunction): Promise<void> {
   if (ctx.from) {
     try {
+      if (!(await getMember(ctx.from.id))) NEW_TO_BOT.add(ctx);
       await upsertMember({
         id: ctx.from.id,
         username: ctx.from.username,

@@ -24,6 +24,7 @@ import {
   Payment,
 } from "../types.ts";
 import { PaymentProcessResult, PaymentProvider } from "./provider.ts";
+import { awardPaymentBonus } from "../referrals/service.ts";
 import {
   markStarTransactionRefunded,
   trackSuccessfulPaymentStarsTx,
@@ -304,11 +305,20 @@ export class TelegramStarsProvider implements PaymentProvider {
       payment.userId
     );
 
+    // Referral: 1 day per full 100 Stars for the referrer (renewals included). Never blocks the credit.
+    let referralBonus: PaymentProcessResult["referralBonus"];
+    try {
+      referralBonus = (await awardPaymentBonus(payment)) ?? undefined;
+    } catch (err) {
+      console.error("[Referrals] payment bonus failed (will be retried by the hourly recovery):", err);
+    }
+
     return {
       success: entitlement !== undefined,
       isDuplicate: false,
       payment,
       entitlement,
+      referralBonus,
       error: entitlement ? undefined : "Telegram reported the paid period had already lapsed.",
     };
   }

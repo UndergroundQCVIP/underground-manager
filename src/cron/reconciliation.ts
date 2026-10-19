@@ -12,6 +12,7 @@ import { reconcileAllMembers } from "../access/sync.ts";
 import { processComplimentaryReminders } from "../complimentary/service.ts";
 import { processContributionReminders } from "../contributions/rewards.ts";
 import { syncNavigationMessages } from "../navigation/service.ts";
+import { recoverPendingBonuses } from "../referrals/service.ts";
 import { getChatId } from "../access/spaces.ts";
 import { syncPublicDirectory } from "../directory/sync.ts";
 import { syncWantedListChannel } from "../wanted/service.ts";
@@ -80,6 +81,14 @@ export async function runHourlyReconciliation(bot: Bot): Promise<{
   console.log(
     `[Cron] Complimentary reminders sent: ${reminders.remindedCount}, errors ${reminders.errors.length}`
   );
+
+  // 3a. UG-06: finish any referral bonus that was reserved but not applied
+  try {
+    const recovered = await recoverPendingBonuses(bot.api);
+    if (recovered > 0) console.log(`[Cron] Recovered ${recovered} referral bonus(es).`);
+  } catch (err) {
+    console.error("[Cron Error] Referral recovery failed:", err);
+  }
 
   // 3b. UG-05: same 3-day heads-up for contribution-earned access (no promise of an extension)
   try {

@@ -109,6 +109,16 @@ paymentsComposer.on("message:successful_payment", async (ctx) => {
       console.error("Plan change post-processing failed:", err);
     }
 
+    if (result.referralBonus && result.referralBonus.days > 0) {
+      await ctx.api
+        .sendMessage(
+          result.referralBonus.referrerId,
+          `🤝 *Parrainage* — une personne que vous avez parrainée a payé un abonnement. Vous recevez *${result.referralBonus.days} jour${result.referralBonus.days > 1 ? "s" : ""}* d'accès.`,
+          { parse_mode: "Markdown" }
+        )
+        .catch(() => {});
+    }
+
     // Success! Congratulate member and show channels button
     await ctx.reply(messages.paymentSuccess(result.entitlement.expiresAt, planId) + upgradeNote, {
       parse_mode: "Markdown",

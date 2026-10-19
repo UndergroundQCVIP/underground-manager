@@ -19,6 +19,7 @@ import { migrationComposer } from "./handlers/migration.ts";
 import { directoryComposer } from "./handlers/directory.ts";
 import { contributeComposer } from "./handlers/contribute.ts";
 import { adminSettingsComposer } from "./handlers/admin_settings.ts";
+import { referralsComposer } from "./handlers/referrals.ts";
 
 export function createBot(token?: string): Bot {
   const config = getConfig();
@@ -49,6 +50,7 @@ export function createBot(token?: string): Bot {
   bot.use(migrationComposer);
   bot.use(adminSettingsComposer);
   bot.use(directoryComposer);
+  bot.use(referralsComposer);
   bot.use(contributeComposer);
   bot.use(forumComposer);
   bot.use(wantedComposer);

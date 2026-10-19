@@ -16,6 +16,8 @@ export interface PaymentProcessResult {
   isDuplicate: boolean;
   payment?: Payment;
   entitlement?: Entitlement;
+  /** UG-06: days credited to the payer's referrer for this payment (notified by the bot layer). */
+  referralBonus?: { referrerId: number; days: number };
   error?: string;
 }
 

@@ -34,7 +34,7 @@ export function mainMenuKeyboard(
     .text("🎯 Liste de souhaits", "wanted:menu")
     .row();
 
-  kb.text("➕ Contribuer", "contrib:start").row();
+  kb.text("➕ Contribuer", "contrib:start").text("🤝 Parrainage", "ref:menu").row();
 
   kb.text("💬 Clavardage général", "member:general_chat")
     .text("🗳️ Vote mensuel", "vote:open")
