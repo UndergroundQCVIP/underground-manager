@@ -3,7 +3,8 @@
  * Detects creator topic creation, renames, and authorized media uploads in the Regular and Retro forums.
  */
 
-import { Composer } from "grammy";
+import { Composer, Context } from "grammy";
+import { isAdministrator } from "../../config.ts";
 import {
   handleForumTopicCreated,
   handleForumTopicEdited,
@@ -12,12 +13,22 @@ import {
 
 export const forumComposer = new Composer();
 
+/**
+ * Topic creation/rename changes the PUBLIC directory, so only administrators (or
+ * the bot itself) may drive it — a member with "manage topics" rights must not be
+ * able to publish arbitrary names.
+ */
+function isTopicAuthority(ctx: Context): boolean {
+  const id = ctx.from?.id;
+  return id !== undefined && (isAdministrator(id) || id === ctx.me.id);
+}
+
 // Detect new forum topics created
 forumComposer.on("message:forum_topic_created", async (ctx) => {
   const threadId = ctx.message.message_thread_id;
   const topicName = ctx.message.forum_topic_created.name;
 
-  if (threadId && topicName) {
+  if (threadId && topicName && isTopicAuthority(ctx)) {
     try {
       await handleForumTopicCreated(ctx.chat.id, threadId, topicName);
     } catch (err) {
@@ -31,7 +42,7 @@ forumComposer.on("message:forum_topic_edited", async (ctx) => {
   const threadId = ctx.message.message_thread_id;
   const newName = ctx.message.forum_topic_edited.name;
 
-  if (threadId && newName) {
+  if (threadId && newName && isTopicAuthority(ctx)) {
     try {
       await handleForumTopicEdited(ctx.chat.id, threadId, newName);
     } catch (err) {
@@ -48,7 +59,7 @@ forumComposer.on(["message:photo", "message:video"], async (ctx) => {
   if (threadId && senderId) {
     try {
       const msg = ctx.message;
-      await handleMediaUpload(ctx.chat.id, threadId, senderId, {
+      await handleMediaUpload(ctx.chat.id, threadId, senderId, msg.date, {
         messageId: msg.message_id,
         kind: msg.photo ? "photo" : "video",
         mediaGroupId: msg.media_group_id,

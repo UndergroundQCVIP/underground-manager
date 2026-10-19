@@ -3,10 +3,14 @@
  */
 
 import { getConfig } from "../config.ts";
-import { recordPayment, updatePaymentStatusByChargeId } from "../db/payments.ts";
 import {
-  createEntitlement,
-  extendEntitlement,
+  getPaymentByChargeId,
+  listPaymentsPendingFulfillment,
+  recordPayment,
+  updatePaymentStatusByChargeId,
+} from "../db/payments.ts";
+import {
+  applyPaidPeriod,
   getActivePaidEntitlements,
   getActiveUserEntitlements,
   revokeEntitlement,
@@ -20,7 +24,10 @@ import {
   Payment,
 } from "../types.ts";
 import { PaymentProcessResult, PaymentProvider } from "./provider.ts";
-import { trackSuccessfulPaymentStarsTx } from "../treasury/stars_tracking.ts";
+import {
+  markStarTransactionRefunded,
+  trackSuccessfulPaymentStarsTx,
+} from "../treasury/stars_tracking.ts";
 
 export interface TelegramPreCheckoutQuery {
   id: string;
@@ -50,11 +57,16 @@ export class TelegramStarsProvider implements PaymentProvider {
    */
   static buildInvoicePayload(userId: number, planId: MembershipPlanId = "regular"): string {
     const config = getConfig();
+    const plan = getPlan(planId);
     const data: InvoicePayloadData = {
       type: "subscription",
       userId,
-      planId: getPlan(planId).payloadId, // "vip_monthly" (Regular, legacy id) or "retro_plus_monthly"
+      planId: plan.payloadId, // "vip_monthly" (Regular, legacy id) or "retro_plus_monthly"
       periodSeconds: config.STARS_SUBSCRIPTION_PERIOD_SECONDS,
+      // The price this invoice was issued at. A renewal of a subscription taken
+      // before a price change is still charged at this amount, so it is validated
+      // against the invoice, not against today's configured price.
+      amount: plan.priceStars,
       timestamp: Date.now(),
     };
     return JSON.stringify(data);
@@ -92,7 +104,7 @@ export class TelegramStarsProvider implements PaymentProvider {
     if (query.currency !== config.CURRENCY) {
       return {
         ok: false,
-        errorMessage: `Invalid currency. Expected ${config.CURRENCY}, got ${query.currency}.`,
+        errorMessage: `Devise invalide. Attendue : ${config.CURRENCY}, reçue : ${query.currency}.`,
       };
     }
 
@@ -101,20 +113,18 @@ export class TelegramStarsProvider implements PaymentProvider {
     if (!payload) {
       return {
         ok: false,
-        errorMessage: "Malformed or unrecognized invoice payload.",
+        errorMessage: "Données de facture mal formées ou non reconnues.",
       };
     }
-
     const planId = planFromPayloadId(payload.planId);
     if (!planId) {
-      return { ok: false, errorMessage: "Unrecognized membership plan." };
+      return { ok: false, errorMessage: "Forfait d'adhésion non reconnu." };
     }
     const plan = getPlan(planId);
-
     if (!plan.enabled) {
       return {
         ok: false,
-        errorMessage: `${plan.label} billing is not available yet.`,
+        errorMessage: `La facturation du forfait ${plan.label} n'est pas encore disponible.`,
       };
     }
 
@@ -122,8 +132,12 @@ export class TelegramStarsProvider implements PaymentProvider {
     if (query.total_amount !== plan.priceStars) {
       return {
         ok: false,
-        errorMessage: `Invalid price amount. Expected ${plan.priceStars} Stars, got ${query.total_amount}.`,
+        errorMessage: `Montant invalide. Attendu : ${plan.priceStars} Étoiles, reçu : ${query.total_amount}.`,
       };
+    }
+
+    if (payload.amount !== undefined && payload.amount !== query.total_amount) {
+      return { ok: false, errorMessage: "Le montant de la facture ne correspond pas." };
     }
 
     if (payload.userId !== query.from.id) {
@@ -139,7 +153,7 @@ export class TelegramStarsProvider implements PaymentProvider {
       );
       return {
         ok: false,
-        errorMessage: "Payer does not match invoice recipient.",
+        errorMessage: "Le payeur ne correspond pas au destinataire de la facture.",
       };
     }
 
@@ -152,7 +166,7 @@ export class TelegramStarsProvider implements PaymentProvider {
       if (remainingMs > 25 * 24 * 3600 * 1000) {
         return {
           ok: false,
-          errorMessage: "You already have an active subscription with ample time remaining.",
+          errorMessage: "Vous avez déjà un abonnement actif avec beaucoup de temps restant.",
         };
       }
     }
@@ -160,7 +174,7 @@ export class TelegramStarsProvider implements PaymentProvider {
       return {
         ok: false,
         errorMessage:
-          "You currently hold Retro Plus, which already includes Regular access. Use Membership Plans to downgrade without double billing.",
+          "Vous avez actuellement Retro Plus, qui inclut déjà l'accès Regular. Utilisez les forfaits d'adhésion pour revenir à Regular sans double facturation.",
       };
     }
 
@@ -169,24 +183,20 @@ export class TelegramStarsProvider implements PaymentProvider {
 
   /**
    * Processes a confirmed successful_payment event.
+   *
+   * Two independently idempotent steps, so any crash/retry converges:
+   *   1. record the payment (unique by Telegram charge id);
+   *   2. credit the entitlement + mark the charge fulfilled in ONE atomic commit.
+   * A replayed event (or the recovery sweep) re-runs step 2 only if it never
+   * completed, so a payment is neither lost nor credited twice.
    */
   async processPayment(
     paymentData: Omit<Payment, "id" | "createdAt">
   ): Promise<PaymentProcessResult> {
-    const config = getConfig();
-
-    // 1. Idempotently record the payment transaction
     const recordResult = await recordPayment(paymentData);
-    if (recordResult.duplicate) {
-      return {
-        success: false,
-        isDuplicate: true,
-        payment: recordResult.payment,
-        error: "Duplicate payment event ignored to prevent duplicate credit.",
-      };
-    }
+    const payment = recordResult.payment;
 
-    if (!recordResult.success || !recordResult.payment) {
+    if (!payment) {
       return {
         success: false,
         isDuplicate: false,
@@ -194,87 +204,91 @@ export class TelegramStarsProvider implements PaymentProvider {
       };
     }
 
-    const payment = recordResult.payment;
+    return await TelegramStarsProvider.fulfillPayment(payment);
+  }
+
+  /**
+   * Credits a recorded payment to the member's entitlement (idempotent).
+   */
+  static async fulfillPayment(payment: Payment): Promise<PaymentProcessResult> {
+    const config = getConfig();
+
+    if (payment.status !== "completed") {
+      return {
+        success: false,
+        isDuplicate: true,
+        payment,
+        error: `Payment ${payment.chargeId} is ${payment.status}; not crediting.`,
+      };
+    }
+
     const planId: MembershipPlanId = payment.planId ?? "regular";
     const plan = getPlan(planId);
 
-    // 2. Determine expiration timestamp
-    let expiryIso: string;
-    if (paymentData.subscriptionExpirationDate) {
-      // Use Telegram's confirmed subscription expiration timestamp if provided
-      expiryIso = paymentData.subscriptionExpirationDate;
-    } else {
-      // Fallback: calculate from period seconds
-      const nowMs = Date.now();
-      const activePaid = (await getActivePaidEntitlements(payment.userId, planId))[0];
+    const credit = await applyPaidPeriod({
+      userId: payment.userId,
+      chargeId: payment.chargeId,
+      telegramExpiryIso: payment.subscriptionExpirationDate,
+      periodSeconds: payment.subscriptionPeriodSeconds || config.STARS_SUBSCRIPTION_PERIOD_SECONDS,
+      invoicePayload: payment.invoicePayload,
+      spaces: [...plan.spaces],
+      plan: planId,
+    });
 
-      let baseMs = nowMs;
-      if (activePaid) {
-        const existingExpiryMs = new Date(activePaid.expiresAt).getTime();
-        if (existingExpiryMs > nowMs) {
-          baseMs = existingExpiryMs;
-        }
-      }
-
-      expiryIso = new Date(
-        baseMs + config.STARS_SUBSCRIPTION_PERIOD_SECONDS * 1000
-      ).toISOString();
+    // Treasury tracking is idempotent per charge id and backfilled by the
+    // getStarTransactions reconciliation, so a failure here must not fail the credit.
+    try {
+      await trackSuccessfulPaymentStarsTx(payment, payment.amount);
+    } catch (err) {
+      console.error("[Treasury Warning] Failed to track Star transaction:", err);
     }
 
-    // 3. Grant or extend the entitlement for THIS plan only (a Regular
-    //    renewal never extends Retro Plus and vice versa).
-    const existingPaid = (await getActivePaidEntitlements(payment.userId, planId))[0];
+    if (credit.alreadyFulfilled) {
+      return {
+        success: false,
+        isDuplicate: true,
+        payment,
+        entitlement: credit.entitlement,
+        error: "Duplicate payment event ignored to prevent duplicate credit.",
+      };
+    }
 
-    let entitlement: Entitlement;
-    if (existingPaid) {
-      // Extend existing active paid entitlement
-      const extended = await extendEntitlement(
-        existingPaid.id,
-        config.STARS_SUBSCRIPTION_PERIOD_SECONDS
-      );
-      entitlement = extended!;
+    const entitlement = credit.entitlement;
+
+    if (credit.expiryAnomaly) {
       await logAuditEvent(
-        "entitlement_extended",
+        "payment_anomaly",
+        { chargeId: payment.chargeId, anomaly: credit.expiryAnomaly },
+        0,
+        payment.userId
+      );
+    }
+    if (payment.amount !== plan.priceStars) {
+      // Genuine renewals keep the price the subscriber originally accepted, so
+      // this is credited, but surfaced for the administrators.
+      await logAuditEvent(
+        "payment_anomaly",
         {
-          entitlementId: entitlement.id,
           chargeId: payment.chargeId,
-          newExpiresAt: entitlement.expiresAt,
-          source: "telegram_stars",
-          plan: planId,
+          anomaly: `amount ${payment.amount} differs from configured ${plan.label} price ${plan.priceStars}`,
         },
         0,
         payment.userId
       );
-    } else {
-      // Create fresh paid entitlement
-      entitlement = await createEntitlement({
-        userId: payment.userId,
+    }
+
+    await logAuditEvent(
+      credit.created ? "entitlement_granted" : "entitlement_extended",
+      {
+        entitlementId: entitlement?.id,
+        chargeId: payment.chargeId,
+        expiresAt: entitlement?.expiresAt,
         source: "telegram_stars",
-        spaces: [...plan.spaces],
         plan: planId,
-        startsAt: new Date().toISOString(),
-        expiresAt: expiryIso,
-        status: "active",
-        metadata: {
-          chargeId: payment.chargeId,
-          invoicePayload: payment.invoicePayload,
-        },
-      });
-      await logAuditEvent(
-        "entitlement_granted",
-        {
-          entitlementId: entitlement.id,
-          chargeId: payment.chargeId,
-          expiresAt: entitlement.expiresAt,
-          source: "telegram_stars",
-          plan: planId,
-        },
-        0,
-        payment.userId
-      );
-    }
-
-    // 4. Log successful payment audit event
+      },
+      0,
+      payment.userId
+    );
     await logAuditEvent(
       "payment_received",
       {
@@ -284,25 +298,39 @@ export class TelegramStarsProvider implements PaymentProvider {
         currency: payment.currency,
         isRecurring: payment.isRecurring,
         plan: planId,
-        expiresAt: entitlement.expiresAt,
+        expiresAt: entitlement?.expiresAt,
       },
       0,
       payment.userId
     );
 
-    // 5. Track Telegram Stars revenue for treasury (21-day holding period)
-    try {
-      await trackSuccessfulPaymentStarsTx(payment, payment.amount);
-    } catch (err) {
-      console.error("[Treasury Warning] Failed to track Star transaction:", err);
-    }
-
     return {
-      success: true,
+      success: entitlement !== undefined,
       isDuplicate: false,
       payment,
       entitlement,
+      error: entitlement ? undefined : "Telegram reported the paid period had already lapsed.",
     };
+  }
+
+  /**
+   * Re-runs fulfilment for payments that were recorded but never credited
+   * (process crash, database outage between the two steps).
+   */
+  static async recoverUnfulfilledPayments(): Promise<{ recovered: number; failed: number }> {
+    const pending = await listPaymentsPendingFulfillment();
+    let recovered = 0;
+    let failed = 0;
+    for (const payment of pending) {
+      try {
+        const res = await TelegramStarsProvider.fulfillPayment(payment);
+        if (!res.isDuplicate) recovered++;
+      } catch (err) {
+        failed++;
+        console.error(`[Payments] Recovery failed for charge ${payment.chargeId}:`, err);
+      }
+    }
+    return { recovered, failed };
   }
 
   /**
@@ -314,7 +342,7 @@ export class TelegramStarsProvider implements PaymentProvider {
   ): Promise<PaymentProcessResult> {
     const config = getConfig();
 
-    // Validate currency
+    // Validate currency and amount
     if (payment.currency !== config.CURRENCY) {
       return {
         success: false,
@@ -337,12 +365,13 @@ export class TelegramStarsProvider implements PaymentProvider {
       return { success: false, isDuplicate: false, error: "Unrecognized membership plan" };
     }
 
-    // Validate amount against the plan's own price
-    if (payment.total_amount !== getPlan(planId).priceStars) {
+    // The expected amount is the one the invoice was issued at (renewals keep it).
+    const expectedAmount = payload.amount ?? getPlan(planId).priceStars;
+    if (payment.total_amount !== expectedAmount) {
       return {
         success: false,
         isDuplicate: false,
-        error: `Unexpected payment amount ${payment.total_amount}`,
+        error: `Unexpected payment amount ${payment.total_amount} (invoice was for ${expectedAmount})`,
       };
     }
 
@@ -367,28 +396,41 @@ export class TelegramStarsProvider implements PaymentProvider {
   }
 
   /**
-   * Handle payment refund or reversal
+   * Handle payment refund or reversal.
+   *
+   * Access is withdrawn only when the refunded charge is the one that funds the
+   * current paid period (the entitlement's latest charge). Refunding an older,
+   * already-consumed period leaves a later renewal's access intact.
    */
   static async handleRefund(
     userId: number,
     chargeId: string,
     adminId = 0
   ): Promise<boolean> {
+    const existing = await getPaymentByChargeId(chargeId);
+    if (!existing) return false;
+    if (existing.userId !== userId) return false;
+
     const payment = await updatePaymentStatusByChargeId(chargeId, "refunded");
     if (!payment) return false;
 
-    // Revoke corresponding entitlement
     const active = await getActiveUserEntitlements(userId);
-    const relatedEntitlement = active.find(
-      (e) => e.metadata?.chargeId === chargeId
+    const related = active.find(
+      (e) => e.source === "telegram_stars" && e.metadata?.chargeId === chargeId
     );
-    if (relatedEntitlement) {
-      await revokeEntitlement(relatedEntitlement.id, `Refund for charge ${chargeId}`);
+    if (related) {
+      await revokeEntitlement(related.id, `Refund for charge ${chargeId}`);
+    }
+
+    try {
+      await markStarTransactionRefunded(chargeId);
+    } catch (err) {
+      console.error("[Treasury Warning] Failed to mark Star transaction refunded:", err);
     }
 
     await logAuditEvent(
       "payment_refunded",
-      { chargeId, userId, revokedEntitlementId: relatedEntitlement?.id },
+      { chargeId, userId, revokedEntitlementId: related?.id },
       adminId,
       userId
     );

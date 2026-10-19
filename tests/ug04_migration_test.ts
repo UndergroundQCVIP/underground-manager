@@ -181,7 +181,7 @@ Deno.test("UG04 MIGRATION — Telegram rejecting the copy as protected stops saf
     const after = (await getMigrationJob(job.id))!;
     assertEquals(after.status, "blocked");
     assertEquals(after.blockedReason, "protected_content");
-    assertStringIncludes(after.notes.join(" "), "does not bypass");
+    assertStringIncludes(after.notes.join(" "), "ne la contourne ni ne la désactive");
     assertEquals(after.totals.copied, 0);
     assertEquals(api.copyCalls.length, 1); // one rejected probe batch, then stop
     assertEquals(api.deletedTopics.length, 0);
@@ -341,7 +341,7 @@ Deno.test("UG04 MIGRATION — Missing source messages are flagged ambiguous, nev
     assertEquals(n, 6);
     const re = await reevaluateMigration(api, job.id);
     assertEquals(re.status, "ready_to_finalize");
-    assertStringIncludes(re.notes.join(" "), "excluded 6");
+    assertStringIncludes(re.notes.join(" "), "exclu 6");
   } finally {
     await kv.close();
   }
@@ -630,7 +630,7 @@ Deno.test("UG04 MIGRATION — Bot lacking Retro rights is blocked with a precise
     const job = await prepared(api, await seedStandard());
     assertEquals(job.status, "blocked");
     assertEquals(job.blockedReason, "missing_permissions");
-    assertStringIncludes(job.preflight!.blockers[0].detail, "Manage topics");
+    assertStringIncludes(job.preflight!.blockers[0].detail, "Gérer les sujets");
   } finally {
     await kv.close();
   }

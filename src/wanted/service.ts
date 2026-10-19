@@ -7,7 +7,7 @@ import { getClubName } from "../config.ts";
 import { getConfig } from "../config.ts";
 import { getCreatorByName } from "../db/creators.ts";
 import {
-  createWantedCandidate,
+  createWantedCandidateOnce,
   getCurrentMonthCycle,
   getUserSupportForCycle,
   getWantedCandidate,
@@ -18,6 +18,9 @@ import {
 } from "../db/wanted.ts";
 import { getMembershipSummary } from "../db/entitlements.ts";
 import { logAuditEvent } from "../db/audit.ts";
+import { getKv } from "../db/kv.ts";
+import { escapeMd } from "../util/markdown.ts";
+import { formatTorontoDate } from "../util/time.ts";
 import {
   WANTED_STATUS_LABELS,
   WantedCandidate,
@@ -45,7 +48,7 @@ export async function submitCreatorNomination(
   const cleanName = name.trim();
 
   if (cleanName.length < 2) {
-    return { success: false, isExistingCandidate: false, error: "Creator name is too short." };
+    return { success: false, isExistingCandidate: false, error: "Le nom du créateur est trop court." };
   }
 
   // 1. Eligibility Check: Active PAYING subscriber required!
@@ -55,7 +58,7 @@ export async function submitCreatorNomination(
     return {
       success: false,
       isExistingCandidate: false,
-      error: "Only active paying subscribers can nominate creators. Complimentary members are not eligible for nominations.",
+      error: "Seuls les abonnés payants actifs peuvent suggérer des créateurs. Les membres ayant un accès gracieux ne sont pas admissibles aux suggestions.",
     };
   }
 
@@ -65,7 +68,7 @@ export async function submitCreatorNomination(
     return {
       success: false,
       isExistingCandidate: false,
-      error: `"${cleanName}" is already available in TOKEBEC VIP COLLECTIONS!`,
+      error: `« ${cleanName} » est déjà disponible dans TOKEBEC VIP COLLECTIONS!`,
     };
   }
 
@@ -78,27 +81,32 @@ export async function submitCreatorNomination(
       success: false,
       isExistingCandidate: false,
       alreadySupportedThisCycle: true,
-      error: "You have already used your nomination/support selection for this monthly cycle.",
+      error: "Vous avez déjà utilisé votre suggestion ou votre appui pour ce cycle mensuel.",
     };
   }
 
-  // 4. Check if creator already exists on Wanted List
-  let candidate = await getWantedCandidateByName(cleanName);
-  let isExisting = false;
+  // 4. Find or create the candidate (atomic by normalized name, so two members
+  // nominating the same creator at the same moment end up on ONE candidate).
+  const { candidate: found, created } = await createWantedCandidateOnce({
+    name: cleanName,
+    normalizedName: cleanName.toLowerCase(),
+    profileUrl: profileUrl?.trim(),
+    status: "requested",
+    suggestedBy: userId,
+    supportCount: 0,
+  });
+  const candidate = found;
+  const isExisting = !created;
 
-  if (candidate) {
-    isExisting = true;
-  } else {
-    // Create new candidate
-    candidate = await createWantedCandidate({
-      name: cleanName,
-      normalizedName: cleanName.toLowerCase(),
-      profileUrl: profileUrl?.trim(),
-      status: "requested",
-      suggestedBy: userId,
-      supportCount: 0,
-    });
+  if (isExisting && !SUPPORTABLE_STATUSES.has(candidate.status)) {
+    return {
+      success: false,
+      isExistingCandidate: true,
+      error: `« ${candidate.name} » a déjà le statut « ${WANTED_STATUS_LABELS[candidate.status]} » et ne peut plus recevoir d'appuis.`,
+    };
+  }
 
+  if (created) {
     await logAuditEvent(
       "wanted_candidate_suggested",
       { candidateId: candidate.id, name: cleanName, profileUrl },
@@ -119,7 +127,7 @@ export async function submitCreatorNomination(
     return {
       success: false,
       isExistingCandidate: isExisting,
-      error: supportResult.error ?? "Failed to register support.",
+      error: supportResult.error ?? "Échec de l'enregistrement de l'appui.",
     };
   }
 
@@ -142,6 +150,13 @@ export async function submitCreatorNomination(
   };
 }
 
+/** Statuses in which a candidate is still collecting community support. */
+const SUPPORTABLE_STATUSES = new Set<WantedCandidateStatus>([
+  "requested",
+  "pricing_review",
+  "eligible_for_voting",
+]);
+
 export async function supportExistingCandidate(
   userId: number,
   candidateId: string
@@ -151,7 +166,18 @@ export async function supportExistingCandidate(
   if (!summary.hasPaid) {
     return {
       success: false,
-      error: "Only active paying subscribers can support creators.",
+      error: "Seuls les abonnés payants actifs peuvent appuyer des créateurs.",
+    };
+  }
+
+  const target = await getWantedCandidate(candidateId);
+  if (!target) {
+    return { success: false, error: "Candidat introuvable." };
+  }
+  if (!SUPPORTABLE_STATUSES.has(target.status)) {
+    return {
+      success: false,
+      error: `« ${target.name} » a déjà le statut « ${WANTED_STATUS_LABELS[target.status]} » et ne peut plus recevoir d'appuis.`,
     };
   }
 
@@ -166,7 +192,7 @@ export async function supportExistingCandidate(
   if (!supportResult.success || !supportResult.candidate) {
     return {
       success: false,
-      error: supportResult.error ?? "Failed to register support.",
+      error: supportResult.error ?? "Échec de l'enregistrement de l'appui.",
     };
   }
 
@@ -202,7 +228,7 @@ export interface WantedApiLike {
   ): Promise<unknown>;
 }
 
-let wantedListMessageId: number | null = null;
+const WANTED_MESSAGE_KEY = ["wanted_list_channel_message"];
 
 export async function syncWantedListChannel(
   api: WantedApiLike
@@ -211,7 +237,7 @@ export async function syncWantedListChannel(
   const channelId = config.WANTED_LIST_CHAT_ID;
 
   if (!channelId) {
-    return { success: false, error: "WANTED_LIST_CHAT_ID not configured" };
+    return { success: false, error: "WANTED_LIST_CHAT_ID non configuré" };
   }
 
   const candidates = await listWantedCandidates();
@@ -219,29 +245,29 @@ export async function syncWantedListChannel(
     (c) => c.status !== "available" && c.status !== "rejected_unavailable"
   );
 
-  const nowFormatted = new Date().toLocaleDateString("en-US", {
+  const nowFormatted = formatTorontoDate(new Date(), {
     month: "long",
     day: "numeric",
     year: "numeric",
   });
 
   let text =
-    `🎯 *${getClubName()} | WANTED LIST*\n` +
-    `_Upcoming creator acquisition requests & rankings_\n` +
-    `📅 *Updated:* ${nowFormatted}\n\n`;
+    `🎯 *${getClubName()} | LISTE DE SOUHAITS*\n` +
+    `_Demandes d'acquisition de créateurs à venir et classement_\n` +
+    `📅 *Mis à jour :* ${nowFormatted}\n\n`;
 
   if (activeCandidates.length === 0) {
-    text += `_No active creator requests yet. Be the first to suggest one in the ${getClubName()} bot!_\n\n`;
+    text += `_Aucune demande de créateur active pour le moment. Soyez le premier à en suggérer une dans le robot ${getClubName()}!_\n\n`;
   } else {
     activeCandidates.slice(0, 25).forEach((c, index) => {
       const statusLabel = WANTED_STATUS_LABELS[c.status] || c.status;
-      const countLabel = c.supportCount === 1 ? "1 supporter" : `${c.supportCount} supporters`;
-      text += `${index + 1}. *${c.name}* — ${countLabel} \`[${statusLabel}]\`\n`;
+      const countLabel = c.supportCount === 1 ? "1 appui" : `${c.supportCount} appuis`;
+      text += `${index + 1}. *${escapeMd(c.name)}* — ${countLabel} \`[${statusLabel}]\`\n`;
     });
     text += "\n";
   }
 
-  text += `💡 _Paid members can suggest and support creators privately inside the bot._`;
+  text += `💡 _Les membres payants peuvent suggérer et appuyer des créateurs en privé dans le robot._`;
 
   const options = {
     parse_mode: "Markdown",
@@ -249,7 +275,7 @@ export async function syncWantedListChannel(
       inline_keyboard: [
         [
           {
-            text: "🗳️ Open Wanted List in Bot",
+            text: "🗳️ Ouvrir la Liste de souhaits dans le robot",
             url: `https://t.me/${config.BOT_USERNAME}?start=wanted`,
           },
         ],
@@ -257,18 +283,32 @@ export async function syncWantedListChannel(
     },
   };
 
+  const kv = await getKv();
+  // The published message id is persisted: an in-memory id would be lost on every
+  // cold start and the list would be re-posted as a duplicate message.
+  const stored = await kv.get<{ messageId: number; hash: string }>(WANTED_MESSAGE_KEY);
+  const hash = await sha256Hex(text);
+
   try {
-    if (wantedListMessageId) {
-      try {
-        await api.editMessageText(channelId, wantedListMessageId, text, options);
+    if (stored.value) {
+      if (stored.value.hash === hash) {
         return { success: true };
-      } catch {
-        // Fallback to sending new message
+      }
+      try {
+        await api.editMessageText(channelId, stored.value.messageId, text, options);
+        await kv.set(WANTED_MESSAGE_KEY, { messageId: stored.value.messageId, hash });
+        return { success: true };
+      } catch (err) {
+        if (isMessageNotModified(err)) {
+          await kv.set(WANTED_MESSAGE_KEY, { messageId: stored.value.messageId, hash });
+          return { success: true };
+        }
+        if (!isMessageGone(err)) throw err; // transient: retry on the next sync, don't duplicate
       }
     }
 
     const msg = await api.sendMessage(channelId, text, options);
-    wantedListMessageId = msg.message_id;
+    await kv.set(WANTED_MESSAGE_KEY, { messageId: msg.message_id, hash });
 
     await logAuditEvent("wanted_list_synced", { channelId, candidatesCount: activeCandidates.length }, 0);
     return { success: true };
@@ -277,4 +317,23 @@ export async function syncWantedListChannel(
     console.error("Failed to sync Wanted List channel:", errorMsg);
     return { success: false, error: errorMsg };
   }
+}
+
+export async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export function isMessageNotModified(err: unknown): boolean {
+  return String((err as Error)?.message ?? err).toLowerCase().includes("message is not modified");
+}
+
+/** The stored message no longer exists (deleted / invalid id) so a new one must be sent. */
+export function isMessageGone(err: unknown): boolean {
+  const msg = String((err as Error)?.message ?? err).toLowerCase();
+  return (
+    msg.includes("message to edit not found") ||
+    msg.includes("message_id_invalid") ||
+    msg.includes("message can't be edited")
+  );
 }

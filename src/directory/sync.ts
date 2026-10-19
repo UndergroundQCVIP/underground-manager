@@ -8,9 +8,13 @@ import { creatorCollection, listCreators } from "../db/creators.ts";
 import {
   clearDirectoryDirty,
   getDirectorySyncState,
+  saveDirectorySyncState,
 } from "../db/directory.ts";
 import { logAuditEvent } from "../db/audit.ts";
 import { CollectionCategory, Creator } from "../types.ts";
+import { escapeMd } from "../util/markdown.ts";
+import { formatTorontoDate } from "../util/time.ts";
+import { isMessageGone, isMessageNotModified, sha256Hex } from "../wanted/service.ts";
 
 export interface DirectoryApiLike {
   sendMessage(
@@ -28,16 +32,26 @@ export interface DirectoryApiLike {
     chatId: number | string,
     messageId: number
   ): Promise<unknown>;
+  deleteMessage?(chatId: number | string, messageId: number): Promise<unknown>;
 }
 
 export function formatCreatorDate(isoString?: string): string {
-  if (!isoString) return "Available";
-  const date = new Date(isoString);
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  if (!isoString) return "Disponible";
+  return formatTorontoDate(isoString, { month: "short", day: "numeric", year: "numeric" });
+}
+
+/** Creators whose first content appeared in the last 7 days are flagged 🆕 in the list. */
+export const NEW_CREATOR_DAYS = 7;
+
+export function isNewCreator(c: Creator, now: Date = new Date()): boolean {
+  if (!c.firstContentDetectedAt) return false;
+  const age = now.getTime() - new Date(c.firstContentDetectedAt).getTime();
+  return age >= -60_000 && age < NEW_CREATOR_DAYS * 86_400_000;
+}
+
+/** Stable key of which creators are currently flagged new (used to detect flag changes). */
+export function newCreatorsKey(creators: Creator[], now: Date = new Date()): string {
+  return creators.filter((c) => isNewCreator(c, now)).map((c) => c.id).sort().join(",");
 }
 
 export const COLLECTION_LABELS: Record<CollectionCategory, string> = {
@@ -53,41 +67,46 @@ export function isRetired(c: Creator, nowMs = Date.now()): boolean {
 export function buildDirectorySections(
   allCreators: Creator[],
   botUsername: string,
-  opts: { collection?: CollectionCategory } = {}
+  optsOrNow: { collection?: CollectionCategory } | Date = {},
+  nowArg?: Date
 ): string[] {
+  const opts = optsOrNow instanceof Date ? {} : optsOrNow;
+  const now = optsOrNow instanceof Date ? optsOrNow : nowArg ?? new Date();
   const club = getClubName();
   const creators = allCreators
-    .filter((c) => !isRetired(c))
+    .filter((c) => !isRetired(c, now.getTime()))
     .filter((c) => !opts.collection || creatorCollection(c) === opts.collection)
-    // Alphabetical across both categories
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 
   if (creators.length === 0) {
     return [
-      `💎 *${club} | CREATOR DIRECTORY*\n\n` +
-      `_No public collections are currently available._\n` +
-      `_New collections are added regularly by our curators._`,
+      `💎 *${club} | RÉPERTOIRE DES CRÉATEURS*\n\n` +
+      `_Aucune collection publique n'est disponible actuellement._\n` +
+      `_De nouvelles collections sont ajoutées régulièrement par nos conservateurs._`,
     ];
   }
 
-  const nowFormatted = new Date().toLocaleDateString("en-US", {
+  const anyNew = creators.some((c) => isNewCreator(c, now));
+  const nowFormatted = formatTorontoDate(now, {
     month: "long",
     day: "numeric",
     year: "numeric",
   });
 
-  const filterNote = opts.collection ? ` — ${COLLECTION_LABELS[opts.collection]} only` : "";
+  const filterNote = opts.collection ? ` — ${COLLECTION_LABELS[opts.collection]} seulement` : "";
   let currentChunk =
-    `💎 *${club} | CREATOR DIRECTORY*${filterNote}\n` +
-    `📅 *Directory Updated:* ${nowFormatted}\n` +
-    `🔒 _Open the ${club} bot to check your access_\n\n`;
+    `💎 *${club} | RÉPERTOIRE DES CRÉATEURS*${filterNote}\n` +
+    `📅 *Répertoire mis à jour :* ${nowFormatted}\n` +
+    `🔒 _Ouvrez le robot ${club} pour vérifier votre accès_\n` +
+    (anyNew ? `🆕 _= ajout récent (${NEW_CREATOR_DAYS} derniers jours)_\n` : "") +
+    `\n`;
 
   const chunks: string[] = [];
   const push = (block: string) => {
     // Keep each Telegram message under the safe chunk size
     if (currentChunk.length + block.length > 3500) {
       chunks.push(currentChunk.trim());
-      currentChunk = `💎 *${club} | CREATOR DIRECTORY (Cont.)*\n\n${block}`;
+      currentChunk = `💎 *${club} | RÉPERTOIRE DES CRÉATEURS (suite)*\n\n${block}`;
     } else {
       currentChunk += block;
     }
@@ -106,7 +125,8 @@ export function buildDirectorySections(
 
     const grouped: Record<string, Creator[]> = {};
     for (const c of inSection) {
-      const letter = (c.name[0] || "#").toUpperCase();
+      const first = (c.name.normalize("NFD")[0] || "#").toUpperCase();
+      const letter = /[A-Z]/.test(first) ? first : "#";
       (grouped[letter] ??= []).push(c);
     }
     for (const letter of Object.keys(grouped).sort()) {
@@ -115,7 +135,8 @@ export function buildDirectorySections(
         const updateStr = formatCreatorDate(c.lastContentUpdatedAt);
         const deepLink = `https://t.me/${botUsername}?start=creator_${c.id}`;
         const label = COLLECTION_LABELS[creatorCollection(c)];
-        sectionText += `• *${c.name}* — ${label} — ${updateStr} [🔍 View](${deepLink})\n`;
+        const badge = isNewCreator(c, now) ? "🆕 " : "• ";
+        sectionText += `${badge}*${escapeMd(c.name)}* — ${label} — ${updateStr} [🔍 Voir](${deepLink})\n`;
       }
       push(sectionText + "\n");
     }
@@ -128,14 +149,8 @@ export function buildDirectorySections(
   return chunks;
 }
 
-export function computeContentHash(chunks: string[]): string {
-  const combined = chunks.join("---CHUNK---");
-  let hash = 0;
-  for (let i = 0; i < combined.length; i++) {
-    hash = (hash << 5) - hash + combined.charCodeAt(i);
-    hash |= 0;
-  }
-  return String(hash);
+export function computeContentHash(chunks: string[]): Promise<string> {
+  return sha256Hex(chunks.join("---CHUNK---"));
 }
 
 export interface SyncDirectoryResult {
@@ -158,62 +173,75 @@ export async function syncPublicDirectory(
 
   const syncState = await getDirectorySyncState();
 
-  // If not forced and not dirty, skip to preserve low API consumption
-  if (!force && !syncState.isDirty) {
-    return { updated: false, publishedCount: 0, reason: "not_dirty" };
-  }
+  const seqAtStart = syncState.dirtySeq ?? 0;
 
   // Fetch only active creators with confirmed media content
   const creators = await listCreators({
     status: "active",
     hasContentOnly: true,
   });
+  const newKey = newCreatorsKey(creators);
+
+  // Skip (no Telegram calls) unless forced, changed, or a 🆕 flag has just expired.
+  if (!force && !syncState.isDirty && (syncState.lastNewKey ?? "") === newKey) {
+    return { updated: false, publishedCount: 0, reason: "not_dirty" };
+  }
 
   const chunks = buildDirectorySections(creators, config.BOT_USERNAME);
-  const contentHash = computeContentHash(chunks);
+  // Hash the creator-driven content, not the "Updated: <today>" header, so a
+  // day passing never by itself triggers an edit.
+  const contentHash = await computeContentHash(
+    chunks.map((c) => c.replace(/📅 \*Répertoire mis à jour :\*[^\n]*\n/, ""))
+  );
 
   if (!force && syncState.lastContentHash === contentHash) {
     // Content is identical, clear dirty flag and skip editing
-    await clearDirectoryDirty(contentHash, syncState.publishedMessageIds);
+    await clearDirectoryDirty(contentHash, syncState.publishedMessageIds, seqAtStart, newKey);
     return { updated: false, publishedCount: 0, reason: "content_identical" };
   }
 
   const publishedIds: number[] = [];
+  const existingIds = syncState.publishedMessageIds || [];
 
   try {
-    const existingIds = syncState.publishedMessageIds || [];
-
     for (let i = 0; i < chunks.length; i++) {
       const chunkText = chunks[i];
+      const options = { parse_mode: "Markdown", disable_web_page_preview: true };
+
       if (i < existingIds.length) {
-        // Edit existing message
         const msgId = existingIds[i];
         try {
-          await api.editMessageText(channelId, msgId, chunkText, {
-            parse_mode: "Markdown",
-            disable_web_page_preview: true,
-          });
+          await api.editMessageText(channelId, msgId, chunkText, options);
           publishedIds.push(msgId);
-        } catch {
-          // If edit fails (e.g. message deleted), send new message
-          const newMsg = await api.sendMessage(channelId, chunkText, {
-            parse_mode: "Markdown",
-            disable_web_page_preview: true,
-          });
-          publishedIds.push(newMsg.message_id);
+        } catch (err) {
+          if (isMessageNotModified(err)) {
+            publishedIds.push(msgId); // already shows exactly this text
+          } else if (isMessageGone(err)) {
+            // Only a message that no longer exists is replaced. Any other failure
+            // (rate limit, network) aborts so a retry cannot post duplicates.
+            const newMsg = await api.sendMessage(channelId, chunkText, options);
+            publishedIds.push(newMsg.message_id);
+          } else {
+            throw err;
+          }
         }
       } else {
-        // Send new message for additional chunk
-        const newMsg = await api.sendMessage(channelId, chunkText, {
-          parse_mode: "Markdown",
-          disable_web_page_preview: true,
-        });
+        const newMsg = await api.sendMessage(channelId, chunkText, options);
         publishedIds.push(newMsg.message_id);
       }
     }
 
-    // Pin first directory message
-    if (publishedIds.length > 0) {
+    // Remove stale trailing messages left over when the directory shrank.
+    if (api.deleteMessage) {
+      for (const staleId of existingIds.slice(chunks.length)) {
+        try {
+          await api.deleteMessage(channelId, staleId);
+        } catch { /* already gone */ }
+      }
+    }
+
+    // Pin only when the first message changed: every pin posts a service message.
+    if (publishedIds.length > 0 && publishedIds[0] !== existingIds[0]) {
       try {
         await api.pinChatMessage(channelId, publishedIds[0]);
       } catch {
@@ -221,7 +249,7 @@ export async function syncPublicDirectory(
       }
     }
 
-    await clearDirectoryDirty(contentHash, publishedIds);
+    await clearDirectoryDirty(contentHash, publishedIds, seqAtStart, newKey);
 
     await logAuditEvent(
       "directory_synced",
@@ -237,10 +265,23 @@ export async function syncPublicDirectory(
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     console.error("Directory synchronization failed:", errorMsg);
+    // Keep any messages created before the failure so the retry edits them
+    // instead of posting a second copy.
+    if (publishedIds.length > 0) {
+      const merged = [...publishedIds, ...existingIds.slice(publishedIds.length)];
+      await clearDirectoryDirtyKeepDirty(syncState, merged).catch(() => {});
+    }
     return {
       updated: false,
       publishedCount: 0,
       error: errorMsg,
     };
   }
+}
+
+async function clearDirectoryDirtyKeepDirty(
+  state: Awaited<ReturnType<typeof getDirectorySyncState>>,
+  messageIds: number[]
+): Promise<void> {
+  await saveDirectorySyncState({ ...state, publishedMessageIds: messageIds, isDirty: true });
 }

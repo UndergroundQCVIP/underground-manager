@@ -4,7 +4,7 @@
 
 import { SPACE_IDS, SpaceId } from "../types.ts";
 import { getChatId, getSpaceTitle } from "./spaces.ts";
-import { hasAccessToSpace } from "../db/entitlements.ts";
+import { getActiveUserEntitlements, hasAccessToSpace } from "../db/entitlements.ts";
 import {
   getSyncState,
   listAllSyncedUserIds,
@@ -110,7 +110,17 @@ export interface RemoveMemberResult {
 export async function removeMemberFromSpace(
   api: SyncApiLike,
   spaceId: SpaceId,
-  userId: number
+  userId: number,
+  options: {
+    /**
+     * Re-evaluated right before the ban, after the Telegram round-trip. Return
+     * false to abort: the member renewed (or was granted access) while the
+     * reconciliation run was in flight.
+     */
+    stillIneligible?: () => Promise<boolean>;
+    /** A previous attempt failed part-way (e.g. ban succeeded, unban did not). */
+    isRetry?: boolean;
+  } = {}
 ): Promise<RemoveMemberResult> {
   const chatId = getChatId(spaceId);
 
@@ -126,6 +136,11 @@ export async function removeMemberFromSpace(
 
     // 2. If user already left or was kicked, just update our sync record
     if (chatMember.status === "left" || chatMember.status === "kicked") {
+      if (chatMember.status === "kicked" && options.isRetry) {
+        // Our earlier ban succeeded but the unban did not: lift it so the member
+        // can rejoin after renewing. Only done for bans this service created.
+        await api.unbanChatMember(chatId, userId, { only_if_banned: true });
+      }
       await recordSyncState({
         userId,
         spaceId,
@@ -136,7 +151,12 @@ export async function removeMemberFromSpace(
       return { success: true, skippedProtected: false };
     }
 
-    // 3. Remove user: ban then immediately unban to allow future re-entry when eligible
+    // 3. Last-moment safety check against a concurrent renewal
+    if (options.stillIneligible && !(await options.stillIneligible())) {
+      return { success: true, skippedProtected: true };
+    }
+
+    // 4. Remove user: ban then immediately unban to allow future re-entry when eligible
     await api.banChatMember(chatId, userId);
     await api.unbanChatMember(chatId, userId, { only_if_banned: true });
 
@@ -184,21 +204,36 @@ export async function reconcileAllMembers(
   const errors: string[] = [];
 
   for (const userId of userIds) {
+    // One entitlement read per user (not per space). A failed read throws and the
+    // user is skipped for this run — never treated as "no entitlement".
+    let granted: Set<SpaceId>;
+    try {
+      const active = await getActiveUserEntitlements(userId);
+      granted = new Set(active.flatMap((e) => e.spaces));
+    } catch (err) {
+      errors.push(`Could not read entitlements for user ${userId}: ${err instanceof Error ? err.message : String(err)}`);
+      continue;
+    }
+
     for (const spaceId of SPACE_IDS) {
       try {
+        if (granted.has(spaceId)) continue;
+
         const syncState = await getSyncState(userId, spaceId);
-        // Only consider spaces where the user was previously admitted
-        if (syncState && syncState.status === "admitted") {
-          const eligible = await hasAccessToSpace(userId, spaceId);
-          if (!eligible) {
-            const removeRes = await removeMemberFromSpace(api, spaceId, userId);
-            if (removeRes.success && !removeRes.skippedProtected) {
-              removedCount++;
-            } else if (removeRes.error) {
-              errors.push(
-                `Failed removing user ${userId} from ${spaceId}: ${removeRes.error}`
-              );
-            }
+        // "admitted" members are removed; "error" means an earlier removal/admission
+        // attempt failed and must be retried — otherwise a single transient Telegram
+        // failure would leave an expired member inside forever.
+        if (syncState && (syncState.status === "admitted" || syncState.status === "error")) {
+          const removeRes = await removeMemberFromSpace(api, spaceId, userId, {
+            isRetry: syncState.status === "error",
+            stillIneligible: async () => !(await hasAccessToSpace(userId, spaceId)),
+          });
+          if (removeRes.success && !removeRes.skippedProtected) {
+            removedCount++;
+          } else if (removeRes.error) {
+            errors.push(
+              `Failed removing user ${userId} from ${spaceId}: ${removeRes.error}`
+            );
           }
         }
       } catch (err) {

@@ -51,24 +51,24 @@ migrationComposer.use(
 );
 
 const STATUS_LABEL: Record<MigrationStatus, string> = {
-  prepared: "🟡 Prepared (dry-run — nothing copied)",
-  blocked: "🔴 Blocked",
-  copying: "🔵 Copying",
-  paused: "⏸ Paused",
-  needs_review: "🟠 Needs review",
-  ready_to_finalize: "🟢 Verified — awaiting your approval",
-  finalized: "✅ Finalized (old Regular topic still exists)",
-  source_deleted: "🗑 Completed — old topic removed",
-  cancelled: "⚫ Cancelled",
+  prepared: "🟡 Préparée (essai à blanc — rien de copié)",
+  blocked: "🔴 Bloquée",
+  copying: "🔵 Copie en cours",
+  paused: "⏸ En pause",
+  needs_review: "🟠 À examiner",
+  ready_to_finalize: "🟢 Vérifiée — en attente de votre approbation",
+  finalized: "✅ Finalisée (l'ancien sujet Regular existe toujours)",
+  source_deleted: "🗑 Terminée — ancien sujet supprimé",
+  cancelled: "⚫ Annulée",
 };
 
 export const PROTECTED_CONTENT_ALTERNATIVE =
-  `*Administrator-controlled republishing alternative*\n` +
-  `Telegram's Restrict Saving Content forbids copying this media, and the bot will not bypass or disable it.\n` +
-  `1. Collect the creator's media from your authorized source files.\n` +
-  `2. Create the creator's topic in RETRO | {club} and upload the files yourself.\n` +
-  `3. Link it to the existing creator record (same internal ID, no duplicate):\n` +
-  `   \`/relink_creator <creator name> <retro topic id>\``;
+  `*Solution de rechange : republication contrôlée par un administrateur*\n` +
+  `L'option « Restreindre l'enregistrement du contenu » de Telegram interdit la copie de ces médias, et le robot ne la contournera ni ne la désactivera.\n` +
+  `1. Rassemblez les médias du créateur à partir de vos fichiers sources autorisés.\n` +
+  `2. Créez le sujet du créateur dans RETRO | {club} et téléversez les fichiers vous-même.\n` +
+  `3. Associez-le à la fiche existante du créateur (même identifiant interne, aucun doublon) :\n` +
+  `   \`/relink_creator <nom du créateur> <id du sujet retro>\``;
 
 function mdSafe(t: string): string {
   return t.replace(/([_*`\[])/g, "\\$1");
@@ -81,69 +81,69 @@ async function renderJob(job: MigrationJob): Promise<{ text: string; kb: InlineK
 
   let text =
     `🚚 *MIGRATION — ${mdSafe(job.creatorName)}*\n` +
-    `*Status:* ${STATUS_LABEL[job.status]}\n\n` +
-    `*Source:* Regular forum \`${job.source.chatId}\` / topic \`${job.source.topicId}\`\n` +
-    `*Destination:* RETRO | ${getClubName()} \`${job.destination.chatId}\` / topic ${job.destination.topicId ? `\`${job.destination.topicId}\`` : "_not created yet_"}\n\n` +
-    `*Inventory:* ${t.items} message(s), ${t.albums} album(s)\n` +
-    `✔ copied ${t.copied} · ⏳ pending ${t.pending} · ✖ failed ${t.failed} · ❓ ambiguous ${t.ambiguous} · 🚫 excluded ${t.excluded}\n`;
+    `*Statut :* ${STATUS_LABEL[job.status]}\n\n` +
+    `*Source :* forum Regular \`${job.source.chatId}\` / sujet \`${job.source.topicId}\`\n` +
+    `*Destination :* RETRO | ${getClubName()} \`${job.destination.chatId}\` / sujet ${job.destination.topicId ? `\`${job.destination.topicId}\`` : "_pas encore créé_"}\n\n` +
+    `*Inventaire :* ${t.items} message(s), ${t.albums} album(s)\n` +
+    `✔ copiés ${t.copied} · ⏳ en attente ${t.pending} · ✖ échoués ${t.failed} · ❓ ambigus ${t.ambiguous} · 🚫 exclus ${t.excluded}\n`;
 
   if (job.status === "prepared") {
-    text += `\n*Dry-run:* ${estimateBatches(items)} batch(es) would be copied. No Telegram content has been changed.\n`;
+    text += `\n*Essai à blanc :* ${estimateBatches(items)} lot(s) seraient copiés. Aucun contenu Telegram n'a été modifié.\n`;
   }
 
   if (job.preflight && job.preflight.blockers.length) {
-    text += `\n*Blockers:*\n` + job.preflight.blockers.map((b) => `• ${mdSafe(b.detail)}`).join("\n") + "\n";
+    text += `\n*Blocages :*\n` + job.preflight.blockers.map((b) => `• ${mdSafe(b.detail)}`).join("\n") + "\n";
   }
   if (job.preflight?.warnings.length) {
-    text += `\n*Warnings:*\n` + job.preflight.warnings.map((w) => `• ${mdSafe(w)}`).join("\n") + "\n";
+    text += `\n*Avertissements :*\n` + job.preflight.warnings.map((w) => `• ${mdSafe(w)}`).join("\n") + "\n";
   }
   if (job.blockedReason === "protected_content") {
     text += `\n${PROTECTED_CONTENT_ALTERNATIVE.replace("{club}", getClubName())}\n`;
   }
   if (job.notes.length) {
-    text += `\n*Notes:*\n` + job.notes.slice(-4).map((n) => `• ${mdSafe(n).slice(0, 300)}`).join("\n") + "\n";
+    text += `\n*Notes :*\n` + job.notes.slice(-4).map((n) => `• ${mdSafe(n).slice(0, 300)}`).join("\n") + "\n";
   }
   if (["prepared", "copying", "paused", "needs_review", "ready_to_finalize"].includes(job.status)) {
     text +=
-      `\n⚠️ _Until the old Regular topic is removed, Regular members can still open the original collection — exclusive Retro access is not achieved yet._`;
+      `\n⚠️ _Tant que l'ancien sujet Regular n'est pas supprimé, les membres Regular peuvent encore ouvrir la collection d'origine — l'accès exclusif Retro n'est pas encore atteint._`;
   }
 
   switch (job.status) {
     case "prepared":
-      kb.text("▶️ Start copying", `mig:start:${job.id}`).row();
+      kb.text("▶️ Lancer la copie", `mig:start:${job.id}`).row();
       break;
     case "blocked":
-      kb.text("🔄 Re-check", `mig:start:${job.id}`).row();
+      kb.text("🔄 Revérifier", `mig:start:${job.id}`).row();
       break;
     case "copying":
-      kb.text("⏩ Copy next batches", `mig:run:${job.id}`).text("⏸ Pause", `mig:pause:${job.id}`).row();
+      kb.text("⏩ Copier les prochains lots", `mig:run:${job.id}`).text("⏸ Pause", `mig:pause:${job.id}`).row();
       break;
     case "paused":
-      kb.text("▶️ Resume", `mig:start:${job.id}`).row();
+      kb.text("▶️ Reprendre", `mig:start:${job.id}`).row();
       break;
     case "needs_review":
-      kb.text("🔁 Retry failed", `mig:start:${job.id}`).text("🔍 Re-verify", `mig:verify:${job.id}`).row();
-      if (t.failed + t.ambiguous > 0) kb.text("🚫 Exclude unresolved…", `mig:excl:${job.id}`).row();
+      kb.text("🔁 Réessayer les échecs", `mig:start:${job.id}`).text("🔍 Revérifier", `mig:verify:${job.id}`).row();
+      if (t.failed + t.ambiguous > 0) kb.text("🚫 Exclure les éléments non résolus…", `mig:excl:${job.id}`).row();
       break;
     case "ready_to_finalize":
-      kb.text("✅ Review & approve finalization", `mig:fin:${job.id}`).row();
+      kb.text("✅ Examiner et approuver la finalisation", `mig:fin:${job.id}`).row();
       break;
     case "finalized":
-      kb.text("🗑 Remove old Regular topic…", `mig:del:${job.id}`).row();
+      kb.text("🗑 Supprimer l'ancien sujet Regular…", `mig:del:${job.id}`).row();
       break;
   }
   if (!isTerminalMigration(job.status) && !["finalized"].includes(job.status)) {
-    kb.text("❌ Cancel migration", `mig:cancel:${job.id}`).row();
+    kb.text("❌ Annuler la migration", `mig:cancel:${job.id}`).row();
   }
-  kb.text("🔃 Refresh", `mig:view:${job.id}`).text("⬅️ Migrations", "mig:list");
+  kb.text("🔃 Actualiser", `mig:view:${job.id}`).text("⬅️ Migrations", "mig:list");
   return { text, kb };
 }
 
 async function showJob(ctx: { editMessageText: (t: string, o: object) => Promise<unknown> }, jobId: string) {
   const job = await getMigrationJob(jobId);
   if (!job) {
-    await ctx.editMessageText("⚠️ Migration job not found.", {
-      reply_markup: new InlineKeyboard().text("⬅️ Admin Menu", "admin:menu"),
+    await ctx.editMessageText("⚠️ Migration introuvable.", {
+      reply_markup: new InlineKeyboard().text("⬅️ Menu administrateur", "admin:menu"),
     });
     return;
   }
@@ -158,10 +158,10 @@ migrationComposer.callbackQuery("mig:pick", async (ctx) => {
   await ctx.answerCallbackQuery();
   const kb = new InlineKeyboard();
   for (const c of regular.slice(0, 30)) kb.text(c.name, `mig:sel:${c.id}`).row();
-  kb.text("⬅️ Admin Menu", "admin:menu");
+  kb.text("⬅️ Menu administrateur", "admin:menu");
   await ctx.editMessageText(
-    `🎞️ *MOVE TO RETRO*\n\nSelect a Regular creator to prepare for migration. Nothing is moved until you review the dry-run and start the copy.` +
-    (regular.length === 0 ? `\n\n_No Regular creators registered._` : ""),
+    `🎞️ *PASSER À RETRO*\n\nChoisissez un créateur Regular à préparer pour la migration. Rien n'est déplacé tant que vous n'avez pas examiné l'essai à blanc et lancé la copie.` +
+    (regular.length === 0 ? `\n\n_Aucun créateur Regular inscrit._` : ""),
     { parse_mode: "Markdown", reply_markup: kb }
   );
 });
@@ -169,12 +169,12 @@ migrationComposer.callbackQuery("mig:pick", async (ctx) => {
 migrationComposer.command("move_to_retro", async (ctx) => {
   const creator = await resolveCreator(ctx.match ?? "");
   if (!creator) {
-    await ctx.reply("Usage: `/move_to_retro <creator name or id>`", { parse_mode: "Markdown" });
+    await ctx.reply("Utilisation : `/move_to_retro <nom ou id du créateur>`", { parse_mode: "Markdown" });
     return;
   }
-  await ctx.reply(`Open the migration for *${mdSafe(creator.name)}*:`, {
+  await ctx.reply(`Ouvrir la migration de *${mdSafe(creator.name)}* :`, {
     parse_mode: "Markdown",
-    reply_markup: new InlineKeyboard().text("🎞️ Continue", `mig:sel:${creator.id}`),
+    reply_markup: new InlineKeyboard().text("🎞️ Continuer", `mig:sel:${creator.id}`),
   });
 });
 
@@ -182,7 +182,7 @@ migrationComposer.callbackQuery(/^mig:sel:([\w-]+)$/, async (ctx) => {
   const creator = await getCreator(ctx.match[1]);
   await ctx.answerCallbackQuery();
   if (!creator) {
-    await ctx.editMessageText("⚠️ Creator not found.", { reply_markup: new InlineKeyboard().text("⬅️ Back", "mig:pick") });
+    await ctx.editMessageText("⚠️ Créateur introuvable.", { reply_markup: new InlineKeyboard().text("⬅️ Retour", "mig:pick") });
     return;
   }
   const existing = await getActiveMigrationForCreator(creator.id);
@@ -192,30 +192,30 @@ migrationComposer.callbackQuery(/^mig:sel:([\w-]+)$/, async (ctx) => {
   }
   const indexed = (await listMediaIndex(creator.id, { chatId: creator.chatId, topicId: creator.topicId })).length;
   await ctx.editMessageText(
-    `🎞️ *MOVE ${mdSafe(creator.name)} TO RETRO*\n\n` +
-    `Indexed media messages: *${indexed}* (${creator.inventoryStatus === "complete" ? "inventory complete" : "⚠️ inventory not confirmed complete"})\n\n` +
-    `This prepares a *dry-run only*: the bot checks the source mapping, the Retro forum, permissions and content protection, and counts what can be copied. Nothing is copied or deleted.\n\n` +
-    `Please confirm the club retains the publication/distribution rights for this collection:`,
+    `🎞️ *DÉPLACER ${mdSafe(creator.name)} VERS RETRO*\n\n` +
+    `Messages médias indexés : *${indexed}* (${creator.inventoryStatus === "complete" ? "inventaire complet" : "⚠️ inventaire non confirmé complet"})\n\n` +
+    `Ceci prépare un *essai à blanc seulement* : le robot vérifie la correspondance de la source, le forum Retro, les permissions et la protection du contenu, et compte ce qui peut être copié. Rien n'est copié ni supprimé.\n\n` +
+    `Veuillez confirmer que le club conserve les droits de publication et de distribution de cette collection :`,
     {
       parse_mode: "Markdown",
       reply_markup: new InlineKeyboard()
-        .text("✅ I confirm the rights — prepare dry-run", `mig:rts:${creator.id}`)
+        .text("✅ Je confirme les droits — préparer l'essai à blanc", `mig:rts:${creator.id}`)
         .row()
-        .text("❌ Cancel", "mig:pick"),
+        .text("❌ Annuler", "mig:pick"),
     }
   );
 });
 
 migrationComposer.callbackQuery(/^mig:rts:([\w-]+)$/, async (ctx) => {
-  await ctx.answerCallbackQuery({ text: "Preparing dry-run..." });
+  await ctx.answerCallbackQuery({ text: "Préparation de l'essai à blanc..." });
   const res = await prepareMigration(ctx.api, {
     creatorId: ctx.match[1],
     adminId: ctx.from!.id,
     rightsConfirmed: true,
   });
   if (!res.ok || !res.job) {
-    await ctx.editMessageText(`⚠️ ${res.error ?? "Could not prepare migration."}`, {
-      reply_markup: new InlineKeyboard().text("⬅️ Back", "mig:pick"),
+    await ctx.editMessageText(`⚠️ ${res.error ?? "Impossible de préparer la migration."}`, {
+      reply_markup: new InlineKeyboard().text("⬅️ Retour", "mig:pick"),
     });
     return;
   }
@@ -228,13 +228,13 @@ migrationComposer.callbackQuery("mig:list", async (ctx) => {
   const jobs = (await listMigrationJobs()).slice(0, 12);
   await ctx.answerCallbackQuery();
   const kb = new InlineKeyboard();
-  let text = `🚚 *MIGRATION STATUS*\n\n`;
-  if (jobs.length === 0) text += `_No migrations yet._`;
+  let text = `🚚 *ÉTAT DES MIGRATIONS*\n\n`;
+  if (jobs.length === 0) text += `_Aucune migration pour le moment._`;
   for (const j of jobs) {
     text += `• *${mdSafe(j.creatorName)}* — ${STATUS_LABEL[j.status]} (${j.totals.copied}/${j.totals.items})\n`;
     kb.text(j.creatorName, `mig:view:${j.id}`).row();
   }
-  kb.text("🎞️ Move a creator", "mig:pick").row().text("⬅️ Admin Menu", "admin:menu");
+  kb.text("🎞️ Déplacer un créateur", "mig:pick").row().text("⬅️ Menu administrateur", "admin:menu");
   await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: kb });
 });
 
@@ -246,7 +246,7 @@ migrationComposer.callbackQuery(/^mig:view:([\w-]+)$/, async (ctx) => {
 // ---- Execution controls ---------------------------------------------------------
 
 migrationComposer.callbackQuery(/^mig:start:([\w-]+)$/, async (ctx) => {
-  await ctx.answerCallbackQuery({ text: "Starting..." });
+  await ctx.answerCallbackQuery({ text: "Démarrage..." });
   const res = await startMigration(ctx.api, ctx.match[1], ctx.from!.id);
   if (!res.ok && res.error) await ctx.reply(`⚠️ ${res.error}`);
   if (res.ok) {
@@ -257,10 +257,10 @@ migrationComposer.callbackQuery(/^mig:start:([\w-]+)$/, async (ctx) => {
 });
 
 migrationComposer.callbackQuery(/^mig:run:([\w-]+)$/, async (ctx) => {
-  await ctx.answerCallbackQuery({ text: "Copying..." });
+  await ctx.answerCallbackQuery({ text: "Copie en cours..." });
   const r = await runMigrationStep(ctx.api, ctx.match[1], { maxBatches: 5, timeBudgetMs: 20_000 });
-  if (r.reason === "locked") await ctx.reply("ℹ️ Another worker is already running this migration.");
-  if (r.reason === "rate_limited") await ctx.reply("ℹ️ Telegram asked us to slow down; the worker will resume automatically.");
+  if (r.reason === "locked") await ctx.reply("ℹ️ Un autre processus exécute déjà cette migration.");
+  if (r.reason === "rate_limited") await ctx.reply("ℹ️ Telegram nous demande de ralentir ; le processus reprendra automatiquement.");
   await showJob(ctx, ctx.match[1]);
 });
 
@@ -271,34 +271,34 @@ migrationComposer.callbackQuery(/^mig:pause:([\w-]+)$/, async (ctx) => {
 });
 
 migrationComposer.callbackQuery(/^mig:verify:([\w-]+)$/, async (ctx) => {
-  await ctx.answerCallbackQuery({ text: "Verifying..." });
+  await ctx.answerCallbackQuery({ text: "Vérification..." });
   const job = await reevaluateMigration(ctx.api, ctx.match[1]);
   const v = await verifyMigration(ctx.api, ctx.match[1]);
-  if (!v.ok) await ctx.reply(`🔍 Verification:\n${v.problems.map((p) => `• ${p}`).join("\n")}`);
+  if (!v.ok) await ctx.reply(`🔍 Vérification :\n${v.problems.map((p) => `• ${p}`).join("\n")}`);
   await showJob(ctx, job.id);
 });
 
 migrationComposer.callbackQuery(/^mig:excl:([\w-]+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    `🚫 *EXCLUDE UNRESOLVED ITEMS*\n\n` +
-    `Only do this if you confirmed these messages no longer exist or must not be moved (for example deleted in the source topic). ` +
-    `Excluded items are recorded as administrator-accepted gaps in the audit log; they are *not* copied.`,
+    `🚫 *EXCLURE LES ÉLÉMENTS NON RÉSOLUS*\n\n` +
+    `Ne le faites que si vous avez confirmé que ces messages n'existent plus ou ne doivent pas être déplacés (par exemple supprimés dans le sujet source). ` +
+    `Les éléments exclus sont consignés au journal d'audit comme lacunes acceptées par un administrateur ; ils ne sont *pas* copiés.`,
     {
       parse_mode: "Markdown",
       reply_markup: new InlineKeyboard()
-        .text("🚫 Exclude failed & ambiguous items", `mig:exclcfm:${ctx.match[1]}`)
+        .text("🚫 Exclure les éléments échoués et ambigus", `mig:exclcfm:${ctx.match[1]}`)
         .row()
-        .text("⬅️ Back", `mig:view:${ctx.match[1]}`),
+        .text("⬅️ Retour", `mig:view:${ctx.match[1]}`),
     }
   );
 });
 
 migrationComposer.callbackQuery(/^mig:exclcfm:([\w-]+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
-  const n = await excludeUnresolvedItems(ctx.match[1], ctx.from!.id, "Accepted by administrator as non-transferable");
+  const n = await excludeUnresolvedItems(ctx.match[1], ctx.from!.id, "Accepté par l'administrateur comme non transférable");
   await reevaluateMigration(ctx.api, ctx.match[1]);
-  await ctx.reply(`🚫 Excluded ${n} item(s).`);
+  await ctx.reply(`🚫 ${n} élément(s) exclu(s).`);
   await showJob(ctx, ctx.match[1]);
 });
 
@@ -307,7 +307,7 @@ migrationComposer.callbackQuery(/^mig:cancel:([\w-]+)$/, async (ctx) => {
   const res = await cancelMigration(ctx.match[1], ctx.from!.id);
   await ctx.editMessageText(
     res.ok
-      ? `⚫ Migration cancelled. The original topic and the creator record were not changed.`
+      ? `⚫ Migration annulée. Le sujet d'origine et la fiche du créateur n'ont pas été modifiés.`
       : `⚠️ ${res.error}`,
     { reply_markup: new InlineKeyboard().text("⬅️ Migrations", "mig:list") }
   );
@@ -320,22 +320,22 @@ migrationComposer.callbackQuery(/^mig:fin:([\w-]+)$/, async (ctx) => {
   const report = await verifyMigration(ctx.api, ctx.match[1]);
   const job = await getMigrationJob(ctx.match[1]);
   await ctx.editMessageText(
-    `✅ *APPROVE FINALIZATION — ${mdSafe(job?.creatorName ?? "")}*\n\n` +
+    `✅ *APPROUVER LA FINALISATION — ${mdSafe(job?.creatorName ?? "")}*\n\n` +
     report.checks.map((c) => `• ${mdSafe(c)}`).join("\n") + "\n\n" +
     (report.ok
-      ? `Approving points the existing creator record (same internal ID) at the Retro topic and updates the directory. *Nothing is deleted.*`
-      : `⚠️ Discrepancies:\n${report.problems.map((p) => `• ${mdSafe(p)}`).join("\n")}`),
+      ? `L'approbation fait pointer la fiche existante du créateur (même identifiant interne) vers le sujet Retro et met à jour le répertoire. *Rien n'est supprimé.*`
+      : `⚠️ Écarts :\n${report.problems.map((p) => `• ${mdSafe(p)}`).join("\n")}`),
     {
       parse_mode: "Markdown",
       reply_markup: report.ok
-        ? new InlineKeyboard().text("✅ Approve & finalize", `mig:fincfm:${ctx.match[1]}`).row().text("⬅️ Back", `mig:view:${ctx.match[1]}`)
-        : new InlineKeyboard().text("⬅️ Back", `mig:view:${ctx.match[1]}`),
+        ? new InlineKeyboard().text("✅ Approuver et finaliser", `mig:fincfm:${ctx.match[1]}`).row().text("⬅️ Retour", `mig:view:${ctx.match[1]}`)
+        : new InlineKeyboard().text("⬅️ Retour", `mig:view:${ctx.match[1]}`),
     }
   );
 });
 
 migrationComposer.callbackQuery(/^mig:fincfm:([\w-]+)$/, async (ctx) => {
-  await ctx.answerCallbackQuery({ text: "Finalizing..." });
+  await ctx.answerCallbackQuery({ text: "Finalisation..." });
   const res = await finalizeMigration(ctx.api, ctx.match[1], ctx.from!.id);
   if (!res.ok) {
     await ctx.reply(`⚠️ ${res.error}`);
@@ -352,18 +352,18 @@ migrationComposer.callbackQuery(/^mig:del:([\w-]+)$/, async (ctx) => {
   const job = await getMigrationJob(ctx.match[1]);
   if (!job) return;
   await ctx.editMessageText(
-    `🗑 *REMOVE OLD REGULAR TOPIC — STEP 1/2*\n\n` +
-    `*Creator:* ${mdSafe(job.creatorName)}\n` +
-    `*Source forum:* \`${job.source.chatId}\`\n` +
-    `*Source topic:* \`${job.source.topicId}\` ("${mdSafe(job.creatorName)}")\n` +
-    `*Migration result:* ${job.totals.copied} copied · ${job.totals.excluded} excluded · ${job.totals.failed + job.totals.ambiguous + job.totals.pending} unresolved\n\n` +
-    `Deleting a topic permanently removes all its messages. Open the Retro topic and check it yourself first.`,
+    `🗑 *SUPPRIMER L'ANCIEN SUJET REGULAR — ÉTAPE 1/2*\n\n` +
+    `*Créateur :* ${mdSafe(job.creatorName)}\n` +
+    `*Forum source :* \`${job.source.chatId}\`\n` +
+    `*Sujet source :* \`${job.source.topicId}\` ("${mdSafe(job.creatorName)}")\n` +
+    `*Résultat de la migration :* ${job.totals.copied} copiés · ${job.totals.excluded} exclus · ${job.totals.failed + job.totals.ambiguous + job.totals.pending} non résolus\n\n` +
+    `La suppression d'un sujet retire définitivement tous ses messages. Ouvrez d'abord le sujet Retro et vérifiez-le vous-même.`,
     {
       parse_mode: "Markdown",
       reply_markup: new InlineKeyboard()
-        .text("✅ I manually reviewed the Retro destination", `mig:delrev:${job.id}`)
+        .text("✅ J'ai examiné manuellement la destination Retro", `mig:delrev:${job.id}`)
         .row()
-        .text("❌ Keep the old topic", `mig:view:${job.id}`),
+        .text("❌ Garder l'ancien sujet", `mig:view:${job.id}`),
     }
   );
 });
@@ -373,22 +373,22 @@ migrationComposer.callbackQuery(/^mig:delrev:([\w-]+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   if (!res.ok || !res.summary) {
     await ctx.editMessageText(`⚠️ ${res.error}`, {
-      reply_markup: new InlineKeyboard().text("⬅️ Back", `mig:view:${ctx.match[1]}`),
+      reply_markup: new InlineKeyboard().text("⬅️ Retour", `mig:view:${ctx.match[1]}`),
     });
     return;
   }
   const s = res.summary;
   await ctx.editMessageText(
-    `🗑 *REMOVE OLD REGULAR TOPIC — STEP 2/2 (IRREVERSIBLE)*\n\n` +
-    `You are about to permanently delete topic \`${s.sourceTopicId}\` (${mdSafe(s.creatorName)}) from forum \`${s.sourceChatId}\` ` +
-    `with all its messages. ${s.copied} message(s) were copied to Retro topic \`${s.destinationTopicId}\`.\n\n` +
-    `This confirmation expires in 10 minutes.`,
+    `🗑 *SUPPRIMER L'ANCIEN SUJET REGULAR — ÉTAPE 2/2 (IRRÉVERSIBLE)*\n\n` +
+    `Vous êtes sur le point de supprimer définitivement le sujet \`${s.sourceTopicId}\` (${mdSafe(s.creatorName)}) du forum \`${s.sourceChatId}\` ` +
+    `avec tous ses messages. ${s.copied} message(s) ont été copiés vers le sujet Retro \`${s.destinationTopicId}\`.\n\n` +
+    `Cette confirmation expire dans 10 minutes.`,
     {
       parse_mode: "Markdown",
       reply_markup: new InlineKeyboard()
-        .text("🗑 DELETE the old Regular topic", `mig:delcfm:${ctx.match[1]}`)
+        .text("🗑 SUPPRIMER l'ancien sujet Regular", `mig:delcfm:${ctx.match[1]}`)
         .row()
-        .text("❌ Keep it", `mig:view:${ctx.match[1]}`),
+        .text("❌ Le garder", `mig:view:${ctx.match[1]}`),
     }
   );
 });
@@ -408,22 +408,22 @@ migrationComposer.command("index_media", async (ctx) => {
   const firstLink = parts.findIndex((p) => /t\.me\//i.test(p));
   if (firstLink <= 0) {
     await ctx.reply(
-      "Usage: `/index_media <creator name or id> <https://t.me/c/…/topic/message> …`\n" +
-      "Right-click a message → Copy link. The topic in each link must be the creator's topic.",
+      "Utilisation : `/index_media <nom ou id du créateur> <https://t.me/c/…/sujet/message> …`\n" +
+      "Clic droit sur un message → Copier le lien. Le sujet de chaque lien doit être celui du créateur.",
       { parse_mode: "Markdown" }
     );
     return;
   }
   const creator = await resolveCreator(parts.slice(0, firstLink).join(" "));
   if (!creator) {
-    await ctx.reply("⚠️ Creator not found.");
+    await ctx.reply("⚠️ Créateur introuvable.");
     return;
   }
   const res = await indexMediaFromLinks(ctx.from!.id, creator, parts.slice(firstLink));
   await ctx.reply(
-    `🗂 *${mdSafe(creator.name)}* — indexed ${res.added}, already known ${res.alreadyIndexed}, rejected ${res.rejected.length}.` +
+    `🗂 *${mdSafe(creator.name)}* — ${res.added} indexé(s), ${res.alreadyIndexed} déjà connu(s), ${res.rejected.length} rejeté(s).` +
     (res.rejected.length ? `\n${res.rejected.slice(0, 5).map((r) => `• ${mdSafe(r.reason)}`).join("\n")}` : "") +
-    `\n\nWhen every media message is indexed, run \`/attest_inventory ${mdSafe(creator.name)}\`.`,
+    `\n\nQuand tous les messages médias sont indexés, exécutez \`/attest_inventory ${mdSafe(creator.name)}\`.`,
     { parse_mode: "Markdown" }
   );
 });
@@ -431,14 +431,14 @@ migrationComposer.command("index_media", async (ctx) => {
 migrationComposer.command("attest_inventory", async (ctx) => {
   const creator = await resolveCreator(ctx.match ?? "");
   if (!creator) {
-    await ctx.reply("Usage: `/attest_inventory <creator name or id>`", { parse_mode: "Markdown" });
+    await ctx.reply("Utilisation : `/attest_inventory <nom ou id du créateur>`", { parse_mode: "Markdown" });
     return;
   }
   const updated = await attestInventoryComplete(ctx.from!.id, creator);
   await ctx.reply(
     updated
-      ? `✅ Inventory for *${mdSafe(creator.name)}* marked complete by you. Migration will treat the indexed messages as the full collection.`
-      : `⚠️ No indexed media for ${creator.name}; index it first with /index_media.`,
+      ? `✅ L'inventaire de *${mdSafe(creator.name)}* est marqué complet par vous. La migration traitera les messages indexés comme la collection complète.`
+      : `⚠️ Aucun média indexé pour ${creator.name} ; indexez-le d'abord avec /index_media.`,
     { parse_mode: "Markdown" }
   );
 });
@@ -448,11 +448,11 @@ migrationComposer.command("retire_creator", async (ctx) => {
   const when = parts.pop() ?? "";
   const creator = await resolveCreator(parts.join(" "));
   if (!creator || !when) {
-    await ctx.reply("Usage: `/retire_creator <creator name> <YYYY-MM-DD|clear>`", { parse_mode: "Markdown" });
+    await ctx.reply("Utilisation : `/retire_creator <nom du créateur> <AAAA-MM-JJ|clear>`", { parse_mode: "Markdown" });
     return;
   }
   const updated = await setRetirement(creator, when);
-  await ctx.reply(updated ? `✅ Updated retirement for ${creator.name}.` : "⚠️ Invalid date.");
+  await ctx.reply(updated ? `✅ Retraite mise à jour pour ${creator.name}.` : "⚠️ Date invalide.");
 });
 
 migrationComposer.command("relink_creator", async (ctx) => {
@@ -460,14 +460,14 @@ migrationComposer.command("relink_creator", async (ctx) => {
   const topicId = Number(parts.pop());
   const creator = await resolveCreator(parts.join(" "));
   if (!creator || !Number.isInteger(topicId) || topicId <= 0) {
-    await ctx.reply("Usage: `/relink_creator <creator name or id> <retro topic id>`", { parse_mode: "Markdown" });
+    await ctx.reply("Utilisation : `/relink_creator <nom ou id du créateur> <id du sujet retro>`", { parse_mode: "Markdown" });
     return;
   }
   const res = await relinkCreatorToRetroTopic(ctx.from!.id, creator, topicId);
   if (res.ok) await syncPublicDirectory(ctx.api, true).catch(() => {});
   await ctx.reply(
     res.ok
-      ? `✅ ${creator.name} now points to Retro topic ${topicId}. The old Regular topic was not touched.`
+      ? `✅ ${creator.name} pointe maintenant vers le sujet Retro ${topicId}. L'ancien sujet Regular n'a pas été touché.`
       : `⚠️ ${res.error}`
   );
 });

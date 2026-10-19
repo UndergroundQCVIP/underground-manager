@@ -4,6 +4,7 @@
 
 import { getKv } from "./kv.ts";
 import { SystemSettings } from "../types.ts";
+import { getConfig } from "../config.ts";
 
 const SETTINGS_KEY = ["system_settings"];
 
@@ -19,7 +20,20 @@ export const DEFAULT_SETTINGS: SystemSettings = {
 export async function getSystemSettings(): Promise<SystemSettings> {
   const kv = await getKv();
   const res = await kv.get<SystemSettings>(SETTINGS_KEY);
-  return { ...DEFAULT_SETTINGS, ...(res.value ?? {}) };
+  const config = getConfig();
+  // Environment values override the built-in defaults; admin-saved settings override both.
+  const envDefaults: SystemSettings = {
+    ...DEFAULT_SETTINGS,
+    directoryUpdateCron: config.DIRECTORY_UPDATE_CRON || DEFAULT_SETTINGS.directoryUpdateCron,
+    votingPeriodDays:
+      config.VOTING_PERIOD_DAYS > 0 ? config.VOTING_PERIOD_DAYS : DEFAULT_SETTINGS.votingPeriodDays,
+    votingShortlistSize:
+      config.VOTING_SHORTLIST_SIZE > 0
+        ? config.VOTING_SHORTLIST_SIZE
+        : DEFAULT_SETTINGS.votingShortlistSize,
+    digestEnabled: config.DIGEST_ENABLED,
+  };
+  return { ...envDefaults, ...(res.value ?? {}) };
 }
 
 export async function updateSystemSettings(

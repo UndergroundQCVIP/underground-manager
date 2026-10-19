@@ -11,7 +11,7 @@ import {
   getCreator,
   getCreatorByName,
   listCreators,
-  patchCreator,
+  patchCreatorFields,
   relocateCreator,
 } from "../db/creators.ts";
 import { markDirectoryDirty } from "../db/directory.ts";
@@ -47,11 +47,11 @@ export async function indexMediaFromLinks(
   for (const link of links) {
     const parsed = parseTopicMessageLink(link);
     if (!parsed) {
-      result.rejected.push({ link, reason: "Not a topic message link (expected https://t.me/c/<chat>/<topic>/<message>)." });
+      result.rejected.push({ link, reason: "Ce n'est pas un lien de message de sujet (attendu : https://t.me/c/<forum>/<sujet>/<message>)." });
       continue;
     }
     if (parsed.chatId !== creator.chatId || parsed.topicId !== creator.topicId) {
-      result.rejected.push({ link, reason: `Belongs to a different forum/topic than ${creator.name}.` });
+      result.rejected.push({ link, reason: `Appartient à un autre forum ou sujet que celui de ${creator.name}.` });
       continue;
     }
     const key = `${parsed.chatId}:${parsed.topicId}:${parsed.messageId}`;
@@ -83,16 +83,16 @@ export async function indexMediaFromLinks(
 export async function attestInventoryComplete(adminId: number, creator: Creator): Promise<Creator | null> {
   const count = (await listMediaIndex(creator.id, { chatId: creator.chatId, topicId: creator.topicId })).length;
   if (count === 0) return null;
-  return await patchCreator(creator.id, { inventoryStatus: "complete", inventoryAttestedBy: adminId });
+  return await patchCreatorFields(creator.id, { inventoryStatus: "complete", inventoryAttestedBy: adminId });
 }
 
 export async function setRetirement(creator: Creator, isoDateOrClear: string): Promise<Creator | null> {
   if (isoDateOrClear.toLowerCase() === "clear") {
-    return await patchCreator(creator.id, { retiredAt: undefined });
+    return await patchCreatorFields(creator.id, { retiredAt: undefined });
   }
   const d = new Date(isoDateOrClear);
   if (isNaN(d.getTime())) return null;
-  return await patchCreator(creator.id, { retiredAt: d.toISOString() });
+  return await patchCreatorFields(creator.id, { retiredAt: d.toISOString() });
 }
 
 export interface RepairReport {
@@ -143,19 +143,19 @@ export async function relinkCreatorToRetroTopic(
   retroTopicId: number
 ): Promise<{ ok: boolean; error?: string }> {
   const config = getConfig();
-  if (!config.TELEGRAM_RETRO_FORUM_CHAT_ID) return { ok: false, error: "The Retro forum is not configured." };
-  if (creatorCollection(creator) !== "regular") return { ok: false, error: "Creator is already in the Retro collection." };
+  if (!config.TELEGRAM_RETRO_FORUM_CHAT_ID) return { ok: false, error: "Le forum Retro n'est pas configuré." };
+  if (creatorCollection(creator) !== "regular") return { ok: false, error: "Le créateur est déjà dans la collection Retro." };
   if (creator.rightsStatus !== "verified") {
-    return { ok: false, error: "Publication/distribution rights are not verified for this creator (start Move to Retro to confirm them)." };
+    return { ok: false, error: "Les droits de publication et de distribution ne sont pas vérifiés pour ce créateur (lancez « Passer à Retro » pour les confirmer)." };
   }
   const job = await getActiveMigrationForCreator(creator.id);
   if (job && ["copying", "needs_review", "ready_to_finalize", "finalized"].includes(job.status)) {
-    return { ok: false, error: `A migration is ${job.status.replace(/_/g, " ")}; finish or cancel it first.` };
+    return { ok: false, error: `Une migration est ${job.status.replace(/_/g, " ")} ; terminez-la ou annulez-la d'abord.` };
   }
   const { getCreatorByTopic } = await import("../db/creators.ts");
   const occupied = await getCreatorByTopic(config.TELEGRAM_RETRO_FORUM_CHAT_ID, retroTopicId);
   if (occupied && occupied.id !== creator.id) {
-    return { ok: false, error: `That Retro topic already belongs to ${occupied.name}.` };
+    return { ok: false, error: `Ce sujet Retro appartient déjà à ${occupied.name}.` };
   }
   await relocateCreator(creator.id, {
     chatId: config.TELEGRAM_RETRO_FORUM_CHAT_ID,

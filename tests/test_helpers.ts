@@ -32,7 +32,7 @@ export const MOCK_CONFIG: AppConfig = {
   BASE_CURRENCY: "CAD",
   DEFAULT_STARS_REWARD_VALUATION_USD: 0.013,
   TREASURY_REPORT_CHANNEL_ID: -1001002,
-  EXCHANGE_RATE_API_URL: "https://open.er-api.com/v6/latest/USD",
+  EXCHANGE_RATE_API_URL: "", // disabled in tests: no network, deterministic built-in rates
   MIGRATION_BATCH_SIZE: 30,
   MIGRATION_BATCH_DELAY_MS: 0,
 };

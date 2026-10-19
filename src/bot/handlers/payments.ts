@@ -27,13 +27,13 @@ paymentsComposer.on("pre_checkout_query", async (ctx) => {
       await ctx.answerPreCheckoutQuery(true);
     } else {
       await ctx.answerPreCheckoutQuery(false, {
-        error_message: validation.errorMessage ?? "Payment validation failed.",
+        error_message: validation.errorMessage ?? "La validation du paiement a échoué.",
       });
     }
   } catch (err) {
     console.error("Error in pre_checkout_query handler:", err);
     await ctx.answerPreCheckoutQuery(false, {
-      error_message: "An internal verification error occurred. Please try again.",
+      error_message: "Une erreur interne de vérification s'est produite. Veuillez réessayer.",
     });
   }
 });
@@ -65,9 +65,9 @@ paymentsComposer.on("message:successful_payment", async (ctx) => {
     if (result.isDuplicate) {
       // Replayed notification; membership already credited
       await ctx.reply(
-        "✅ Payment was already confirmed. Your membership is active!",
+        "✅ Le paiement a déjà été confirmé. Votre abonnement est actif !",
         {
-          reply_markup: new InlineKeyboard().text("🔓 Access My Channels", "member:channels"),
+          reply_markup: new InlineKeyboard().text("🔓 Accéder à mes canaux", "member:channels"),
         }
       );
       return;
@@ -76,7 +76,7 @@ paymentsComposer.on("message:successful_payment", async (ctx) => {
     if (!result.success || !result.entitlement) {
       console.error("Payment processing error:", result.error);
       await ctx.reply(
-        "⚠️ We encountered an issue finalizing your access. Support has been notified."
+        "⚠️ Un problème est survenu lors de la finalisation de votre accès. Le soutien a été avisé."
       );
       return;
     }
@@ -103,14 +103,30 @@ paymentsComposer.on("message:successful_payment", async (ctx) => {
     await ctx.reply(messages.paymentSuccess(result.entitlement.expiresAt, planId) + upgradeNote, {
       parse_mode: "Markdown",
       reply_markup: new InlineKeyboard()
-        .text("🔓 Access My Channels", "member:channels")
+        .text("🔓 Accéder à mes canaux", "member:channels")
         .row()
-        .text("📋 View Membership", "member:status"),
+        .text("📋 Voir mon abonnement", "member:status"),
     });
   } catch (err) {
     console.error("Unhandled error in message:successful_payment handler:", err);
     await ctx.reply(
-      "⚠️ Payment confirmation received but encountered an error. Please contact support."
+      "⚠️ Confirmation de paiement reçue, mais une erreur s'est produite. Veuillez communiquer avec le soutien."
     );
+  }
+});
+
+// Handle refunds issued through the Bot API (refundStarPayment): withdraw the access
+// that the refunded charge paid for and take its Stars out of the revenue figures.
+paymentsComposer.on("message:refunded_payment", async (ctx) => {
+  const refund = ctx.message.refunded_payment;
+  const userId = ctx.from?.id;
+  if (!userId || !refund) return;
+
+  const handled = await TelegramStarsProvider.handleRefund(
+    userId,
+    refund.telegram_payment_charge_id
+  );
+  if (!handled) {
+    console.warn(`[Payments] Refund for unknown charge ${refund.telegram_payment_charge_id}`);
   }
 });

@@ -149,7 +149,7 @@ Deno.test("COMPLIMENTARY — Reminder is sent approximately 3 days before expiry
     assertEquals(result.remindedCount, 1);
     assertEquals(api.sentMessages.length, 1);
     assertEquals(api.sentMessages[0].chatId, recipientId);
-    assertEquals(api.sentMessages[0].text.includes("expires in approximately"), true);
+    assertEquals(api.sentMessages[0].text.includes("expire dans environ"), true);
 
     // Verify reminderSent flag is now set
     const updated = await getEntitlement(ent.id);

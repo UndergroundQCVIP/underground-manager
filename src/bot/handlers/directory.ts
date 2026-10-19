@@ -16,11 +16,11 @@ export const directoryComposer = new Composer();
 function filterKeyboard(active: "all" | CollectionCategory): InlineKeyboard {
   const mark = (id: string, label: string) => (active === id ? `• ${label}` : label);
   return new InlineKeyboard()
-    .text(mark("all", "All"), "dir:all")
+    .text(mark("all", "Tous"), "dir:all")
     .text(mark("regular", "Regular"), "dir:regular")
     .text(mark("retro", "Retro"), "dir:retro")
     .row()
-    .text("⬅️ Main Menu", "member:home");
+    .text("⬅️ Menu principal", "member:home");
 }
 
 directoryComposer.callbackQuery(/^dir:(all|regular|retro)$/, async (ctx) => {

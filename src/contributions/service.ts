@@ -36,7 +36,7 @@ export async function startContribution(
   creatorId: string
 ): Promise<{ ok: boolean; contribution?: Contribution; error?: string }> {
   const creator = await getCreator(creatorId);
-  if (!creator || creator.status !== "active") return { ok: false, error: "Creator not found." };
+  if (!creator || creator.status !== "active") return { ok: false, error: "Créateur introuvable." };
 
   // Starting a new session replaces an unfinished one.
   const existing = await getActiveContribution(userId);
@@ -87,14 +87,14 @@ export async function finishContribution(
   userId: number
 ): Promise<{ ok: boolean; contribution?: Contribution; error?: string }> {
   const c = await getActiveContribution(userId);
-  if (!c) return { ok: false, error: "You have no open contribution." };
-  if (c.items.length === 0) return { ok: false, error: "Send at least one photo or video first." };
+  if (!c) return { ok: false, error: "Vous n'avez aucune contribution en cours." };
+  if (c.items.length === 0) return { ok: false, error: "Envoyez d'abord au moins une photo ou une vidéo." };
 
   const submitted = await transitionContribution(c.id, ["collecting"], (x) => {
     x.status = "pending";
     x.submittedAt = new Date().toISOString();
   });
-  if (!submitted) return { ok: false, error: "This contribution was already submitted." };
+  if (!submitted) return { ok: false, error: "Cette contribution a déjà été soumise." };
   await logAuditEvent(
     "contribution_submitted",
     { contributionId: submitted.id, creatorId: submitted.creatorId, items: submitted.items.length },
@@ -109,15 +109,15 @@ export async function finishContribution(
       await api.copyMessages(adminId, userId, ids);
       await api.sendMessage(
         adminId,
-        `📥 *New contribution for ${submitted.creatorName}*\n` +
-        `${submitted.items.length} item(s) from user \`${userId}\` — preview above.\n` +
-        `Approve to publish into the creator's topic, or reject.`,
+        `📥 *Nouvelle contribution pour ${submitted.creatorName}*\n` +
+        `${submitted.items.length} élément(s) de l'utilisateur \`${userId}\` — aperçu ci-dessus.\n` +
+        `Approuvez pour publier dans le sujet du créateur, ou refusez.`,
         {
           parse_mode: "Markdown",
           reply_markup: {
             inline_keyboard: [[
-              { text: "✅ Approve & publish", callback_data: `cadm:ok:${submitted.id}` },
-              { text: "❌ Reject", callback_data: `cadm:no:${submitted.id}` },
+              { text: "✅ Approuver et publier", callback_data: `cadm:ok:${submitted.id}` },
+              { text: "❌ Refuser", callback_data: `cadm:no:${submitted.id}` },
             ]],
           },
         }
@@ -139,11 +139,11 @@ export async function rejectContribution(
     x.reviewedBy = adminId;
     x.reviewedAt = new Date().toISOString();
   });
-  if (!updated) return { ok: false, error: "This contribution is no longer awaiting review." };
+  if (!updated) return { ok: false, error: "Cette contribution n'est plus en attente d'examen." };
   await logAuditEvent("contribution_rejected", { contributionId: id }, adminId, updated.userId);
   await api.sendMessage(
     updated.userId,
-    `Thanks for your contribution for *${updated.creatorName}*. It was not accepted this time.`,
+    `Merci pour votre contribution pour *${updated.creatorName}*. Elle n'a pas été acceptée cette fois-ci.`,
     { parse_mode: "Markdown" }
   ).catch(() => {});
   return { ok: true };
@@ -155,14 +155,14 @@ export async function approveContribution(
   adminId: number
 ): Promise<{ ok: boolean; error?: string; published?: number }> {
   const current = await getContribution(id);
-  if (!current) return { ok: false, error: "Contribution not found." };
+  if (!current) return { ok: false, error: "Contribution introuvable." };
   const creator = await getCreator(current.creatorId);
-  if (!creator) return { ok: false, error: "Creator no longer exists." };
+  if (!creator) return { ok: false, error: "Le créateur n'existe plus." };
 
   // Don't add content to a topic that is mid-migration (it would be missed by the copy).
   const mig = await getActiveMigrationForCreator(creator.id);
   if (mig && ["copying", "needs_review", "ready_to_finalize", "paused"].includes(mig.status)) {
-    return { ok: false, error: `${creator.name} is being migrated (${mig.status.replace(/_/g, " ")}). Approve after it is finalized or cancelled.` };
+    return { ok: false, error: `${creator.name} fait l'objet d'une migration (${mig.status.replace(/_/g, " ")}). Approuvez après sa finalisation ou son annulation.` };
   }
 
   // Claim: only one approval can ever publish this contribution.
@@ -171,7 +171,7 @@ export async function approveContribution(
     x.reviewedBy = adminId;
     x.reviewedAt = new Date().toISOString();
   });
-  if (!claimed) return { ok: false, error: "This contribution is no longer awaiting review." };
+  if (!claimed) return { ok: false, error: "Cette contribution n'est plus en attente d'examen." };
 
   const ids = claimed.items.map((i) => i.messageId).sort((a, b) => a - b);
   let copies: { message_id: number }[];
@@ -181,9 +181,9 @@ export async function approveContribution(
     const msg = err instanceof Error ? err.message : String((err as { description?: string })?.description ?? err);
     await transitionContribution(id, ["publishing"], (x) => {
       x.status = "failed";
-      x.note = `Publishing failed: ${msg}`;
+      x.note = `Échec de la publication : ${msg}`;
     });
-    return { ok: false, error: `Publishing failed: ${msg}` };
+    return { ok: false, error: `Échec de la publication : ${msg}` };
   }
 
   if (copies.length !== ids.length) {
@@ -191,10 +191,10 @@ export async function approveContribution(
     await transitionContribution(id, ["publishing"], (x) => {
       x.status = "needs_review";
       x.publishedMessageIds = copies.map((c) => c.message_id);
-      x.note = `Requested ${ids.length}, Telegram published ${copies.length}. Check the topic.`;
+      x.note = `Demandés : ${ids.length}, publiés par Telegram : ${copies.length}. Vérifiez le sujet.`;
     });
     if (copies.length > 0) await recordPublished(creator.id, creator.chatId, creator.topicId, claimed, copies);
-    return { ok: false, error: `Only ${copies.length} of ${ids.length} items could be published (originals may have been deleted). Check the topic.`, published: copies.length };
+    return { ok: false, error: `Seulement ${copies.length} élément(s) sur ${ids.length} ont pu être publiés (les originaux ont peut-être été supprimés). Vérifiez le sujet.`, published: copies.length };
   }
 
   await transitionContribution(id, ["publishing"], (x) => {
@@ -210,7 +210,7 @@ export async function approveContribution(
   );
   await api.sendMessage(
     claimed.userId,
-    `✅ Your contribution for *${creator.name}* was approved and published in ${getClubName()}. Thank you!`,
+    `✅ Votre contribution pour *${creator.name}* a été approuvée et publiée dans ${getClubName()}. Merci !`,
     { parse_mode: "Markdown" }
   ).catch(() => {});
   return { ok: true, published: copies.length };

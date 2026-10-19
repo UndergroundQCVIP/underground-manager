@@ -220,7 +220,7 @@ Deno.test("PAYMENTS — Duplicate subscription prevention checks active ample ti
     });
     assertEquals(checkDuplicate.ok, false);
     assertEquals(
-      checkDuplicate.errorMessage?.includes("ample time remaining"),
+      checkDuplicate.errorMessage?.includes("beaucoup de temps restant"),
       true
     );
   } finally {

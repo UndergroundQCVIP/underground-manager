@@ -48,11 +48,11 @@ export interface PlanChangeQuote {
 export async function quoteUpgrade(userId: number): Promise<PlanChangeQuote> {
   const retro = getPlan("retro_plus");
   if (!retro.enabled) {
-    return { ok: false, error: "Retro Plus billing is not available yet." };
+    return { ok: false, error: "La facturation Retro Plus n'est pas encore disponible." };
   }
   const retroActive = await getActivePaidEntitlements(userId, "retro_plus");
   if (retroActive.length > 0) {
-    return { ok: false, error: "You already have an active Retro Plus subscription." };
+    return { ok: false, error: "Vous avez déjà un abonnement Retro Plus actif." };
   }
   const regular = (await getActivePaidEntitlements(userId, "regular"))[0];
   return {
@@ -106,7 +106,7 @@ export async function cancelPlanRenewal(
 ): Promise<{ cancelled: boolean; error?: string }> {
   const chargeIds = await chargeIdsForPlan(userId, plan);
   if (chargeIds.length === 0) {
-    return { cancelled: false, error: "No Stars payment found for this plan (nothing to cancel)." };
+    return { cancelled: false, error: "Aucun paiement en Étoiles trouvé pour ce forfait (rien à annuler)." };
   }
   let lastError = "";
   for (const chargeId of chargeIds) {
@@ -153,7 +153,7 @@ export async function applyPlanChangeAfterPayment(
     cancelOutcome = res.cancelled ? "cancelled" : "failed";
     error = res.error;
     // No Regular payment on record means there is no renewal to cancel.
-    if (!res.cancelled && res.error?.startsWith("No Stars payment")) {
+    if (!res.cancelled && res.error?.startsWith("Aucun paiement en Étoiles")) {
       cancelOutcome = "not_needed";
       error = undefined;
     }
@@ -178,7 +178,7 @@ export interface DowngradeQuote {
 
 export async function quoteDowngrade(userId: number): Promise<DowngradeQuote> {
   const retro = (await getActivePaidEntitlements(userId, "retro_plus"))[0];
-  if (!retro) return { ok: false, error: "You do not have an active Retro Plus subscription." };
+  if (!retro) return { ok: false, error: "Vous n'avez pas d'abonnement Retro Plus actif." };
   const regular = (await getActivePaidEntitlements(userId, "regular"))[0];
   return { ok: true, retroPaidThrough: retro.expiresAt, regularPaidThrough: regular?.expiresAt };
 }

@@ -10,38 +10,53 @@ import {
   WantedCandidateStatus,
 } from "../types.ts";
 import { normalizeCreatorName } from "./creators.ts";
+import { torontoMonthCycle } from "../util/time.ts";
 
-export function getCurrentMonthCycle(): string {
-  const d = new Date();
-  const year = d.getUTCFullYear();
-  const month = String(d.getUTCMonth() + 1).padStart(2, "0");
-  return `${year}-${month}`;
+/** Monthly nomination/voting cycle ("YYYY-MM") in America/Toronto local time. */
+export function getCurrentMonthCycle(date: Date = new Date()): string {
+  return torontoMonthCycle(date);
 }
 
-export async function createWantedCandidate(
+/**
+ * Creates a candidate, unique by normalized name. If another request created the
+ * same name first, that existing candidate is returned instead (`created: false`)
+ * so concurrent duplicate nominations merge instead of splitting support.
+ */
+export async function createWantedCandidateOnce(
   data: Omit<WantedCandidate, "id" | "createdAt" | "updatedAt">
-): Promise<WantedCandidate> {
+): Promise<{ candidate: WantedCandidate; created: boolean }> {
   const kv = await getKv();
+  const normalizedName = normalizeCreatorName(data.name);
+  const nameKey = ["wanted_candidates_by_name", normalizedName];
+
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-
   const candidate: WantedCandidate = {
     ...data,
+    normalizedName,
     id,
     createdAt: now,
     updatedAt: now,
   };
 
-  const atomic = kv.atomic();
-  atomic.set(["wanted_candidates", id], candidate);
-  atomic.set(["wanted_candidates_by_name", candidate.normalizedName], id);
+  const res = await kv
+    .atomic()
+    .check({ key: nameKey, versionstamp: null })
+    .set(["wanted_candidates", id], candidate)
+    .set(nameKey, id)
+    .commit();
 
-  const res = await atomic.commit();
-  if (!res.ok) {
-    throw new Error(`Failed to commit wanted candidate: ${candidate.name}`);
-  }
+  if (res.ok) return { candidate, created: true };
 
-  return candidate;
+  const existing = await getWantedCandidateByName(data.name);
+  if (existing) return { candidate: existing, created: false };
+  throw new Error(`Failed to commit wanted candidate: ${data.name}`);
+}
+
+export async function createWantedCandidate(
+  data: Omit<WantedCandidate, "id" | "createdAt" | "updatedAt">
+): Promise<WantedCandidate> {
+  return (await createWantedCandidateOnce(data)).candidate;
 }
 
 export async function getWantedCandidate(
@@ -88,27 +103,41 @@ export async function listWantedCandidates(filter?: {
   });
 }
 
+/** Compare-and-set patch of a candidate (retries on write conflicts). */
+export async function patchWantedCandidate(
+  id: string,
+  patch: Partial<Omit<WantedCandidate, "id" | "createdAt">>
+): Promise<WantedCandidate | null> {
+  const kv = await getKv();
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const res = await kv.get<WantedCandidate>(["wanted_candidates", id]);
+    if (!res.value) return null;
+
+    const updated: WantedCandidate = {
+      ...res.value,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    };
+    const commit = await kv
+      .atomic()
+      .check(res)
+      .set(["wanted_candidates", id], updated)
+      .commit();
+    if (commit.ok) return updated;
+  }
+  throw new Error(`Candidate ${id} could not be updated (persistent write conflict)`);
+}
+
 export async function updateWantedStatus(
   id: string,
   status: WantedCandidateStatus,
   notes?: string,
   creatorId?: string
 ): Promise<WantedCandidate | null> {
-  const kv = await getKv();
-  const current = await getWantedCandidate(id);
-  if (!current) return null;
-
-  const now = new Date().toISOString();
-  const updated: WantedCandidate = {
-    ...current,
-    status,
-    notes: notes !== undefined ? notes : current.notes,
-    creatorId: creatorId !== undefined ? creatorId : current.creatorId,
-    updatedAt: now,
-  };
-
-  await kv.set(["wanted_candidates", id], updated);
-  return updated;
+  const patch: Partial<WantedCandidate> = { status };
+  if (notes !== undefined) patch.notes = notes;
+  if (creatorId !== undefined) patch.creatorId = creatorId;
+  return await patchWantedCandidate(id, patch);
 }
 
 export async function getUserSupportForCycle(
@@ -140,77 +169,77 @@ export async function recordMemberSupport(
 ): Promise<RecordSupportResult> {
   const kv = await getKv();
 
-  // 1. Check if user already supported or nominated in this monthly cycle
-  const existingCycleSupport = await getUserSupportForCycle(cycleId, userId);
-  if (existingCycleSupport) {
-    return {
-      success: false,
-      alreadySupportedThisCycle: true,
-      error: "You have already used your nomination or support selection for this monthly cycle.",
+  // Many members can back the same candidate at once; a lost compare-and-set on the
+  // candidate's counter is retried (re-validating every rule) instead of failing the member.
+  for (let attempt = 0; attempt < 25; attempt++) {
+    // 1. One nomination/support selection per member per monthly cycle
+    const cycleKey = ["member_support_by_cycle", cycleId, userId];
+    if ((await kv.get(cycleKey)).value) {
+      return {
+        success: false,
+        alreadySupportedThisCycle: true,
+        error: "Vous avez déjà utilisé votre suggestion ou votre appui pour ce cycle mensuel.",
+      };
+    }
+
+    // 2. A member backs a given creator only once, ever (unique supporter count)
+    const candidateSupporterKey = ["candidate_supporters", candidateId, userId];
+    if ((await kv.get(candidateSupporterKey)).value) {
+      return {
+        success: false,
+        alreadySupportedThisCandidate: true,
+        error: "Vous avez déjà appuyé ce créateur.",
+      };
+    }
+
+    // 3. Retrieve candidate
+    const candidateRes = await kv.get<WantedCandidate>(["wanted_candidates", candidateId]);
+    const candidate = candidateRes.value;
+    if (!candidate) {
+      return { success: false, error: "Candidat introuvable." };
+    }
+
+    const now = new Date().toISOString();
+    const supportRecord: MemberSupportRecord = {
+      id: crypto.randomUUID(),
+      cycleId,
+      userId,
+      candidateId,
+      type,
+      createdAt: now,
     };
-  }
-
-  // 2. Check if user already supported this specific candidate historically
-  const candidateSupporterKey = ["candidate_supporters", candidateId, userId];
-  const existingCandidateSupport = await kv.get(candidateSupporterKey);
-  if (existingCandidateSupport.value) {
-    return {
-      success: false,
-      alreadySupportedThisCandidate: true,
-      error: "You have already supported this creator previously.",
+    const updatedCandidate: WantedCandidate = {
+      ...candidate,
+      supportCount: candidate.supportCount + 1,
+      updatedAt: now,
     };
-  }
 
-  // 3. Retrieve candidate
-  const candidateRes = await kv.get<WantedCandidate>(["wanted_candidates", candidateId]);
-  const candidate = candidateRes.value;
-  if (!candidate) {
-    return { success: false, error: "Candidate not found." };
-  }
+    const commitRes = await kv
+      .atomic()
+      .check({ key: cycleKey, versionstamp: null })
+      .check({ key: candidateSupporterKey, versionstamp: null })
+      .check(candidateRes)
+      .set(cycleKey, supportRecord)
+      .set(candidateSupporterKey, 1)
+      .set(["wanted_candidates", candidateId], updatedCandidate)
+      .commit();
 
-  const supportId = crypto.randomUUID();
-  const now = new Date().toISOString();
-
-  const supportRecord: MemberSupportRecord = {
-    id: supportId,
-    cycleId,
-    userId,
-    candidateId,
-    type,
-    createdAt: now,
-  };
-
-  const updatedCandidate: WantedCandidate = {
-    ...candidate,
-    supportCount: candidate.supportCount + 1,
-    updatedAt: now,
-  };
-
-  const cycleKey = ["member_support_by_cycle", cycleId, userId];
-
-  const atomic = kv.atomic();
-  atomic.check({ key: cycleKey, versionstamp: null });
-  atomic.check({ key: candidateSupporterKey, versionstamp: null });
-  atomic.check({ key: ["wanted_candidates", candidateId], versionstamp: candidateRes.versionstamp });
-
-  atomic.set(cycleKey, supportRecord);
-  atomic.set(candidateSupporterKey, 1);
-  atomic.set(["wanted_candidates", candidateId], updatedCandidate);
-
-  const commitRes = await atomic.commit();
-  if (!commitRes.ok) {
-    return {
-      success: false,
-      error: "Concurrent support submission detected. Please try again.",
-    };
+    if (commitRes.ok) {
+      return { success: true, candidate: updatedCandidate };
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.random() * 6 * (attempt + 1)));
   }
 
   return {
-    success: true,
-    candidate: updatedCandidate,
+    success: false,
+    error: "La Liste de souhaits est très sollicitée en ce moment. Veuillez réessayer dans un instant.",
   };
 }
 
+/**
+ * Merge `source` into `target`: supporters are re-keyed (deduplicated by user) and
+ * the support count is the number of UNIQUE supporters, never a plain sum.
+ */
 export async function mergeWantedCandidates(
   sourceId: string,
   targetId: string
@@ -223,16 +252,36 @@ export async function mergeWantedCandidates(
     return null;
   }
 
-  const mergedCount = target.supportCount + source.supportCount;
-  const now = new Date().toISOString();
+  const supporters = new Set<number>();
+  let targetRecorded = 0;
+  for await (const e of kv.list({ prefix: ["candidate_supporters", target.id] })) {
+    supporters.add(e.key[2] as number);
+    targetRecorded++;
+  }
+  const sourceSupporters: number[] = [];
+  for await (const e of kv.list({ prefix: ["candidate_supporters", source.id] })) {
+    sourceSupporters.push(e.key[2] as number);
+  }
+  // Counts without a per-user record (legacy/imported) cannot be de-duplicated
+  // and are carried over as-is.
+  const unrecorded =
+    Math.max(0, target.supportCount - targetRecorded) +
+    Math.max(0, source.supportCount - sourceSupporters.length);
 
+  const atomic = kv.atomic();
+  for (const userId of sourceSupporters) {
+    supporters.add(userId);
+    atomic.set(["candidate_supporters", target.id, userId], 1);
+    atomic.delete(["candidate_supporters", source.id, userId]);
+  }
+
+  const now = new Date().toISOString();
   const updatedTarget: WantedCandidate = {
     ...target,
-    supportCount: mergedCount,
+    supportCount: supporters.size + unrecorded,
     updatedAt: now,
   };
 
-  const atomic = kv.atomic();
   atomic.set(["wanted_candidates", target.id], updatedTarget);
   atomic.delete(["wanted_candidates", source.id]);
   atomic.delete(["wanted_candidates_by_name", source.normalizedName]);

@@ -48,7 +48,7 @@ export async function computeTierRevenue(period?: string): Promise<TierRevenueBr
 
 export function formatTierRevenueLines(t: TierRevenueBreakdown): string {
   return (
-    `• Regular: *${t.regular.periodStars.toLocaleString()} ⭐* this period · ${t.regular.activeSubscribers} active\n` +
-    `• Retro Plus: *${t.retro_plus.periodStars.toLocaleString()} ⭐* this period · ${t.retro_plus.activeSubscribers} active\n`
+    `• Regular: *${t.regular.periodStars.toLocaleString()} ⭐* ce mois-ci · ${t.regular.activeSubscribers} actifs\n` +
+    `• Retro Plus: *${t.retro_plus.periodStars.toLocaleString()} ⭐* ce mois-ci · ${t.retro_plus.activeSubscribers} actifs\n`
   );
 }

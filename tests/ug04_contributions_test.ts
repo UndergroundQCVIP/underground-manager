@@ -68,7 +68,7 @@ Deno.test("UG04 CONTRIB — Approval publishes via the bot into the creator topi
     const published = (await listMediaIndex(c.id)).filter((e) => e.source === "contribution");
     assertEquals(published.length, 3);
     assertEquals(published[0].mediaGroupId === published[1].mediaGroupId, true); // album kept together
-    assertStringIncludes(api.sentMessages.at(-1)!.text, "approved"); // contributor told
+    assertStringIncludes(api.sentMessages.at(-1)!.text, "approuvée"); // contributor told
 
     // A second approval (double tap) must not publish again
     const again = await approveContribution(api, sub.id, ADMIN);
@@ -158,7 +158,7 @@ Deno.test("UG04 CONTRIB — Approval is held while the creator is being migrated
     await startMigration(api, job.id, ADMIN);
     const res = await approveContribution(api, sub.id, ADMIN);
     assertEquals(res.ok, false);
-    assertStringIncludes(res.error!, "migrated");
+    assertStringIncludes(res.error!, "migration");
     assertEquals((await getContribution(sub.id))?.status, "pending");
   } finally {
     await kv.close();

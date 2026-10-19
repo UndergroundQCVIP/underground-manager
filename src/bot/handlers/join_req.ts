@@ -29,13 +29,13 @@ joinReqComposer.on("chat_join_request", async (ctx) => {
         const title = getSpaceTitle(result.spaceId);
         await ctx.api.sendMessage(
           result.userId,
-          `⛔ *Access Denied to ${title}*\n\n` +
-          `Your join request could not be approved because you do not have an active subscription for this space.\n\n` +
-          `Subscribe with Telegram Stars below to get instant access:`,
+          `⛔ *Accès refusé à ${title}*\n\n` +
+          `Votre demande d'adhésion n'a pas pu être approuvée, car vous n'avez pas d'abonnement actif pour cet espace.\n\n` +
+          `Abonnez-vous avec les Étoiles Telegram ci-dessous pour obtenir un accès immédiat :`,
           {
             parse_mode: "Markdown",
             reply_markup: new InlineKeyboard().text(
-              "🌟 Join " + getClubName(),
+              "🌟 Joindre " + getClubName(),
               "member:join"
             ),
           }

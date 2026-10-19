@@ -98,9 +98,13 @@ export async function getStarTransactionByTelegramId(
   return await getStarTransaction(idx.value);
 }
 
-export async function listStarTransactions(limit = 200): Promise<StarTransactionRecord[]> {
+/** Lists Star transactions; without `limit` every record is returned (totals must never be truncated). */
+export async function listStarTransactions(limit?: number): Promise<StarTransactionRecord[]> {
   const kv = await getKv();
-  const iter = kv.list<StarTransactionRecord>({ prefix: ["star_transactions"] }, { limit });
+  const iter = kv.list<StarTransactionRecord>(
+    { prefix: ["star_transactions"] },
+    limit ? { limit } : undefined
+  );
   const records: StarTransactionRecord[] = [];
   for await (const entry of iter) {
     if (entry.value) {
@@ -129,6 +133,7 @@ export async function updateStarTransactionStatus(
   };
 
   const atomic = kv.atomic();
+  atomic.check(res);
   atomic.set(["star_transactions", id], updated);
   atomic.delete(["star_tx_by_status", oldRecord.status, id]);
   atomic.set(["star_tx_by_status", newStatus, id], updated);
@@ -190,11 +195,22 @@ export async function recordWithdrawal(
   };
 
   const atomic = kv.atomic();
+  if (record.fragmentReference) {
+    // A Fragment/TON withdrawal reference identifies one withdrawal: refuse re-entry
+    // (double submission would otherwise credit the same proceeds twice).
+    const refKey = ["withdrawals_by_reference", record.fragmentReference];
+    atomic.check({ key: refKey, versionstamp: null });
+    atomic.set(refKey, id);
+  }
   atomic.set(["withdrawals", id], record);
   atomic.set(["withdrawals_by_date", record.withdrawalDate, id], record);
   const res = await atomic.commit();
   if (!res.ok) {
-    throw new Error("Failed to record withdrawal");
+    throw new Error(
+      record.fragmentReference
+        ? `Withdrawal with reference ${record.fragmentReference} is already recorded`
+        : "Failed to record withdrawal"
+    );
   }
 
   return record;
@@ -206,9 +222,12 @@ export async function getWithdrawal(id: string): Promise<WithdrawalRecord | null
   return res.value ?? null;
 }
 
-export async function listWithdrawals(limit = 100): Promise<WithdrawalRecord[]> {
+export async function listWithdrawals(limit?: number): Promise<WithdrawalRecord[]> {
   const kv = await getKv();
-  const iter = kv.list<WithdrawalRecord>({ prefix: ["withdrawals"] }, { limit });
+  const iter = kv.list<WithdrawalRecord>(
+    { prefix: ["withdrawals"] },
+    limit ? { limit } : undefined
+  );
   const records: WithdrawalRecord[] = [];
   for await (const entry of iter) {
     if (entry.value) {
@@ -222,11 +241,16 @@ export async function listWithdrawals(limit = 100): Promise<WithdrawalRecord[]> 
 
 export async function recordWithdrawalSettlement(
   withdrawalId: string,
-  settlement: WithdrawalSettlement
+  settlement: WithdrawalSettlement,
+  journal: JournalDraft[] = []
 ): Promise<WithdrawalRecord | null> {
   const kv = await getKv();
-  const current = await getWithdrawal(withdrawalId);
+  const currentRes = await kv.get<WithdrawalRecord>(["withdrawals", withdrawalId]);
+  const current = currentRes.value;
   if (!current) return null;
+  if (current.status === "completed") {
+    throw new Error(`Withdrawal ${withdrawalId} is already settled`);
+  }
 
   const now = new Date().toISOString();
   const updated: WithdrawalRecord = {
@@ -237,8 +261,11 @@ export async function recordWithdrawalSettlement(
   };
 
   const atomic = kv.atomic();
+  atomic.check(currentRes);
   atomic.set(["withdrawals", withdrawalId], updated);
   atomic.set(["withdrawals_by_date", updated.withdrawalDate, withdrawalId], updated);
+  stageJournalEntries(atomic, journal);
+  stageBudgetVersionBump(atomic);
   const res = await atomic.commit();
   if (!res.ok) {
     throw new Error(`Failed to commit settlement for withdrawal ${withdrawalId}`);
@@ -251,23 +278,47 @@ export async function recordWithdrawalSettlement(
 // 4. Financial Journal (Append-Only)
 // ==============================================================================
 
+export type JournalDraft = Omit<FinancialJournalEntry, "id" | "timestamp">;
+
+/** Version stamp key bumped by every commit that changes available budget. */
+export const BUDGET_VERSION_KEY: Deno.KvKey = ["treasury_budget_version"];
+
+/** Stages a budget-version bump on an atomic operation (optimistic budget lock). */
+export function stageBudgetVersionBump(atomic: Deno.AtomicOperation): void {
+  atomic.set(BUDGET_VERSION_KEY, crypto.randomUUID());
+}
+
+export async function getBudgetVersionstamp(): Promise<string | null> {
+  const kv = await getKv();
+  const res = await kv.get(BUDGET_VERSION_KEY);
+  return res.versionstamp;
+}
+
+/**
+ * Stages append-only journal entries on an existing atomic operation so that
+ * business records and their ledger postings commit (or fail) together.
+ */
+export function stageJournalEntries(
+  atomic: Deno.AtomicOperation,
+  drafts: JournalDraft[]
+): FinancialJournalEntry[] {
+  const timestamp = new Date().toISOString();
+  return drafts.map((draft) => {
+    const entry: FinancialJournalEntry = { ...draft, id: crypto.randomUUID(), timestamp };
+    atomic.set(["journal_entries", entry.id], entry);
+    atomic.set(["journal_by_category", entry.category, entry.id], entry);
+    atomic.set(["journal_by_timestamp", entry.timestamp, entry.id], entry);
+    return entry;
+  });
+}
+
 export async function recordJournalEntry(
-  data: Omit<FinancialJournalEntry, "id" | "timestamp">
+  data: JournalDraft
 ): Promise<FinancialJournalEntry> {
   const kv = await getKv();
-  const id = crypto.randomUUID();
-  const now = new Date().toISOString();
-
-  const entry: FinancialJournalEntry = {
-    ...data,
-    id,
-    timestamp: now,
-  };
-
   const atomic = kv.atomic();
-  atomic.set(["journal_entries", id], entry);
-  atomic.set(["journal_by_category", entry.category, id], entry);
-  atomic.set(["journal_by_timestamp", entry.timestamp, id], entry);
+  const [entry] = stageJournalEntries(atomic, [data]);
+  stageBudgetVersionBump(atomic);
 
   const res = await atomic.commit();
   if (!res.ok) {
@@ -277,9 +328,12 @@ export async function recordJournalEntry(
   return entry;
 }
 
-export async function listJournalEntries(limit = 200): Promise<FinancialJournalEntry[]> {
+export async function listJournalEntries(limit?: number): Promise<FinancialJournalEntry[]> {
   const kv = await getKv();
-  const iter = kv.list<FinancialJournalEntry>({ prefix: ["journal_entries"] }, { limit });
+  const iter = kv.list<FinancialJournalEntry>(
+    { prefix: ["journal_entries"] },
+    limit ? { limit } : undefined
+  );
   const entries: FinancialJournalEntry[] = [];
   for await (const item of iter) {
     if (item.value) {
@@ -346,8 +400,11 @@ export async function getTreasuryAllocations(): Promise<TreasuryAllocations> {
 export async function saveTreasuryAllocations(
   allocations: TreasuryAllocations
 ): Promise<void> {
-  const total =
-    allocations.acquisitionPct + allocations.operationsPct + allocations.reservePct;
+  const parts = [allocations.acquisitionPct, allocations.operationsPct, allocations.reservePct];
+  if (parts.some((p) => !Number.isInteger(p) || p < 0)) {
+    throw new Error("Treasury allocation percentages must be non-negative whole numbers");
+  }
+  const total = parts[0] + parts[1] + parts[2];
   if (total !== 100) {
     throw new Error(`Treasury allocations must sum exactly to 100% (currently ${total}%)`);
   }

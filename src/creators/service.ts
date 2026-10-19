@@ -183,6 +183,8 @@ export async function handleMediaUpload(
   chatId: number,
   topicId: number,
   senderUserId: number,
+  /** Telegram message.date (unix seconds): the real upload time. */
+  messageDateUnix?: number,
   media?: UploadedMediaInfo
 ): Promise<Creator | null> {
   // Only monitor media uploads inside the Regular and Retro creator forums
@@ -205,7 +207,8 @@ export async function handleMediaUpload(
   }
 
   const wasEmpty = !creator.hasContent;
-  const updated = await recordCreatorMediaUpload(chatId, topicId);
+  const contentAt = messageDateUnix ? new Date(messageDateUnix * 1000) : new Date();
+  const updated = await recordCreatorMediaUpload(chatId, topicId, contentAt);
 
   // UG-04: keep the minimum necessary message inventory (IDs only) so this
   // collection can be copied between forums later.

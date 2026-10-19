@@ -39,10 +39,12 @@ export async function adminOnlyMiddleware(ctx: Context, next: NextFunction): Pro
 
     if (ctx.callbackQuery) {
       await ctx.answerCallbackQuery({
-        text: "⛔ Access Denied: Administrator privileges required.",
+        text: "⛔ Accès refusé : privilèges d'administrateur requis.",
         show_alert: true,
       });
-    } else {
+    } else if (ctx.chat?.type === "private") {
+      // Never answer in groups/channels: that would leak that the command exists
+      // and spam shared chats.
       await ctx.reply(messages.unauthorized(), { parse_mode: "Markdown" });
     }
     return;
@@ -54,26 +56,23 @@ export async function adminOnlyMiddleware(ctx: Context, next: NextFunction): Pro
 /**
  * Scope administrator enforcement to administrator ROUTES only.
  *
- * Applying `adminOnlyMiddleware` unconditionally to a composer would reject
- * (and swallow) every non-admin update that reaches it — including ordinary
- * members using Wanted List / Voting handlers registered later. This guard
- * enforces admin-only access for matching routes and lets every other update
- * continue down the middleware chain.
+ * `composer.use(adminOnlyMiddleware)` would gate EVERY update that reaches the
+ * composer — including ordinary members' /suggest, /vote and callback taps —
+ * silently disabling the member features registered after it and spamming
+ * "Access Denied". This guard applies the admin check only to the listed
+ * slash-commands and callback-data prefixes and lets everything else flow on.
  */
 export function adminRouteGuard(options: {
   callbackPrefixes: string[];
   commands: string[];
 }) {
-  const cmdRe = options.commands.length
-    ? new RegExp(`^/(${options.commands.join("|")})(?:@\\w+)?(?:\\s|$)`, "i")
-    : /$^/;
   return async (ctx: Context, next: NextFunction): Promise<void> => {
     const data = ctx.callbackQuery?.data;
-    const text = ctx.message?.text;
-    const isAdminRoute =
-      (data !== undefined && options.callbackPrefixes.some((p) => data.startsWith(p))) ||
-      (text !== undefined && cmdRe.test(text));
-    if (isAdminRoute) {
+    const isAdminCallback =
+      typeof data === "string" && options.callbackPrefixes.some((p) => data.startsWith(p));
+    const isAdminCommand = options.commands.length > 0 && ctx.hasCommand(options.commands);
+
+    if (isAdminCallback || isAdminCommand) {
       await adminOnlyMiddleware(ctx, next);
       return;
     }

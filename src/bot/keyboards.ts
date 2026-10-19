@@ -20,29 +20,29 @@ export function mainMenuKeyboard(
 ): InlineKeyboard {
   const kb = new InlineKeyboard();
 
-  kb.text("💎 Membership Plans", "member:plans")
-    .text("📋 My Membership", "member:status")
+  kb.text("💎 Forfaits d'adhésion", "member:plans")
+    .text("📋 Mon abonnement", "member:status")
     .row();
 
   if (plan === "regular" && getPlan("retro_plus").enabled) {
-    kb.text("⬆️ Upgrade to Retro Plus", "member:upgrade").row();
+    kb.text("⬆️ Passer à Retro Plus", "member:upgrade").row();
   }
 
-  kb.text("📚 Creator Directory", "dir:all")
-    .text("🎯 Wanted List", "wanted:menu")
+  kb.text("📚 Répertoire des créateurs", "dir:all")
+    .text("🎯 Liste de souhaits", "wanted:menu")
     .row();
 
-  kb.text("➕ Contribute", "contrib:start").row();
+  kb.text("➕ Contribuer", "contrib:start").row();
 
-  kb.text("💬 General Chat", "member:general_chat")
-    .text("🗳️ Monthly Vote", "vote:open")
+  kb.text("💬 Clavardage général", "member:general_chat")
+    .text("🗳️ Vote mensuel", "vote:open")
     .row();
 
   if (isMember) {
-    kb.text("🔓 Access My Channels", "member:channels").row();
+    kb.text("🔓 Accéder à mes canaux", "member:channels").row();
   }
 
-  kb.text("🆘 Support", "member:support");
+  kb.text("💬 Aide et soutien", "member:support");
 
   if (isAdmin) {
     kb.row().text("🛠️ Administration", "admin:menu");
@@ -58,14 +58,14 @@ export function plansKeyboard(plan: MembershipPlanId | "none"): InlineKeyboard {
   const retro = getPlan("retro_plus");
 
   if (plan === "none") {
-    if (regular.enabled) kb.text(`🌟 Regular — ${regular.priceStars} Stars`, "member:pay:regular").row();
-    if (retro.enabled) kb.text(`🎞️ Retro Plus — ${retro.priceStars} Stars`, "member:pay:retro_plus").row();
+    if (regular.enabled) kb.text(`🌟 Regular — ${regular.priceStars} Étoiles`, "member:pay:regular").row();
+    if (retro.enabled) kb.text(`🎞️ Retro Plus — ${retro.priceStars} Étoiles`, "member:pay:retro_plus").row();
   } else if (plan === "regular") {
-    if (retro.enabled) kb.text(`⬆️ Upgrade to Retro Plus — ${retro.priceStars} Stars`, "member:upgrade").row();
+    if (retro.enabled) kb.text(`⬆️ Passer à Retro Plus — ${retro.priceStars} Étoiles`, "member:upgrade").row();
   } else {
-    kb.text("⬇️ Switch to Regular at renewal", "member:downgrade").row();
+    kb.text("⬇️ Revenir à Regular au renouvellement", "member:downgrade").row();
   }
-  kb.text("⬅️ Main Menu", "member:home");
+  kb.text("⬅️ Menu principal", "member:home");
   return kb;
 }
 
@@ -78,50 +78,50 @@ export function spacesKeyboard(
 ): InlineKeyboard {
   const kb = new InlineKeyboard();
   for (const s of spaces) {
-    kb.url(`👉 Join ${getSpaceTitle(s.spaceId)}`, s.url).row();
+    kb.url(`👉 Joindre ${getSpaceTitle(s.spaceId)}`, s.url).row();
   }
-  kb.text("⬅️ Main Menu", "member:home");
+  kb.text("⬅️ Menu principal", "member:home");
   return kb;
 }
 
 export function supportKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
-    .text("💎 Membership Plans", "member:plans")
+    .text("💎 Forfaits d'adhésion", "member:plans")
     .row()
-    .text("⬅️ Main Menu", "member:home");
+    .text("⬅️ Menu principal", "member:home");
 }
 
 export function adminMenuKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
-    .text("👥 Members", "admin:members_list")
-    .text("🎁 Complimentary", "admin:grant_wizard")
+    .text("👥 Membres", "admin:members_list")
+    .text("🎁 Accès gracieux", "admin:grant_wizard")
     .row()
-    .text("💎 Membership Plans", "admin:plans")
-    .text("👩‍🎤 Creators", "admin:creators_menu")
+    .text("💎 Forfaits", "admin:plans")
+    .text("👩‍🎤 Créateurs", "admin:creators_menu")
     .row()
-    .text("🎞️ Move to Retro", "mig:pick")
-    .text("🚚 Migration Status", "mig:list")
+    .text("🎞️ Passer à Retro", "mig:pick")
+    .text("🚚 État des migrations", "mig:list")
     .row()
-    .text("📚 Directory", "admin:sync_dir_menu")
-    .text("💰 Treasury", "admin:treasury_menu")
+    .text("📚 Répertoire", "admin:sync_dir_menu")
+    .text("💰 Trésorerie", "admin:treasury_menu")
     .row()
-    .text("🎯 Wanted List", "admin:wanted_menu")
-    .text("🗳️ Monthly Voting", "admin:voting_menu")
+    .text("🎯 Liste de souhaits", "admin:wanted_menu")
+    .text("🗳️ Vote mensuel", "admin:voting_menu")
     .row()
     .text("📥 Contributions", "cadm:queue")
-    .text("⚙️ Settings", "admin:status")
-    .text("⬅️ User Menu", "member:home");
+    .text("⚙️ Paramètres", "admin:status")
+    .text("⬅️ Menu membre", "member:home");
 }
 
 export function grantDurationKeyboard(userId: number): InlineKeyboard {
   return new InlineKeyboard()
-    .text("7 Days", `admin:grant_dur:${userId}:7`)
-    .text("30 Days (Default)", `admin:grant_dur:${userId}:30`)
+    .text("7 jours", `admin:grant_dur:${userId}:7`)
+    .text("30 jours (par défaut)", `admin:grant_dur:${userId}:30`)
     .row()
-    .text("90 Days", `admin:grant_dur:${userId}:90`)
-    .text("365 Days", `admin:grant_dur:${userId}:365`)
+    .text("90 jours", `admin:grant_dur:${userId}:90`)
+    .text("365 jours", `admin:grant_dur:${userId}:365`)
     .row()
-    .text("❌ Cancel", "admin:menu");
+    .text("❌ Annuler", "admin:menu");
 }
 
 export function grantReasonKeyboard(userId: number, duration: number): InlineKeyboard {
@@ -137,7 +137,7 @@ export function grantReasonKeyboard(userId: number, duration: number): InlineKey
     kb.text(COMPLIMENTARY_REASONS[r], `admin:grant_rsn:${userId}:${duration}:${r}`).row();
   }
 
-  kb.text("❌ Cancel", "admin:menu");
+  kb.text("❌ Annuler", "admin:menu");
   return kb;
 }
 
@@ -148,26 +148,26 @@ export function grantSpacesKeyboard(
 ): InlineKeyboard {
   return new InlineKeyboard()
     .text(
-      "VIP Collections Only (Default)",
+      "Collections VIP seulement (par défaut)",
       `admin:grant_spc:${userId}:${duration}:${reason}:vip_only`
     )
     .row()
     .text(
-      "VIP Collections + General Chat",
+      "Collections VIP + Clavardage général",
       `admin:grant_spc:${userId}:${duration}:${reason}:vip_and_chat`
     )
     .row()
     .text(
-      "Full Access (VIP + Chat + Wanted List)",
+      "Accès complet (VIP + Clavardage + Liste de souhaits)",
       `admin:grant_spc:${userId}:${duration}:${reason}:full`
     )
     .row()
     .text(
-      "Full Access + Retro Vault",
+      "Accès complet + voûte Retro",
       `admin:grant_spc:${userId}:${duration}:${reason}:full_retro`
     )
     .row()
-    .text("❌ Cancel", "admin:menu");
+    .text("❌ Annuler", "admin:menu");
 }
 
 export function grantConfirmKeyboard(
@@ -178,22 +178,22 @@ export function grantConfirmKeyboard(
 ): InlineKeyboard {
   return new InlineKeyboard()
     .text(
-      "✅ Confirm & Grant Access",
+      "✅ Confirmer et accorder l'accès",
       `admin:grant_cfm:${userId}:${duration}:${reason}:${level}`
     )
     .row()
-    .text("❌ Cancel", "admin:menu");
+    .text("❌ Annuler", "admin:menu");
 }
 
 export function memberManageKeyboard(userId: number, entitlementId?: string): InlineKeyboard {
   const kb = new InlineKeyboard();
   if (entitlementId) {
-    kb.text("➕ Extend 30 Days", `admin:extend_ent:${userId}:${entitlementId}:30`)
-      .text("⛔ Revoke Access", `admin:revoke_ent:${userId}:${entitlementId}`)
+    kb.text("➕ Prolonger de 30 jours", `admin:extend_ent:${userId}:${entitlementId}:30`)
+      .text("⛔ Révoquer l'accès", `admin:revoke_ent:${userId}:${entitlementId}`)
       .row();
   }
-  kb.text("🎁 Grant Complimentary", `admin:grant_dur:${userId}:30`).row();
-  kb.text("⬅️ Admin Menu", "admin:menu");
+  kb.text("🎁 Accorder un accès gracieux", `admin:grant_dur:${userId}:30`).row();
+  kb.text("⬅️ Menu admin", "admin:menu");
   return kb;
 }
 
@@ -203,56 +203,56 @@ export function memberManageKeyboard(userId: number, entitlementId?: string): In
 
 export function treasuryMenuKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
-    .text("➕ Add Expense", "admin:treasury_add_exp")
-    .text("📋 View Expenses", "admin:treasury_expenses")
+    .text("➕ Ajouter une dépense", "admin:treasury_add_exp")
+    .text("📋 Voir les dépenses", "admin:treasury_expenses")
     .row()
-    .text("📤 Record Withdrawal", "admin:treasury_withdraw")
-    .text("🔄 Reconcile Stars", "admin:treasury_reconcile")
+    .text("📤 Consigner un retrait", "admin:treasury_withdraw")
+    .text("🔄 Rapprocher les Étoiles", "admin:treasury_reconcile")
     .row()
-    .text("📊 Monthly Reports", "admin:treasury_reports")
-    .text("⚙️ Allocations", "admin:treasury_allocations")
+    .text("📊 Rapports mensuels", "admin:treasury_reports")
+    .text("⚙️ Répartitions", "admin:treasury_allocations")
     .row()
-    .text("⬅️ Admin Menu", "admin:menu");
+    .text("⬅️ Menu admin", "admin:menu");
 }
 
 export function treasuryExpenseCategoryKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
-    .text("Creator Sub", "admin:exp_cat:creator_subscription")
-    .text("Content/License", "admin:exp_cat:creator_content_license")
+    .text("Abonn. créateur", "admin:exp_cat:creator_subscription")
+    .text("Contenu/licence", "admin:exp_cat:creator_content_license")
     .row()
-    .text("Operations", "admin:exp_cat:platform_operations")
+    .text("Opérations", "admin:exp_cat:platform_operations")
     .text("Marketing", "admin:exp_cat:marketing")
     .row()
-    .text("Transaction Fees", "admin:exp_cat:transaction_fees")
-    .text("Other", "admin:exp_cat:other")
+    .text("Frais de transaction", "admin:exp_cat:transaction_fees")
+    .text("Autre", "admin:exp_cat:other")
     .row()
-    .text("❌ Cancel", "admin:treasury_menu");
+    .text("❌ Annuler", "admin:treasury_menu");
 }
 
 export function treasuryExpensePayerKeyboard(category: string): InlineKeyboard {
   return new InlineKeyboard()
-    .text("🏦 Club Funds", `admin:exp_pyr:${category}:club_funds`)
-    .text("👤 Admin Personal", `admin:exp_pyr:${category}:admin_personal`)
+    .text("🏦 Fonds du club", `admin:exp_pyr:${category}:club_funds`)
+    .text("👤 Admin (personnel)", `admin:exp_pyr:${category}:admin_personal`)
     .row()
-    .text("❌ Cancel", "admin:treasury_menu");
+    .text("❌ Annuler", "admin:treasury_menu");
 }
 
 export function treasuryReportsKeyboard(period: string): InlineKeyboard {
   return new InlineKeyboard()
-    .text("📢 Publish to Channel", `admin:report_pub:${period}`)
-    .text("🔍 Detailed Audit", `admin:report_audit:${period}`)
+    .text("📢 Publier dans le canal", `admin:report_pub:${period}`)
+    .text("🔍 Audit détaillé", `admin:report_audit:${period}`)
     .row()
-    .text("⬅️ Treasury Menu", "admin:treasury_menu");
+    .text("⬅️ Menu trésorerie", "admin:treasury_menu");
 }
 
 export function treasuryAllocationsKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
-    .text("60% Acq / 25% Ops / 15% Res (Default)", "admin:alloc_preset:60_25_15")
+    .text("60 % Acq. / 25 % Op. / 15 % Rés. (par défaut)", "admin:alloc_preset:60_25_15")
     .row()
-    .text("70% Acq / 20% Ops / 10% Res", "admin:alloc_preset:70_20_10")
+    .text("70 % Acq. / 20 % Op. / 10 % Rés.", "admin:alloc_preset:70_20_10")
     .row()
-    .text("50% Acq / 30% Ops / 20% Res", "admin:alloc_preset:50_30_20")
+    .text("50 % Acq. / 30 % Op. / 20 % Rés.", "admin:alloc_preset:50_30_20")
     .row()
-    .text("⬅️ Treasury Menu", "admin:treasury_menu");
+    .text("⬅️ Menu trésorerie", "admin:treasury_menu");
 }
 

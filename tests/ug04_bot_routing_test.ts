@@ -68,14 +68,14 @@ Deno.test("UG04 ROUTING — Members reach Wanted List and Plans (admin guard no 
   try {
     const { bot, calls } = makeBot();
     await bot.handleUpdate(cb(5000, "wanted:menu") as never);
-    assertStringIncludes(texts(calls, "editMessageText").join("\n"), "LA CONFRÉRIE | WANTED LIST");
+    assertStringIncludes(texts(calls, "editMessageText").join("\n"), "LA CONFRÉRIE | LISTE DE SOUHAITS");
 
     calls.length = 0;
     await bot.handleUpdate(cb(5000, "member:plans") as never);
     const plans = texts(calls, "editMessageText").join("\n");
     assertStringIncludes(plans, "Regular");
     assertStringIncludes(plans, "Retro Plus");
-    assertStringIncludes(plans, "1500 Stars");
+    assertStringIncludes(plans, "1500 Étoiles");
     assert(!/underground/i.test(plans));
   } finally {
     await kv.close();
@@ -95,13 +95,13 @@ Deno.test("UG04 ROUTING — Administrator routes (admin:, mig:, migration comman
     for (const text of ["/admin", "/index_media Aria https://t.me/c/1/2/3", "/move_to_retro Aria", "/relink_creator Aria 5"]) {
       calls.length = 0;
       await bot.handleUpdate(cmd(5000, text) as never);
-      assertStringIncludes(texts(calls, "sendMessage").join("\n"), "Access Denied");
+      assertStringIncludes(texts(calls, "sendMessage").join("\n"), "Accès refusé");
     }
 
     // Admin passes
     calls.length = 0;
     await bot.handleUpdate(cb(111111, "mig:pick") as never);
-    assertStringIncludes(texts(calls, "editMessageText").join("\n"), "MOVE TO RETRO");
+    assertStringIncludes(texts(calls, "editMessageText").join("\n"), "PASSER À RETRO");
     calls.length = 0;
     await bot.handleUpdate(cb(111111, "admin:menu") as never);
     assertStringIncludes(texts(calls, "editMessageText").join("\n"), "LA CONFRÉRIE | ADMIN");
@@ -153,12 +153,12 @@ Deno.test("UG04 ROUTING — Retro Plus checkout is unavailable until its price i
     const { bot, calls } = makeBot();
     await bot.handleUpdate(cb(5200, "member:pay:retro_plus") as never);
     assertEquals(calls.some((c) => c.method === "createInvoiceLink"), false);
-    assertStringIncludes(texts(calls, "sendMessage").join("\n"), "not available yet");
+    assertStringIncludes(texts(calls, "sendMessage").join("\n"), "pas encore disponible");
 
-    // Plans screen says "Coming soon" and offers no Retro Plus buy button
+    // Plans screen says "Bientôt disponible" and offers no Retro Plus buy button
     calls.length = 0;
     await bot.handleUpdate(cb(5200, "member:plans") as never);
-    assertStringIncludes(texts(calls, "editMessageText").join("\n"), "Coming soon");
+    assertStringIncludes(texts(calls, "editMessageText").join("\n"), "Bientôt disponible");
     assert(!JSON.stringify(calls).includes("member:pay:retro_plus"));
   } finally {
     await kv.close();
@@ -180,8 +180,8 @@ Deno.test("UG04 ROUTING — Regular checkout builds a Regular invoice; Regular s
     // Not an invoice yet: the user must first see price/effective date and confirm
     assertEquals(r.calls.some((c) => c.method === "createInvoiceLink"), false);
     const shown = texts(r.calls, "editMessageText").join("\n");
-    assertStringIncludes(shown, "1500 Stars");
-    assertStringIncludes(shown, "Nothing is cancelled until your Retro Plus payment is verified");
+    assertStringIncludes(shown, "1500 Étoiles");
+    assertStringIncludes(shown, "Rien n'est annulé tant que votre paiement Retro Plus n'est pas vérifié");
 
     r = makeBot();
     await r.bot.handleUpdate(cb(5301, "member:upg_cfm:1") as never);

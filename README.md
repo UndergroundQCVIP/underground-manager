@@ -381,7 +381,7 @@ LA CONFRÉRIE bot automatically detects new forum topics and topic renames in `T
 4. **Empty Topic Suppression:** Empty topics (`hasContent: false`) are kept internally but omitted from the public directory until media is published.
 
 ### Public Directory Channel (`PUBLIC_DIRECTORY_CHAT_ID`)
-- **Daily Synchronization:** Scheduled daily at 3:00 AM (America/Toronto) via Deno Cron (`DIRECTORY_UPDATE_CRON`).
+- **Daily Synchronization:** One hourly `Deno.cron` (UTC) drives all jobs; the daily directory/Wanted/Stars-ledger sync runs at the first hourly tick at or after 03:00 America/Toronto (DST-safe, caught up if missed, at most once per local day). `DIRECTORY_UPDATE_CRON` is only read for its hour field (default `0 3 * * *` = 03:00 Toronto).
 - **Alphabetical A–Z Index:** Creators are grouped alphabetically under letter headers.
 - **Message Chunking:** Telegram messages are limited to 4,096 characters. The sync engine automatically chunks entries into clean posts under 4,000 characters and updates existing channel messages by ID.
 - **Content Hashing:** The directory computes an SHA-256 hash of the generated content. If no creator updates have occurred, Telegram API calls are skipped.
@@ -484,7 +484,7 @@ At the end of each calendar month (or on-demand via `/treasury_report`):
 
 ## 12. Complete Testing & Verification Matrix
 
-LA CONFRÉRIE's bot features a comprehensive automated test suite consisting of **137 tests across 21 test files** (78 from UG-01…UG-03 plus 59 for UG-04) running on Deno's native test runner (`deno test -A`):
+LA CONFRÉRIE's bot features a comprehensive automated test suite consisting of **193 tests** (the UG-01…UG-03 suites plus the post-audit E2E/regression suites, and 59 for UG-04) running on Deno's native test runner (`deno test -A`):
 
 | Test Suite File | Tests | Domain / Coverage |
 |---|:---:|---|
@@ -508,12 +508,12 @@ LA CONFRÉRIE's bot features a comprehensive automated test suite consisting of 
 | `tests/ug04_migration_test.ts` | 21 | Dry-run, protected content, albums, partial failure, resume, rate limits, leases, finalization, deletion safeguards. |
 | `tests/ug04_bot_routing_test.ts` | 6 | Real bot wiring: menus, admin-only routes, tier-gated deep links, disabled Retro checkout. |
 | `tests/ug04_contributions_test.ts` | 8 | Admin-reviewed member contributions: review gate, single publish, partial failure, migration hold, bot wiring. |
-| **Total** | **137** | **All 137 Tests Passing** |
+| **Total** | **193** | **All 193 Tests Passing** |
 
 To run the full suite:
 ```bash
 deno task check  # Strict TypeScript type check
-deno task test   # Runs all 137 unit, integration and security tests
+deno task test   # Runs all 193 unit, integration and security tests
 ```
 
 ---

@@ -11,6 +11,11 @@ import {
   SpaceId,
 } from "../types.ts";
 
+/** Jittered pause between optimistic-concurrency retries. */
+async function backoff(attempt: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, Math.random() * 8 * (attempt + 1)));
+}
+
 export async function createEntitlement(
   data: Omit<Entitlement, "id" | "createdAt" | "updatedAt">
 ): Promise<Entitlement> {
@@ -64,22 +69,20 @@ export async function getUserEntitlements(userId: number): Promise<Entitlement[]
   );
 }
 
+export function isEntitlementActive(ent: Entitlement, nowMs = Date.now()): boolean {
+  return ent.status === "active" && new Date(ent.expiresAt).getTime() > nowMs;
+}
+
+/**
+ * Entitlements that currently grant access. This is a pure read: validity is
+ * always derived from `status` + `expiresAt`. (A previous version lazily wrote
+ * "expired" back from this read path, which could clobber a concurrent
+ * renewal; persisted expiry is now done by `expireStaleEntitlements`.)
+ */
 export async function getActiveUserEntitlements(userId: number): Promise<Entitlement[]> {
   const all = await getUserEntitlements(userId);
   const nowMs = Date.now();
-
-  const active: Entitlement[] = [];
-  for (const ent of all) {
-    const expiresMs = new Date(ent.expiresAt).getTime();
-    if (ent.status === "active" && expiresMs > nowMs) {
-      active.push(ent);
-    } else if (ent.status === "active" && expiresMs <= nowMs) {
-      // Lazy transition expired entitlement
-      await updateEntitlementStatus(ent.id, "expired");
-    }
-  }
-
-  return active;
+  return all.filter((ent) => isEntitlementActive(ent, nowMs));
 }
 
 /** Active Stars-paid entitlements, optionally limited to one plan (legacy = regular). */
@@ -142,115 +145,251 @@ export async function getMembershipSummary(userId: number): Promise<MembershipSu
   };
 }
 
+/**
+ * Optimistic-concurrency read-modify-write of one entitlement. `fn` receives the
+ * latest stored value and returns the replacement (or null to leave it alone).
+ * The commit is rejected if the entitlement changed in between, then retried.
+ */
+export async function mutateEntitlement(
+  id: string,
+  fn: (current: Entitlement) => Entitlement | null
+): Promise<Entitlement | null> {
+  const kv = await getKv();
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const res = await kv.get<Entitlement>(["entitlements", id]);
+    const current = res.value;
+    if (!current) return null;
+
+    const next = fn(current);
+    if (!next) return current;
+
+    const updated: Entitlement = { ...next, updatedAt: new Date().toISOString() };
+    const atomic = kv.atomic();
+    atomic.check(res);
+    atomic.set(["entitlements", id], updated);
+    atomic.set(["entitlements_by_user", updated.userId, id], updated);
+    if (updated.status === "active") {
+      atomic.set(["active_entitlements_by_user", updated.userId, id], updated);
+    } else {
+      atomic.delete(["active_entitlements_by_user", updated.userId, id]);
+    }
+    const commit = await atomic.commit();
+    if (commit.ok) return updated;
+    await backoff(attempt);
+  }
+  throw new Error(`Entitlement ${id} could not be updated (persistent write conflict)`);
+}
+
 export async function updateEntitlementStatus(
   id: string,
   status: EntitlementStatus
 ): Promise<void> {
-  const kv = await getKv();
-  const current = await getEntitlement(id);
-  if (!current) return;
-
-  const now = new Date().toISOString();
-  const updated: Entitlement = {
-    ...current,
-    status,
-    updatedAt: now,
-  };
-
-  const atomic = kv.atomic();
-  atomic.set(["entitlements", id], updated);
-  atomic.set(["entitlements_by_user", current.userId, id], updated);
-
-  if (status === "active") {
-    atomic.set(["active_entitlements_by_user", current.userId, id], updated);
-  } else {
-    atomic.delete(["active_entitlements_by_user", current.userId, id]);
-  }
-
-  await atomic.commit();
+  await mutateEntitlement(id, (cur) => (cur.status === status ? null : { ...cur, status }));
 }
 
+/**
+ * Extends an entitlement by `additionalSeconds` from the later of its current
+ * expiry and now. Revoked entitlements are never revived (returns null).
+ */
 export async function extendEntitlement(
   id: string,
   additionalSeconds: number
 ): Promise<Entitlement | null> {
-  const kv = await getKv();
   const current = await getEntitlement(id);
-  if (!current) return null;
+  if (!current || current.status === "revoked") return null;
 
-  const currentExpiryMs = new Date(current.expiresAt).getTime();
-  const baseMs = Math.max(currentExpiryMs, Date.now());
-  const newExpiryIso = new Date(baseMs + additionalSeconds * 1000).toISOString();
-  const now = new Date().toISOString();
-
-  const updated: Entitlement = {
-    ...current,
-    expiresAt: newExpiryIso,
-    status: "active",
-    updatedAt: now,
-  };
-
-  const atomic = kv.atomic();
-  atomic.set(["entitlements", id], updated);
-  atomic.set(["entitlements_by_user", current.userId, id], updated);
-  atomic.set(["active_entitlements_by_user", current.userId, id], updated);
-
-  const res = await atomic.commit();
-  if (!res.ok) {
-    throw new Error(`Failed to extend entitlement ${id}`);
-  }
-
-  return updated;
+  return await mutateEntitlement(id, (cur) => {
+    if (cur.status === "revoked") return null;
+    const baseMs = Math.max(new Date(cur.expiresAt).getTime(), Date.now());
+    return {
+      ...cur,
+      expiresAt: new Date(baseMs + additionalSeconds * 1000).toISOString(),
+      status: "active",
+    };
+  });
 }
 
 export async function revokeEntitlement(
   id: string,
   reason?: string
 ): Promise<Entitlement | null> {
-  const kv = await getKv();
-  const current = await getEntitlement(id);
-  if (!current) return null;
-
-  const now = new Date().toISOString();
-  const updated: Entitlement = {
-    ...current,
+  return await mutateEntitlement(id, (cur) => ({
+    ...cur,
     status: "revoked",
-    updatedAt: now,
     metadata: {
-      ...current.metadata,
+      ...cur.metadata,
       notes: reason ? `Revoked: ${reason}` : "Revoked by administrator",
     },
-  };
-
-  const atomic = kv.atomic();
-  atomic.set(["entitlements", id], updated);
-  atomic.set(["entitlements_by_user", current.userId, id], updated);
-  atomic.delete(["active_entitlements_by_user", current.userId, id]);
-
-  const res = await atomic.commit();
-  if (!res.ok) {
-    throw new Error(`Failed to revoke entitlement ${id}`);
-  }
-
-  return updated;
+  }));
 }
 
 export async function markReminderSent(id: string): Promise<void> {
+  await mutateEntitlement(id, (cur) =>
+    cur.metadata?.reminderSent ? null : { ...cur, metadata: { ...cur.metadata, reminderSent: true } }
+  );
+}
+
+/**
+ * Persists "expired" for active entitlements whose time has passed. Safe against
+ * concurrent renewals: the transition is re-validated against the latest value.
+ */
+export async function expireStaleEntitlements(): Promise<number> {
+  const all = await listAllEntitlements();
+  const nowMs = Date.now();
+  let expired = 0;
+  for (const ent of all) {
+    if (ent.status === "active" && new Date(ent.expiresAt).getTime() <= nowMs) {
+      const result = await mutateEntitlement(ent.id, (cur) =>
+        cur.status === "active" && new Date(cur.expiresAt).getTime() <= Date.now()
+          ? { ...cur, status: "expired" }
+          : null
+      );
+      if (result?.status === "expired") expired++;
+    }
+  }
+  return expired;
+}
+
+export interface ApplyPaidPeriodParams {
+  userId: number;
+  chargeId: string;
+  /** Telegram's authoritative subscription_expiration_date, if supplied. */
+  telegramExpiryIso?: string;
+  periodSeconds: number;
+  invoicePayload?: string;
+  spaces: SpaceId[];
+  /** UG-04: which plan this charge pays for (default regular). */
+  plan?: MembershipPlanId;
+}
+
+export interface ApplyPaidPeriodResult {
+  alreadyFulfilled: boolean;
+  created: boolean;
+  entitlement?: Entitlement;
+  /** Set when the Telegram expiry looked implausible and was ignored. */
+  expiryAnomaly?: string;
+}
+
+/**
+ * Atomically credits one verified paid charge to the user's paid entitlement
+ * (create or extend) and marks the charge as fulfilled in the same commit, so a
+ * charge can never be credited twice and a crash can never leave it half-applied.
+ */
+export async function applyPaidPeriod(
+  params: ApplyPaidPeriodParams
+): Promise<ApplyPaidPeriodResult> {
   const kv = await getKv();
-  const current = await getEntitlement(id);
-  if (!current) return;
+  const fulfilledKey = ["payment_fulfilled", params.chargeId];
+  const pendingKey = ["payments_pending_fulfillment", params.chargeId];
 
-  const updated: Entitlement = {
-    ...current,
-    metadata: {
-      ...current.metadata,
-      reminderSent: true,
-    },
-    updatedAt: new Date().toISOString(),
-  };
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const fulfilled = await kv.get<{ entitlementId?: string }>(fulfilledKey);
+    if (fulfilled.value) {
+      const ent = fulfilled.value.entitlementId
+        ? await getEntitlement(fulfilled.value.entitlementId)
+        : null;
+      return { alreadyFulfilled: true, created: false, entitlement: ent ?? undefined };
+    }
 
-  await kv.set(["entitlements", id], updated);
-  await kv.set(["entitlements_by_user", current.userId, id], updated);
+    const nowMs = Date.now();
+
+    // One paid entitlement per member, tracked by a pointer whose version is part of
+    // the commit: two concurrent first charges cannot both create one.
+    const plan = params.plan ?? "regular";
+    // Regular keeps the original (UG-01..03) pointer key; Retro Plus has its own.
+    const pointerKey = plan === "retro_plus"
+      ? ["paid_entitlement_ptr", params.userId, "retro_plus"]
+      : ["paid_entitlement_ptr", params.userId];
+    const pointer = await kv.get<string>(pointerKey);
+    let existingId = pointer.value ?? null;
+    if (!existingId) {
+      // Entitlements that predate the pointer: adopt the active paid one, if any.
+      const legacy = (await getUserEntitlements(params.userId)).find(
+        (e) =>
+          e.source === "telegram_stars" &&
+          (e.plan ?? "regular") === plan &&
+          isEntitlementActive(e, nowMs)
+      );
+      existingId = legacy?.id ?? null;
+    }
+    const existingRes = existingId ? await kv.get<Entitlement>(["entitlements", existingId]) : null;
+    const existing =
+      existingRes?.value && isEntitlementActive(existingRes.value, nowMs) ? existingRes.value : null;
+    const existingExpiryMs = existing ? new Date(existing.expiresAt).getTime() : 0;
+
+    // Resolve the new expiry: Telegram's own timestamp wins when plausible.
+    let anomaly: string | undefined;
+    let telegramMs: number | undefined;
+    if (params.telegramExpiryIso) {
+      const ms = new Date(params.telegramExpiryIso).getTime();
+      const maxPlausible = nowMs + params.periodSeconds * 2000 + 86400_000;
+      if (Number.isNaN(ms) || ms > maxPlausible) {
+        anomaly = `implausible subscription_expiration_date ${params.telegramExpiryIso}`;
+      } else {
+        telegramMs = ms;
+      }
+    }
+
+    let newExpiryMs: number;
+    if (telegramMs !== undefined) {
+      newExpiryMs = Math.max(telegramMs, existingExpiryMs);
+    } else {
+      newExpiryMs = Math.max(nowMs, existingExpiryMs) + params.periodSeconds * 1000;
+    }
+
+    const atomic = kv.atomic();
+    atomic.check({ key: fulfilledKey, versionstamp: null });
+    atomic.check(pointer);
+
+    let entitlement: Entitlement | undefined;
+    let created = false;
+    const nowIso = new Date(nowMs).toISOString();
+
+    if (existing && existingRes) {
+      atomic.check(existingRes);
+      if (pointer.value !== existing.id) atomic.set(pointerKey, existing.id);
+      entitlement = {
+        ...existing,
+        expiresAt: new Date(newExpiryMs).toISOString(),
+        status: "active",
+        updatedAt: nowIso,
+        metadata: { ...existing.metadata, chargeId: params.chargeId },
+      };
+    } else if (newExpiryMs > nowMs) {
+      created = true;
+      entitlement = {
+        id: crypto.randomUUID(),
+        userId: params.userId,
+        source: "telegram_stars",
+        spaces: [...params.spaces],
+        plan,
+        startsAt: nowIso,
+        expiresAt: new Date(newExpiryMs).toISOString(),
+        status: "active",
+        metadata: { chargeId: params.chargeId, invoicePayload: params.invoicePayload },
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+    }
+    // else: Telegram says this paid period already lapsed (late delivery) — record
+    // the charge as fulfilled but grant nothing.
+
+    if (entitlement) {
+      if (created) atomic.set(pointerKey, entitlement.id);
+      atomic.set(["entitlements", entitlement.id], entitlement);
+      atomic.set(["entitlements_by_user", entitlement.userId, entitlement.id], entitlement);
+      atomic.set(["active_entitlements_by_user", entitlement.userId, entitlement.id], entitlement);
+    }
+    atomic.set(fulfilledKey, { entitlementId: entitlement?.id, at: nowIso });
+    atomic.delete(pendingKey);
+
+    const commit = await atomic.commit();
+    if (commit.ok) {
+      return { alreadyFulfilled: false, created, entitlement, expiryAnomaly: anomaly };
+    }
+    await backoff(attempt);
+  }
+  throw new Error(`Payment ${params.chargeId} could not be fulfilled (persistent write conflict)`);
 }
 
 export async function listAllEntitlements(): Promise<Entitlement[]> {

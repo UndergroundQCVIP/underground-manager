@@ -6,7 +6,7 @@
 | Check | Result |
 |---|---|
 | `deno task check` (strict type-check) | ✅ pass |
-| `deno task test` | ✅ **129 passed / 0 failed** (78 pre-existing UG-01–03 unchanged in behaviour + 51 new) |
+| `deno task test` | ✅ **193 passed / 0 failed** (after merging the audit branch) |
 | `deno task verify` (read-only live Telegram check) | ⚠️ see "Open items" |
 
 ## Delivered

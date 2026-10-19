@@ -20,7 +20,7 @@
 
 import { getConfig, getSpaceIdForChatId } from "../config.ts";
 import { logAuditEvent } from "../db/audit.ts";
-import { getCreator, patchCreator, relocateCreator } from "../db/creators.ts";
+import { getCreator, patchCreatorFields, relocateCreator } from "../db/creators.ts";
 import { listMediaIndex, recordMediaIndex } from "../db/media_index.ts";
 import {
   acquireMigrationLease,
@@ -195,32 +195,32 @@ export async function runPreflight(
 
   const retroChat = config.TELEGRAM_RETRO_FORUM_CHAT_ID;
   if (!retroChat) {
-    block("retro_not_configured", "TELEGRAM_RETRO_FORUM_CHAT_ID is not configured.");
+    block("retro_not_configured", "TELEGRAM_RETRO_FORUM_CHAT_ID n'est pas configuré.");
   } else if (getSpaceIdForChatId(retroChat, config) !== "retro_collections") {
-    block("retro_not_configured", "The Retro forum is not registered as a managed space.");
+    block("retro_not_configured", "Le forum Retro n'est pas enregistré comme espace géré.");
   }
 
   if ((creator.collection ?? "regular") !== "regular" || creator.chatId !== config.VIP_COLLECTIONS_CHAT_ID) {
-    block("source_mismatch", "Creator is not currently mapped to a topic in the Regular forum.");
+    block("source_mismatch", "Le créateur n'est pas actuellement associé à un sujet du forum Regular.");
   }
 
   if (creator.rightsStatus !== "verified") {
-    block("rights_not_confirmed", "Publication/distribution rights have not been confirmed by an administrator.");
+    block("rights_not_confirmed", "Les droits de publication et de distribution n'ont pas été confirmés par un administrateur.");
   }
 
   if (items.length === 0) {
     block(
       "no_inventory",
-      "No indexed media messages exist for this creator. The Bot API cannot list a topic's history; index the media manually (see /index_media) or republish it from authorized source files."
+      "Aucun message média indexé n'existe pour ce créateur. L'API des robots ne peut pas lister l'historique d'un sujet ; indexez les médias manuellement (voir /index_media) ou republiez-les à partir de fichiers sources autorisés."
     );
   } else if (creator.inventoryStatus !== "complete") {
     block(
       "incomplete_inventory",
-      `Only ${items.length} message(s) are indexed and this older collection may contain media Telegram will not let the bot enumerate. Index the remainder with /index_media, then attest the inventory is complete — or republish from authorized source files.`
+      `Seulement ${items.length} message(s) sont indexés et cette ancienne collection peut contenir des médias que Telegram ne permet pas au robot d'énumérer. Indexez le reste avec /index_media, puis attestez que l'inventaire est complet — ou republiez à partir de fichiers sources autorisés.`
     );
   }
   if (items.some((i) => i.kind === "unknown")) {
-    warnings.push("Some manually indexed messages have an unknown media type; copy results are still verified per message.");
+    warnings.push("Certains messages indexés manuellement ont un type de média inconnu ; les résultats de copie sont tout de même vérifiés message par message.");
   }
 
   // --- Live Telegram checks (read-only) ---
@@ -230,33 +230,33 @@ export async function runPreflight(
     if (src.has_protected_content) {
       block(
         "protected_content",
-        "The Regular forum has Restrict Saving Content enabled, so Telegram forbids copying its media. The bot will NOT disable this or work around it. Republish from authorized source files instead."
+        "Le forum Regular a l'option « Restreindre l'enregistrement du contenu » activée : Telegram interdit donc la copie de ses médias. Le robot NE la désactivera PAS et ne la contournera pas. Republiez plutôt à partir de fichiers sources autorisés."
       );
     }
     const srcMember = await api.getChatMember(creator.chatId, me.id);
     if (srcMember.status === "left" || srcMember.status === "kicked") {
-      block("missing_permissions", "The bot is not a member of the Regular forum.");
+      block("missing_permissions", "Le robot n'est pas membre du forum Regular.");
     } else if (srcMember.status === "administrator" && srcMember.can_delete_messages === false) {
-      warnings.push("Bot lacks 'Delete messages' in the Regular forum; the optional final source-topic deletion step would fail.");
+      warnings.push("Le robot n'a pas la permission « Supprimer des messages » dans le forum Regular ; l'étape facultative de suppression du sujet source échouerait.");
     }
 
     if (retroChat) {
       const dst = await api.getChat(retroChat);
       if (dst.is_forum === false) {
-        block("missing_permissions", "The Retro chat is not a forum (Topics are not enabled).");
+        block("missing_permissions", "Le clavardage Retro n'est pas un forum (les sujets ne sont pas activés).");
       }
       if (dst.has_protected_content) {
-        warnings.push("The Retro forum has Restrict Saving Content on; copying INTO it is allowed.");
+        warnings.push("Le forum Retro a l'option « Restreindre l'enregistrement du contenu » activée ; la copie VERS ce forum reste permise.");
       }
       const dstMember = await api.getChatMember(retroChat, me.id);
       if (dstMember.status !== "administrator" && dstMember.status !== "creator") {
-        block("missing_permissions", "The bot is not an administrator of the Retro forum.");
+        block("missing_permissions", "Le robot n'est pas administrateur du forum Retro.");
       } else if (dstMember.can_manage_topics === false) {
-        block("missing_permissions", "The bot lacks 'Manage topics' in the Retro forum.");
+        block("missing_permissions", "Le robot n'a pas la permission « Gérer les sujets » dans le forum Retro.");
       }
     }
   } catch (err) {
-    block("missing_permissions", `Telegram check failed: ${classifyTelegramError(err).message}`);
+    block("missing_permissions", `Échec de la vérification Telegram : ${classifyTelegramError(err).message}`);
   }
 
   return { ok: blockers.length === 0, checkedAt: new Date().toISOString(), blockers, warnings };
@@ -278,12 +278,12 @@ export async function prepareMigration(
   params: PrepareParams
 ): Promise<{ ok: boolean; job?: MigrationJob; error?: string }> {
   if (!params.rightsConfirmed) {
-    return { ok: false, error: "You must confirm that the club retains publication/distribution rights." };
+    return { ok: false, error: "Vous devez confirmer que le club conserve les droits de publication et de distribution." };
   }
   const creator = await getCreator(params.creatorId);
-  if (!creator) return { ok: false, error: "Creator not found." };
+  if (!creator) return { ok: false, error: "Créateur introuvable." };
   if ((creator.collection ?? "regular") !== "regular") {
-    return { ok: false, error: `${creator.name} is already in the Retro collection.` };
+    return { ok: false, error: `${creator.name} est déjà dans la collection Retro.` };
   }
 
   const existing = await getActiveMigrationForCreator(creator.id);
@@ -291,13 +291,13 @@ export async function prepareMigration(
     return {
       ok: false,
       job: existing,
-      error: `A migration for ${creator.name} is already ${existing.status.replace(/_/g, " ")}. Open Migration Status to continue it.`,
+      error: `Une migration pour ${creator.name} est déjà ${existing.status.replace(/_/g, " ")}. Ouvrez l'état des migrations pour la poursuivre.`,
     };
   }
 
   const now = new Date().toISOString();
   if (creator.rightsStatus !== "verified") {
-    await patchCreator(creator.id, {
+    await patchCreatorFields(creator.id, {
       rightsStatus: "verified",
       rightsVerifiedBy: params.adminId,
       rightsVerifiedAt: now,
@@ -374,9 +374,9 @@ export async function startMigration(
   adminId: number
 ): Promise<{ ok: boolean; job?: MigrationJob; error?: string }> {
   const job = await getMigrationJob(jobId);
-  if (!job) return { ok: false, error: "Migration job not found." };
+  if (!job) return { ok: false, error: "Migration introuvable." };
   if (!["prepared", "paused", "needs_review", "blocked"].includes(job.status)) {
-    return { ok: false, job, error: `Cannot start a migration that is ${job.status}.` };
+    return { ok: false, job, error: `Impossible de démarrer une migration à l'état ${job.status}.` };
   }
 
   // Re-prepare to re-run the preflight against current reality.
@@ -387,7 +387,7 @@ export async function startMigration(
   }
   const current = (await getMigrationJob(jobId))!;
   if (["prepared", "blocked"].includes(current.status) && !current.preflight?.ok) {
-    return { ok: false, job: current, error: "Preflight checks failed; see the blockers listed." };
+    return { ok: false, job: current, error: "Les vérifications préalables ont échoué ; voyez les blocages listés." };
   }
 
   // Create the destination topic once, persist its id BEFORE any copying.
@@ -402,9 +402,9 @@ export async function startMigration(
       await updateMigrationJob(jobId, (j) => {
         j.status = "blocked";
         j.blockedReason = "missing_permissions";
-        j.notes.push(`Could not create the Retro topic: ${info.message}`);
+        j.notes.push(`Impossible de créer le sujet Retro : ${info.message}`);
       });
-      return { ok: false, job: (await getMigrationJob(jobId))!, error: `Could not create the Retro topic: ${info.message}` };
+      return { ok: false, job: (await getMigrationJob(jobId))!, error: `Impossible de créer le sujet Retro : ${info.message}` };
     }
   }
 
@@ -441,13 +441,13 @@ export async function pauseMigration(jobId: string, adminId: number): Promise<Mi
 /** Cancel: leaves the source topic and the creator record untouched. */
 export async function cancelMigration(jobId: string, adminId: number): Promise<{ ok: boolean; error?: string }> {
   const job = await getMigrationJob(jobId);
-  if (!job) return { ok: false, error: "Migration job not found." };
+  if (!job) return { ok: false, error: "Migration introuvable." };
   if (["finalized", "source_deleted"].includes(job.status)) {
-    return { ok: false, error: "A finalized migration cannot be cancelled." };
+    return { ok: false, error: "Une migration finalisée ne peut pas être annulée." };
   }
   await updateMigrationJob(jobId, (j) => {
     j.status = "cancelled";
-    j.notes.push(`Cancelled by administrator ${adminId}. Source topic and creator record were not modified; any copies already placed in the Retro topic must be removed manually if unwanted.`);
+    j.notes.push(`Annulée par l'administrateur ${adminId}. Le sujet source et la fiche du créateur n'ont pas été modifiés ; les copies déjà placées dans le sujet Retro doivent être retirées manuellement si elles sont indésirables.`);
   });
   await logAuditEvent("migration_cancelled", { jobId }, adminId);
   return { ok: true };
@@ -520,7 +520,7 @@ export async function runMigrationStep(
             await saveMigrationItem(jobId, {
               ...it,
               status: "failed",
-              error: "Telegram copied none of these messages (deleted or not copyable)",
+              error: "Telegram n'a copié aucun de ces messages (supprimés ou non copiables)",
               attempts: it.attempts + 1,
               updatedAt: now,
             });
@@ -548,14 +548,14 @@ export async function runMigrationStep(
             await saveMigrationItem(jobId, {
               ...it,
               status: "ambiguous",
-              error: "Batch result count mismatch",
+              error: "Nombre de résultats du lot non concordant",
               attempts: it.attempts + 1,
               updatedAt: now,
             });
           }
           await updateMigrationJob(jobId, (j) => {
             j.notes.push(
-              `Batch of ${batch.length} message(s) (${batch[0]}–${batch[batch.length - 1]}): Telegram returned ${copies.length} copies (destination IDs ${copies.map((c) => c.message_id).join(", ") || "none"}). Some source messages were skipped; items are flagged AMBIGUOUS and will not be retried automatically to avoid duplicates. Review the Retro topic.`
+              `Lot de ${batch.length} message(s) (${batch[0]}–${batch[batch.length - 1]}) : Telegram a retourné ${copies.length} copie(s) (ID de destination ${copies.map((c) => c.message_id).join(", ") || "aucun"}). Certains messages sources ont été ignorés ; les éléments sont marqués AMBIGUS et ne seront pas retentés automatiquement afin d'éviter les doublons. Examinez le sujet Retro.`
             );
           });
         }
@@ -567,7 +567,7 @@ export async function runMigrationStep(
             j.status = "blocked";
             j.blockedReason = "protected_content";
             j.notes.push(
-              "Telegram refused to copy: content protection (Restrict Saving Content) is active. The bot does not bypass or disable it. Use the administrator-controlled republishing alternative from authorized source files."
+              "Telegram a refusé la copie : la protection du contenu (« Restreindre l'enregistrement du contenu ») est active. Le robot ne la contourne ni ne la désactive. Utilisez la solution de rechange de republication contrôlée par un administrateur à partir de fichiers sources autorisés."
             );
           });
           await refreshTotals(jobId);
@@ -585,7 +585,7 @@ export async function runMigrationStep(
           await updateMigrationJob(jobId, (j) => {
             j.status = "blocked";
             j.blockedReason = "missing_permissions";
-            j.notes.push(`Copy stopped: ${info.message}`);
+            j.notes.push(`Copie arrêtée : ${info.message}`);
           });
           await refreshTotals(jobId);
           return { ran: true, reason: "blocked", batchesRun, status: "blocked" };
@@ -619,7 +619,7 @@ export async function runMigrationStep(
       const verification = await verifyMigration(api, jobId);
       await updateMigrationJob(jobId, (j) => {
         j.status = verification.ok ? "ready_to_finalize" : "needs_review";
-        if (!verification.ok) j.notes.push(...verification.problems.map((p) => `Verification: ${p}`));
+        if (!verification.ok) j.notes.push(...verification.problems.map((p) => `Vérification : ${p}`));
       });
       if (!verification.ok) {
         await logAuditEvent("migration_needs_review", { jobId, problems: verification.problems }, 0);
@@ -627,7 +627,7 @@ export async function runMigrationStep(
     } else if (stillPending && consecutiveFailures >= MAX_CONSECUTIVE_BATCH_FAILURES) {
       await updateMigrationJob(jobId, (j) => {
         j.status = "needs_review";
-        j.notes.push("Copying stopped after repeated batch failures. Review failed items, then resume.");
+        j.notes.push("La copie s'est arrêtée après des échecs répétés de lots. Examinez les éléments échoués, puis reprenez.");
       });
     }
     const final = (await getMigrationJob(jobId))!;
@@ -669,8 +669,8 @@ export async function excludeUnresolvedItems(
         status: "excluded",
         error:
           it.status === "ambiguous"
-            ? `Accepted by administrator ${adminId} after manual review of the Retro topic (copy may exist but is not attributable): ${reason}`
-            : `Excluded by administrator ${adminId}: ${reason}`,
+            ? `Accepté par l'administrateur ${adminId} après examen manuel du sujet Retro (une copie peut exister mais n'est pas attribuable) : ${reason}`
+            : `Exclu par l'administrateur ${adminId} : ${reason}`,
         updatedAt: new Date().toISOString(),
       });
       n++;
@@ -678,7 +678,7 @@ export async function excludeUnresolvedItems(
   }
   await refreshTotals(jobId);
   await updateMigrationJob(jobId, (j) => {
-    j.notes.push(`Administrator ${adminId} excluded ${n} unresolved item(s): ${reason}`);
+    j.notes.push(`L'administrateur ${adminId} a exclu ${n} élément(s) non résolu(s) : ${reason}`);
   });
   return n;
 }
@@ -694,7 +694,7 @@ export async function reevaluateMigration(
   if (items.some((i) => i.status === "pending")) {
     return updateMigrationJob(jobId, (j) => {
       j.status = "paused";
-      j.notes.push("Pending items remain; resume copying.");
+      j.notes.push("Il reste des éléments en attente ; reprenez la copie.");
     });
   }
   const v = await verifyMigration(api, jobId);
@@ -731,13 +731,13 @@ export async function verifyMigration(api: MigrationApiLike, jobId: string): Pro
   const excluded = items.filter((i) => i.status === "excluded");
   const unresolved = items.filter((i) => i.status !== "copied" && i.status !== "excluded");
 
-  checks.push(`Inventory: ${items.length} indexed message(s); ${copied.length} copied; ${excluded.length} excluded by admin.`);
-  if (items.length === 0) problems.push("The source inventory is empty.");
+  checks.push(`Inventaire : ${items.length} message(s) indexé(s) ; ${copied.length} copié(s) ; ${excluded.length} exclu(s) par l'administrateur.`);
+  if (items.length === 0) problems.push("L'inventaire source est vide.");
   if (unresolved.length > 0) {
-    problems.push(`${unresolved.length} item(s) are unaccounted for (pending/failed/ambiguous).`);
+    problems.push(`${unresolved.length} élément(s) ne sont pas comptabilisés (en attente/échoués/ambigus).`);
   }
   if (new Set(copied.map((c) => c.destMessageId)).size !== copied.filter((c) => c.destMessageId).length) {
-    problems.push("Duplicate destination message IDs detected in the mapping.");
+    problems.push("ID de messages de destination en double détectés dans la correspondance.");
   }
 
   // Albums: all members copied, with destination IDs that stay contiguous.
@@ -750,23 +750,23 @@ export async function verifyMigration(api: MigrationApiLike, jobId: string): Pro
     const contiguous = allCopied && dest.every((d, i) => i === 0 || d === dest[i - 1] + 1);
     if (allCopied && contiguous) albumsPreserved++;
     else if (members.some((m) => m.status === "copied")) {
-      problems.push(`Album starting at source message ${u.messageIds[0]} was not fully/contiguously preserved.`);
+      problems.push(`L'album commençant au message source ${u.messageIds[0]} n'a pas été entièrement ou continuellement préservé.`);
     }
   }
-  checks.push(`Albums: ${albumsPreserved}/${units.length} preserved as albums.`);
-  checks.push("Captions: copied via copyMessages without remove_caption (preserved by Telegram).");
+  checks.push(`Albums : ${albumsPreserved}/${units.length} préservés en tant qu'albums.`);
+  checks.push("Légendes : copiées via copyMessages sans remove_caption (préservées par Telegram).");
 
   // Destination identity
   let destinationTopicOk: boolean | null = null;
   const config = getConfig();
   if (!job.destination.topicId) {
-    problems.push("No destination topic has been created.");
+    problems.push("Aucun sujet de destination n'a été créé.");
     destinationTopicOk = false;
   } else if (job.destination.chatId === job.source.chatId) {
-    problems.push("Destination forum is the same as the source forum.");
+    problems.push("Le forum de destination est le même que le forum source.");
     destinationTopicOk = false;
   } else if (getSpaceIdForChatId(job.destination.chatId, config) !== "retro_collections") {
-    problems.push("Destination chat is not the managed Retro forum (access control would not apply).");
+    problems.push("Le clavardage de destination n'est pas le forum Retro géré (le contrôle d'accès ne s'appliquerait pas).");
     destinationTopicOk = false;
   } else if (api.editForumTopic) {
     try {
@@ -777,19 +777,19 @@ export async function verifyMigration(api: MigrationApiLike, jobId: string): Pro
       if (/not[ _]modified/i.test(info.message)) destinationTopicOk = true;
       else {
         destinationTopicOk = false;
-        problems.push(`Destination topic could not be confirmed: ${info.message}`);
+        problems.push(`Le sujet de destination n'a pas pu être confirmé : ${info.message}`);
       }
     }
   }
   checks.push(
-    `Destination topic: ${job.destination.topicId ?? "none"} in forum ${job.destination.chatId} — ${
-      destinationTopicOk === null ? "existence not probed" : destinationTopicOk ? "confirmed" : "NOT confirmed"
+    `Sujet de destination : ${job.destination.topicId ?? "aucun"} dans le forum ${job.destination.chatId} — ${
+      destinationTopicOk === null ? "existence non sondée" : destinationTopicOk ? "confirmé" : "NON confirmé"
     }.`
   );
 
-  if (creator?.rightsStatus !== "verified") problems.push("Publication rights are not verified.");
-  else checks.push("Publication rights: verified.");
-  checks.push("Access: Retro forum admission is gated by the Retro Plus entitlement (join-request approval).");
+  if (creator?.rightsStatus !== "verified") problems.push("Les droits de publication ne sont pas vérifiés.");
+  else checks.push("Droits de publication : vérifiés.");
+  checks.push("Accès : l'admission au forum Retro est conditionnée par le droit Retro Plus (approbation des demandes d'adhésion).");
 
   return {
     ok: problems.length === 0,
@@ -815,10 +815,10 @@ export async function finalizeMigration(
   adminId: number
 ): Promise<{ ok: boolean; job?: MigrationJob; error?: string; report?: VerificationReport }> {
   const job = await getMigrationJob(jobId);
-  if (!job) return { ok: false, error: "Migration job not found." };
+  if (!job) return { ok: false, error: "Migration introuvable." };
   if (["finalized", "source_deleted"].includes(job.status)) return { ok: true, job };
   if (job.status !== "ready_to_finalize") {
-    return { ok: false, job, error: `Migration is ${job.status.replace(/_/g, " ")}; it must be verified and ready to finalize.` };
+    return { ok: false, job, error: `La migration est ${job.status.replace(/_/g, " ")} ; elle doit être vérifiée et prête à être finalisée.` };
   }
 
   // Re-verify at the moment of approval; never trust a stale state.
@@ -826,9 +826,9 @@ export async function finalizeMigration(
   if (!report.ok) {
     await updateMigrationJob(jobId, (j) => {
       j.status = "needs_review";
-      j.notes.push(...report.problems.map((p) => `Verification: ${p}`));
+      j.notes.push(...report.problems.map((p) => `Vérification : ${p}`));
     });
-    return { ok: false, job: (await getMigrationJob(jobId))!, report, error: "Verification found discrepancies; finalization refused." };
+    return { ok: false, job: (await getMigrationJob(jobId))!, report, error: "La vérification a trouvé des écarts ; finalisation refusée." };
   }
 
   const items = await listMigrationItems(jobId);
@@ -837,7 +837,7 @@ export async function finalizeMigration(
     topicId: job.destination.topicId!,
     collection: "retro",
   });
-  if (!relocated) return { ok: false, job, error: "Creator record disappeared." };
+  if (!relocated) return { ok: false, job, error: "La fiche du créateur a disparu." };
 
   // Record the destination inventory so the creator's Retro collection is indexed too.
   for (const it of items) {
@@ -887,16 +887,16 @@ export interface SourceDeletionSummary {
 function deletionBlockers(job: MigrationJob, creator: Creator | null, items: MigrationItem[]): string[] {
   const b: string[] = [];
   const config = getConfig();
-  if (job.status !== "finalized") b.push("The migration is not finalized.");
+  if (job.status !== "finalized") b.push("La migration n'est pas finalisée.");
   if (items.some((i) => !["copied", "excluded"].includes(i.status))) {
-    b.push("Unresolved migration discrepancies remain.");
+    b.push("Des écarts de migration non résolus subsistent.");
   }
   if (!creator || creator.chatId !== job.destination.chatId || creator.topicId !== job.destination.topicId) {
-    b.push("The creator record does not point at the Retro destination yet.");
+    b.push("La fiche du créateur ne pointe pas encore vers la destination Retro.");
   }
-  if (job.source.chatId !== config.VIP_COLLECTIONS_CHAT_ID) b.push("Source is not the Regular forum.");
+  if (job.source.chatId !== config.VIP_COLLECTIONS_CHAT_ID) b.push("La source n'est pas le forum Regular.");
   if (job.source.chatId === job.destination.chatId && job.source.topicId === job.destination.topicId) {
-    b.push("Source and destination are the same topic.");
+    b.push("La source et la destination sont le même sujet.");
   }
   return b;
 }
@@ -908,9 +908,9 @@ export async function requestSourceDeletion(
   destinationReviewed: boolean
 ): Promise<{ ok: boolean; summary?: SourceDeletionSummary; error?: string }> {
   const job = await getMigrationJob(jobId);
-  if (!job) return { ok: false, error: "Migration job not found." };
+  if (!job) return { ok: false, error: "Migration introuvable." };
   if (!destinationReviewed) {
-    return { ok: false, error: "You must confirm that the Retro destination was manually reviewed." };
+    return { ok: false, error: "Vous devez confirmer que la destination Retro a été examinée manuellement." };
   }
   const creator = await getCreator(job.creatorId);
   const items = await listMigrationItems(jobId);
@@ -945,12 +945,12 @@ export async function confirmSourceDeletion(
   adminId: number
 ): Promise<{ ok: boolean; error?: string }> {
   const job = await getMigrationJob(jobId);
-  if (!job) return { ok: false, error: "Migration job not found." };
+  if (!job) return { ok: false, error: "Migration introuvable." };
   if (!job.deletionRequestedAt || !job.destinationReviewedAt) {
-    return { ok: false, error: "Deletion was not requested/reviewed. Start the deletion review first." };
+    return { ok: false, error: "La suppression n'a pas été demandée ni examinée. Commencez d'abord l'examen de suppression." };
   }
   if (Date.now() - new Date(job.deletionRequestedAt).getTime() > DELETE_CONFIRM_WINDOW_MS) {
-    return { ok: false, error: "The deletion confirmation window expired. Start the review again." };
+    return { ok: false, error: "La fenêtre de confirmation de suppression a expiré. Recommencez l'examen." };
   }
   const creator = await getCreator(job.creatorId);
   const items = await listMigrationItems(jobId);
@@ -960,7 +960,7 @@ export async function confirmSourceDeletion(
   try {
     await api.deleteForumTopic(job.source.chatId, job.source.topicId);
   } catch (err) {
-    return { ok: false, error: `Telegram could not delete the topic: ${classifyTelegramError(err).message}` };
+    return { ok: false, error: `Telegram n'a pas pu supprimer le sujet : ${classifyTelegramError(err).message}` };
   }
   await updateMigrationJob(jobId, (j) => {
     j.status = "source_deleted";

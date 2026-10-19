@@ -121,7 +121,7 @@ Deno.test("VOTING — Paid member can vote, complimentary member is excluded", a
       candidateId: c1.id,
     });
     assertEquals(compVote.success, false);
-    assertEquals(compVote.error?.includes("Complimentary members are excluded"), true);
+    assertEquals(compVote.error?.includes("sont exclus du vote"), true);
   } finally {
     await kv.close();
   }
@@ -174,7 +174,7 @@ Deno.test("VOTING — Votes are irrevocable and duplicate attempts are rejected"
       candidateId: c2.id,
     });
     assertEquals(vote2.success, false);
-    assertEquals(vote2.error?.includes("already voted"), true);
+    assertEquals(vote2.error?.includes("déjà voté"), true);
   } finally {
     await kv.close();
   }

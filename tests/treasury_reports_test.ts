@@ -89,11 +89,11 @@ Deno.test("TREASURY REPORTS — Formats clean, transparent member report", async
   const report = await generateMonthlyTreasuryReport("2026-10");
   const memberReport = formatPrivateMemberReport(report);
 
-  assertStringIncludes(memberReport, "LA CONFRÉRIE TREASURY REPORT");
-  assertStringIncludes(memberReport, "October 2026");
-  assertStringIncludes(memberReport, "Revenue & Inflows");
-  assertStringIncludes(memberReport, "Budget & Allocations");
-  assertStringIncludes(memberReport, "Active Paying Subscribers");
+  assertStringIncludes(memberReport, "RAPPORT DE TRÉSORERIE LA CONFRÉRIE");
+  assertStringIncludes(memberReport, "octobre 2026");
+  assertStringIncludes(memberReport, "Revenus et entrées de fonds");
+  assertStringIncludes(memberReport, "Budget et répartition");
+  assertStringIncludes(memberReport, "Abonnés payants actifs");
 });
 
 Deno.test("TREASURY REPORTS — Detailed admin audit report includes comprehensive breakdown", async () => {
@@ -102,10 +102,10 @@ Deno.test("TREASURY REPORTS — Detailed admin audit report includes comprehensi
   const report = await generateMonthlyTreasuryReport("2026-10");
   const adminReport = formatDetailedAdminReport(report);
 
-  assertStringIncludes(adminReport, "DETAILED TREASURY AUDIT REPORT");
-  assertStringIncludes(adminReport, "Telegram Stars Breakdown");
-  assertStringIncludes(adminReport, "Settled Fiat Cash (CAD)");
-  assertStringIncludes(adminReport, "Net Acquisition Purchasing Power");
+  assertStringIncludes(adminReport, "RAPPORT D'AUDIT DÉTAILLÉ DE LA TRÉSORERIE");
+  assertStringIncludes(adminReport, "Ventilation des Étoiles Telegram");
+  assertStringIncludes(adminReport, "Encaisse réglée en monnaie fiduciaire (CAD)");
+  assertStringIncludes(adminReport, "Pouvoir d'achat net pour les acquisitions");
 });
 
 Deno.test("TREASURY REPORTS — Publishes report to configured Telegram channel", async () => {
@@ -117,5 +117,5 @@ Deno.test("TREASURY REPORTS — Publishes report to configured Telegram channel"
   const success = await publishMonthlyReportToChannel(mockApi as any, report);
   assertEquals(success, true);
   assertEquals(mockApi.sentMessages.length, 1);
-  assertStringIncludes(mockApi.sentMessages[0].text, "LA CONFRÉRIE TREASURY REPORT");
+  assertStringIncludes(mockApi.sentMessages[0].text, "RAPPORT DE TRÉSORERIE LA CONFRÉRIE");
 });

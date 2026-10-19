@@ -23,11 +23,11 @@ Deno.test("UG04 DIRECTORY — Regular and Retro creators share ONE alphabetical 
     const creators = await listCreators({ status: "active", hasContentOnly: true });
     const text = buildDirectorySections(creators, "TestBot")[0];
 
-    assertStringIncludes(text, "LA CONFRÉRIE | CREATOR DIRECTORY");
+    assertStringIncludes(text, "LA CONFRÉRIE | RÉPERTOIRE DES CRÉATEURS");
     assert(!/underground/i.test(text));
-    assertStringIncludes(text, "*Aria* — Regular — Oct 18, 2026");
-    assertStringIncludes(text, "*Maya* — Retro — Oct 12, 2026");
-    assertStringIncludes(text, "*Sophie* — Regular — Oct 17, 2026");
+    assertStringIncludes(text, "*Aria* — Regular — 18 oct. 2026");
+    assertStringIncludes(text, "*Maya* — Retro — 12 oct. 2026");
+    assertStringIncludes(text, "*Sophie* — Regular — 17 oct. 2026");
     // Separate sections per forum, each alphabetical
     assertStringIncludes(text, "RETRO — RETRO | LA CONFRÉRIE");
     assertStringIncludes(text, "REGULAR — TOKEBEC VIP COLLECTIONS");
@@ -124,8 +124,8 @@ Deno.test("UG04 DIRECTORY — New topics in the Retro forum register as Retro cr
     assertEquals(c?.rightsStatus, "unverified");
 
     // Authorized uploads are indexed (IDs only); non-admin uploads are ignored
-    assert(await handleMediaUpload(RETRO_CHAT, 700, 111111, { messageId: 55, kind: "photo", hasCaption: true }));
-    assertEquals(await handleMediaUpload(RETRO_CHAT, 700, 424242, { messageId: 56, kind: "photo", hasCaption: false }), null);
+    assert(await handleMediaUpload(RETRO_CHAT, 700, 111111, undefined, { messageId: 55, kind: "photo", hasCaption: true }));
+    assertEquals(await handleMediaUpload(RETRO_CHAT, 700, 424242, undefined, { messageId: 56, kind: "photo", hasCaption: false }), null);
     const idx = await listMediaIndex(c!.id);
     assertEquals(idx.map((e) => e.messageId), [55]);
     assertEquals((await getCreator(c!.id))?.hasContent, true);
@@ -141,8 +141,8 @@ Deno.test("UG04 INVENTORY — Message IDs are recorded for Regular uploads, orde
   const kv = await setupTestEnvironment();
   try {
     const c = await handleForumTopicCreated(REGULAR_CHAT, 800, "Lena");
-    await handleMediaUpload(REGULAR_CHAT, 800, 111111, { messageId: 12, kind: "photo", mediaGroupId: "g1", hasCaption: true });
-    await handleMediaUpload(REGULAR_CHAT, 800, 111111, { messageId: 10, kind: "video", hasCaption: false });
+    await handleMediaUpload(REGULAR_CHAT, 800, 111111, undefined, { messageId: 12, kind: "photo", mediaGroupId: "g1", hasCaption: true });
+    await handleMediaUpload(REGULAR_CHAT, 800, 111111, undefined, { messageId: 10, kind: "video", hasCaption: false });
     const idx = await listMediaIndex(c!.id);
     assertEquals(idx.map((e) => e.messageId), [10, 12]);
     assertEquals(idx[1].mediaGroupId, "g1");

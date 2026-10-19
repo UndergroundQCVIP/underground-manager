@@ -60,15 +60,15 @@ Deno.test("UG04 BRAND — Member and admin menus match the contract", async () =
   const kv = await setupTestEnvironment();
   try {
     const member = menuLabels(mainMenuKeyboard(true, false, "regular")).join("|");
-    for (const label of ["My Membership", "Membership Plans", "Creator Directory", "Wanted List", "General Chat", "Support"]) {
+    for (const label of ["Mon abonnement", "Forfaits d'adhésion", "Répertoire des créateurs", "Liste de souhaits", "Clavardage général", "Aide et soutien", "Contribuer"]) {
       assertStringIncludes(member, label);
     }
     // Regular members see the upgrade option; Retro Plus members do not.
-    assertStringIncludes(member, "Upgrade to Retro Plus");
-    assert(!menuLabels(mainMenuKeyboard(true, false, "retro_plus")).join("|").includes("Upgrade to Retro Plus"));
+    assertStringIncludes(member, "Passer à Retro Plus");
+    assert(!menuLabels(mainMenuKeyboard(true, false, "retro_plus")).join("|").includes("Passer à Retro Plus"));
 
     const admin = menuLabels(adminMenuKeyboard()).join("|");
-    for (const label of ["Members", "Membership Plans", "Creators", "Move to Retro", "Migration Status", "Directory", "Treasury", "Settings"]) {
+    for (const label of ["Membres", "Forfaits", "Créateurs", "Passer à Retro", "État des migrations", "Répertoire", "Trésorerie", "Paramètres", "Contributions"]) {
       assertStringIncludes(admin, label);
     }
   } finally {
@@ -427,7 +427,7 @@ Deno.test("UG04 TREASURY — Revenue is attributed per tier once; upgrades never
     const report = await generateMonthlyTreasuryReport();
     assertEquals(report.revenueByTier?.retro_plus.periodStars, 1500);
     assertStringIncludes(formatPrivateMemberReport(report), "Retro Plus");
-    assertStringIncludes(formatPrivateMemberReport(report), "LA CONFRÉRIE TREASURY REPORT");
+    assertStringIncludes(formatPrivateMemberReport(report), "RAPPORT DE TRÉSORERIE LA CONFRÉRIE");
   } finally {
     await kv.close();
   }

@@ -15,12 +15,21 @@ import {
 } from "../keyboards.ts";
 import { formatMoney } from "../../treasury/conversion.ts";
 import {
+  approveCandidateAcquisition,
+  cancelExpense,
+  confirmCandidateAcquisitionPaid,
+  evaluateCandidateAffordability,
   getTreasuryOverview,
   recordExpenseWithJournal,
   recordWithdrawalWithSettlement,
+  refundExpense,
   reimburseAdminExpense,
-  evaluateCandidateAffordability,
 } from "../../treasury/service.ts";
+import { parseMoneyToMinor, parseTonToNano } from "../../util/money.ts";
+import { escapeMd } from "../../util/markdown.ts";
+import { getKv } from "../../db/kv.ts";
+import { isSupportedExpenseCurrency, normalizeCurrency } from "../../treasury/conversion.ts";
+import { EXPENSE_CATEGORY_LABELS } from "../../types.ts";
 import {
   reconcileStarHoldingStatuses,
   reconcileStarTransactionsFromApi,
@@ -48,15 +57,19 @@ import { getWantedCandidate } from "../../db/wanted.ts";
 
 export const treasuryComposer = new Composer();
 
-// All treasury routes require administrator authorization
+// All treasury routes require administrator authorization (scoped; see adminRouteGuard)
 treasuryComposer.use(
   adminRouteGuard({
     callbackPrefixes: ["admin:"],
-    commands: ["treasury", "record_expense", "record_withdrawal", "price"],
+    commands: [
+      "treasury", "record_expense", "record_withdrawal", "price",
+      "refund_expense", "cancel_expense", "approve_acquisition", "acquisition_paid",
+    ],
   })
 );
 
-// In-memory pending draft cache for expense confirmations
+// Pending expense confirmations live in KV (not process memory): Deno Deploy may route
+// the confirm tap to a different isolate, and the draft must be claimable exactly once.
 interface ExpenseDraft {
   description: string;
   originalAmountMinor: number;
@@ -66,7 +79,23 @@ interface ExpenseDraft {
   candidateId?: string;
   adminId: number;
 }
-const expenseDrafts = new Map<string, ExpenseDraft>();
+const DRAFT_TTL_MS = 60 * 60 * 1000;
+
+async function saveExpenseDraft(draft: ExpenseDraft): Promise<string> {
+  const kv = await getKv();
+  const id = crypto.randomUUID();
+  await kv.set(["expense_drafts", id], draft, { expireIn: DRAFT_TTL_MS });
+  return id;
+}
+
+/** Atomically takes the draft: a double-tap on "Confirm" yields exactly one expense. */
+async function claimExpenseDraft(id: string, adminId: number): Promise<ExpenseDraft | null> {
+  const kv = await getKv();
+  const res = await kv.get<ExpenseDraft>(["expense_drafts", id]);
+  if (!res.value || res.value.adminId !== adminId) return null;
+  const del = await kv.atomic().check(res).delete(["expense_drafts", id]).commit();
+  return del.ok ? res.value : null;
+}
 
 // ==============================================================================
 // 1. Treasury Overview
@@ -76,23 +105,23 @@ async function renderTreasuryOverviewText(): Promise<string> {
   const o = await getTreasuryOverview();
 
   return (
-    `💰 *${getClubName()} TREASURY OVERVIEW*\n\n` +
-    `*1. Telegram Stars Holdings:*\n` +
-    `• Total Stars Received: *${o.totalStarsReceived.toLocaleString()} ⭐*\n` +
-    `• Pending Holding (< 21 days): *${o.pendingStars.toLocaleString()} ⭐* (~${formatMoney(o.estimatedPendingRewardsCadMinor, "CAD")} est.)\n` +
-    `• Potentially Withdrawable: *${o.potentiallyWithdrawableStars.toLocaleString()} ⭐* (~${formatMoney(o.estimatedWithdrawableRewardsCadMinor, "CAD")} est.)\n` +
-    `• Withdrawn: *${o.withdrawnStars.toLocaleString()} ⭐*\n\n` +
-    `*2. Settled Fiat Cash (CAD):*\n` +
-    `• Net Cash in Bank/Wallet: *${formatMoney(o.settledNetCashCadMinor, "CAD")}*\n` +
-    `• Allocated to Acquisitions (60%): ${formatMoney(o.allocatedAcquisitionsCadMinor, "CAD")}\n` +
-    `• Allocated to Operations (25%): ${formatMoney(o.allocatedOperationsCadMinor, "CAD")}\n` +
-    `• Contingency Reserve (15%): ${formatMoney(o.allocatedReserveCadMinor, "CAD")}\n\n` +
-    `*3. Outlays & Available Budget:*\n` +
-    `• Paid Creator Acquisitions: ${formatMoney(o.paidAcquisitionsCadMinor, "CAD")}\n` +
-    `• Outstanding Commitments: ${formatMoney(o.committedAcquisitionsCadMinor, "CAD")}\n` +
-    `• Total Paid Expenses: ${formatMoney(o.totalPaidExpensesCadMinor, "CAD")}\n` +
-    `• Unreimbursed Admin Outlays: ${formatMoney(o.adminReimbursementsOwedCadMinor, "CAD")}\n\n` +
-    `🎯 *Available Acquisition Budget:* *${formatMoney(o.availableAcquisitionBudgetCadMinor, "CAD")}*`
+    `💰 *APERÇU DE LA TRÉSORERIE ${getClubName()}*\n\n` +
+    `*1. Avoirs en Étoiles Telegram :*\n` +
+    `• Total des Étoiles reçues : *${o.totalStarsReceived.toLocaleString()} ⭐*\n` +
+    `• En période de détention (< 21 jours) : *${o.pendingStars.toLocaleString()} ⭐* (~${formatMoney(o.estimatedPendingRewardsCadMinor, "CAD")} env.)\n` +
+    `• Potentiellement retirables : *${o.potentiallyWithdrawableStars.toLocaleString()} ⭐* (~${formatMoney(o.estimatedWithdrawableRewardsCadMinor, "CAD")} env.)\n` +
+    `• Retirées : *${o.withdrawnStars.toLocaleString()} ⭐*\n\n` +
+    `*2. Encaisse réglée en monnaie fiduciaire (CAD) :*\n` +
+    `• Encaisse nette en banque/portefeuille : *${formatMoney(o.settledNetCashCadMinor, "CAD")}*\n` +
+    `• Affecté aux acquisitions : ${formatMoney(o.allocatedAcquisitionsCadMinor, "CAD")}\n` +
+    `• Affecté à l'exploitation : ${formatMoney(o.allocatedOperationsCadMinor, "CAD")}\n` +
+    `• Réserve de prévoyance : ${formatMoney(o.allocatedReserveCadMinor, "CAD")}\n\n` +
+    `*3. Débours et budget disponible :*\n` +
+    `• Acquisitions de créateurs payées : ${formatMoney(o.paidAcquisitionsCadMinor, "CAD")}\n` +
+    `• Engagements en cours : ${formatMoney(o.committedAcquisitionsCadMinor, "CAD")}\n` +
+    `• Total des dépenses payées : ${formatMoney(o.totalPaidExpensesCadMinor, "CAD")}\n` +
+    `• Débours d'administrateurs non remboursés : ${formatMoney(o.adminReimbursementsOwedCadMinor, "CAD")}\n\n` +
+    `🎯 *Budget d'acquisition disponible :* *${formatMoney(o.availableAcquisitionBudgetCadMinor, "CAD")}*`
   );
 }
 
@@ -121,24 +150,24 @@ treasuryComposer.callbackQuery("admin:treasury_expenses", async (ctx) => {
   const expenses = await listExpenses({ limit: 10 });
   const kb = new InlineKeyboard();
 
-  let text = `📋 *RECENT EXPENSES & OUTLAYS*\n\n`;
+  let text = `📋 *DÉPENSES ET DÉBOURS RÉCENTS*\n\n`;
   if (expenses.length === 0) {
-    text += `_No expenses recorded yet._\n`;
+    text += `_Aucune dépense enregistrée pour le moment._\n`;
   } else {
     for (const exp of expenses) {
-      const payerBadge = exp.payer === "admin_personal" ? "[Personal]" : "[Club]";
+      const payerBadge = exp.payer === "admin_personal" ? "[Personnel]" : "[Club]";
       const statusBadge = `[${exp.status.toUpperCase()}]`;
       text += `• *${exp.description}*\n  ${formatMoney(exp.cadAmountMinor, "CAD")} ${statusBadge} ${payerBadge}\n`;
 
       if (exp.payer === "admin_personal" && exp.reimbursementStatus === "pending") {
-        text += `  ⚠️ _Pending Reimbursement_\n`;
-        kb.text(`Reimburse: ${exp.description.slice(0, 15)}`, `admin:reimburse:${exp.id}`).row();
+        text += `  ⚠️ _Remboursement en attente_\n`;
+        kb.text(`Rembourser : ${exp.description.slice(0, 15)}`, `admin:reimburse:${exp.id}`).row();
       }
     }
   }
 
-  kb.text("➕ Add Expense", "admin:treasury_add_exp")
-    .text("⬅️ Treasury Menu", "admin:treasury_menu");
+  kb.text("➕ Ajouter une dépense", "admin:treasury_add_exp")
+    .text("⬅️ Menu de la trésorerie", "admin:treasury_menu");
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(text, {
@@ -152,19 +181,19 @@ treasuryComposer.callbackQuery(/^admin:reimburse:([a-f0-9-]+)$/, async (ctx) => 
   try {
     const updated = await reimburseAdminExpense(expenseId, ctx.from!.id);
     await ctx.answerCallbackQuery({
-      text: `Reimbursed ${formatMoney(updated.cadAmountMinor, "CAD")}!`,
+      text: `${formatMoney(updated.cadAmountMinor, "CAD")} remboursé !`,
       show_alert: true,
     });
     // Refresh expenses view
     const expenses = await listExpenses({ limit: 10 });
-    const kb = new InlineKeyboard().text("⬅️ Treasury Menu", "admin:treasury_menu");
+    const kb = new InlineKeyboard().text("⬅️ Menu de la trésorerie", "admin:treasury_menu");
     await ctx.editMessageText(
-      `✅ *Expense Reimbursed:*\n${updated.description} (${formatMoney(updated.cadAmountMinor, "CAD")})\n\nSettled cash was debited and admin liability cleared.`,
+      `✅ *Dépense remboursée :*\n${updated.description} (${formatMoney(updated.cadAmountMinor, "CAD")})\n\nL'encaisse réglée a été débitée et la dette envers l'administrateur a été effacée.`,
       { parse_mode: "Markdown", reply_markup: kb }
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await ctx.answerCallbackQuery({ text: `Failed: ${msg}`, show_alert: true });
+    await ctx.answerCallbackQuery({ text: `Échec : ${msg}`, show_alert: true });
   }
 });
 
@@ -175,7 +204,7 @@ treasuryComposer.callbackQuery(/^admin:reimburse:([a-f0-9-]+)$/, async (ctx) => 
 treasuryComposer.callbackQuery("admin:treasury_add_exp", async (ctx) => {
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    `➕ *RECORD NEW EXPENSE*\n\nSelect the expense category:`,
+    `➕ *ENREGISTRER UNE NOUVELLE DÉPENSE*\n\nChoisissez la catégorie de dépense :`,
     {
       parse_mode: "Markdown",
       reply_markup: treasuryExpenseCategoryKeyboard(),
@@ -187,7 +216,7 @@ treasuryComposer.callbackQuery(/^admin:exp_cat:([a-z_]+)$/, async (ctx) => {
   const category = ctx.match[1];
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    `➕ *RECORD EXPENSE — ${category.toUpperCase()}*\n\nWho paid for this expense?`,
+    `➕ *ENREGISTRER UNE DÉPENSE — ${category.toUpperCase()}*\n\nQui a payé cette dépense ?`,
     {
       parse_mode: "Markdown",
       reply_markup: treasuryExpensePayerKeyboard(category),
@@ -201,47 +230,58 @@ treasuryComposer.callbackQuery(/^admin:exp_pyr:([a-z_]+):([a-z_]+)$/, async (ctx
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    `➕ *RECORD EXPENSE: ${category} (${payer})*\n\n` +
-    `Please send the command with amount, currency, and description:\n\n` +
-    `*Command format:*\n` +
+    `➕ *ENREGISTRER UNE DÉPENSE : ${category} (${payer})*\n\n` +
+    `Veuillez envoyer la commande avec le montant, la devise et la description :\n\n` +
+    `*Format de la commande :*\n` +
     `\`/record_expense <amount> <currency> <category> <payer> <description>\`\n\n` +
-    `*Example:*\n` +
+    `*Exemple :*\n` +
     `\`/record_expense 16 CAD ${category} ${payer} Aria Monthly Subscription\``,
     {
       parse_mode: "Markdown",
-      reply_markup: new InlineKeyboard().text("⬅️ Treasury Menu", "admin:treasury_menu"),
+      reply_markup: new InlineKeyboard().text("⬅️ Menu de la trésorerie", "admin:treasury_menu"),
     }
   );
 });
 
 treasuryComposer.command("record_expense", async (ctx) => {
   const text = ctx.message?.text ?? "";
-  const parts = text.split(" ").slice(1);
+  const parts = text.trim().split(/\s+/).slice(1);
 
   if (parts.length < 5) {
     await ctx.reply(
-      `⚠️ *Usage:* \`/record_expense <amount> <currency> <category> <payer> <description>\`\n\n` +
-      `Example: \`/record_expense 16.00 CAD creator_subscription club_funds Aria OnlyFans\``,
+      `⚠️ *Utilisation :* \`/record_expense <amount> <currency> <category> <payer> <description>\`\n\n` +
+      `Exemple : \`/record_expense 16.00 CAD creator_subscription club_funds Aria OnlyFans\`\n` +
+      `Catégories : ${Object.keys(EXPENSE_CATEGORY_LABELS).join(", ")}\n` +
+      `Payeurs : club_funds, admin_personal`,
       { parse_mode: "Markdown" }
     );
     return;
   }
 
-  const rawAmount = parseFloat(parts[0]);
-  const currency = parts[1].toUpperCase() as CurrencyCode;
+  const amountMinor = parseMoneyToMinor(parts[0]);
+  const currency = normalizeCurrency(parts[1]) as CurrencyCode;
   const category = parts[2] as ExpenseCategory;
   const payer = parts[3] as ExpensePayer;
   const description = parts.slice(4).join(" ");
 
-  if (isNaN(rawAmount) || rawAmount <= 0) {
-    await ctx.reply("⚠️ Amount must be a positive number.");
+  if (amountMinor === null || amountMinor <= 0) {
+    await ctx.reply("⚠️ Le montant doit être un nombre positif avec au plus 2 décimales (p. ex. 16,50).");
+    return;
+  }
+  if (!isSupportedExpenseCurrency(currency)) {
+    await ctx.reply("⚠️ Devise non prise en charge. Devises acceptées : CAD, USD, EUR, GBP.");
+    return;
+  }
+  if (!(category in EXPENSE_CATEGORY_LABELS)) {
+    await ctx.reply(`⚠️ Catégorie inconnue. Utilisez l'une des suivantes : ${Object.keys(EXPENSE_CATEGORY_LABELS).join(", ")}`);
+    return;
+  }
+  if (payer !== "club_funds" && payer !== "admin_personal") {
+    await ctx.reply("⚠️ Le payeur doit être `club_funds` ou `admin_personal`.", { parse_mode: "Markdown" });
     return;
   }
 
-  const amountMinor = Math.round(rawAmount * 100);
-  const draftId = crypto.randomUUID();
-
-  expenseDrafts.set(draftId, {
+  const draftId = await saveExpenseDraft({
     description,
     originalAmountMinor: amountMinor,
     originalCurrency: currency,
@@ -251,24 +291,31 @@ treasuryComposer.command("record_expense", async (ctx) => {
   });
 
   const { convertToBaseCurrency } = await import("../../treasury/conversion.ts");
-  const { cadAmountMinor, usdAmountMinor, indicativeStars } =
-    await convertToBaseCurrency(amountMinor, currency);
+  let conv;
+  try {
+    conv = await convertToBaseCurrency(amountMinor, currency);
+  } catch (err) {
+    await ctx.reply(`⚠️ ${err instanceof Error ? err.message : String(err)}`);
+    return;
+  }
+  const { cadAmountMinor, usdAmountMinor, indicativeStars } = conv;
 
   const kb = new InlineKeyboard()
-    .text("✅ Confirm Expense", `admin:exp_cfm:${draftId}`)
+    .text("✅ Confirmer la dépense", `admin:exp_cfm:${draftId}`)
     .row()
-    .text("❌ Cancel", "admin:treasury_menu");
+    .text("❌ Annuler", "admin:treasury_menu");
 
   await ctx.reply(
-    `📝 *CONFIRM EXPENSE ENTRY*\n\n` +
-    `• *Description:* ${description}\n` +
-    `• *Amount:* ${formatMoney(amountMinor, currency)}\n` +
-    `• *Base Reporting (CAD):* ${formatMoney(cadAmountMinor, "CAD")}\n` +
-    `• *USD Equivalent:* ${formatMoney(usdAmountMinor, "USD")}\n` +
-    `• *Indicative Stars:* ~${indicativeStars.toLocaleString()} ⭐ (Informational)\n` +
-    `• *Category:* ${category}\n` +
-    `• *Payer:* ${payer === "club_funds" ? "🏦 Club Funds" : "👤 Admin Personal"}\n\n` +
-    `Confirm to record this expense into the financial ledger:`,
+    `📝 *CONFIRMER L'ENTRÉE DE DÉPENSE*\n\n` +
+    `• *Description :* ${escapeMd(description)}\n` +
+    `• *Montant :* ${formatMoney(amountMinor, currency)}\n` +
+    `• *Devise de présentation (CAD) :* ${formatMoney(cadAmountMinor, "CAD")}\n` +
+    `• *Taux de change :* ${conv.rateToCad} (${conv.rateSource ?? "n/a"} ${conv.rateDate ?? ""})\n` +
+    `• *Équivalent en USD :* ${formatMoney(usdAmountMinor, "USD")}\n` +
+    `• *Étoiles indicatives :* ~${indicativeStars.toLocaleString()} ⭐ (à titre informatif)\n` +
+    `• *Catégorie :* ${category}\n` +
+    `• *Payeur :* ${payer === "club_funds" ? "🏦 Fonds du club" : "👤 Administrateur (personnel)"}\n\n` +
+    `Confirmez pour inscrire cette dépense au registre financier :`,
     {
       parse_mode: "Markdown",
       reply_markup: kb,
@@ -278,10 +325,10 @@ treasuryComposer.command("record_expense", async (ctx) => {
 
 treasuryComposer.callbackQuery(/^admin:exp_cfm:([a-f0-9-]+)$/, async (ctx) => {
   const draftId = ctx.match[1];
-  const draft = expenseDrafts.get(draftId);
+  const draft = await claimExpenseDraft(draftId, ctx.from!.id);
 
   if (!draft) {
-    await ctx.answerCallbackQuery({ text: "Draft expired or already processed.", show_alert: true });
+    await ctx.answerCallbackQuery({ text: "Le brouillon est expiré ou a déjà été traité.", show_alert: true });
     return;
   }
 
@@ -297,23 +344,22 @@ treasuryComposer.callbackQuery(/^admin:exp_cfm:([a-f0-9-]+)$/, async (ctx) => {
       actorId: ctx.from!.id,
     });
 
-    expenseDrafts.delete(draftId);
-    await ctx.answerCallbackQuery({ text: "Expense recorded successfully!" });
+    await ctx.answerCallbackQuery({ text: "Dépense enregistrée avec succès !" });
     await ctx.editMessageText(
-      `✅ *EXPENSE RECORDED SUCCESSFULLY!*\n\n` +
-      `• *ID:* \`${expense.id}\`\n` +
-      `• *Description:* ${expense.description}\n` +
-      `• *Amount:* ${formatMoney(expense.cadAmountMinor, "CAD")}\n` +
-      `• *Payer:* ${expense.payer}\n` +
-      `• *Status:* ${expense.status.toUpperCase()}`,
+      `✅ *DÉPENSE ENREGISTRÉE AVEC SUCCÈS !*\n\n` +
+      `• *ID :* \`${expense.id}\`\n` +
+      `• *Description :* ${escapeMd(expense.description)}\n` +
+      `• *Montant :* ${formatMoney(expense.cadAmountMinor, "CAD")}\n` +
+      `• *Payeur :* ${expense.payer}\n` +
+      `• *Statut :* ${expense.status.toUpperCase()}`,
       {
         parse_mode: "Markdown",
-        reply_markup: new InlineKeyboard().text("📋 View Expenses", "admin:treasury_expenses"),
+        reply_markup: new InlineKeyboard().text("📋 Voir les dépenses", "admin:treasury_expenses"),
       }
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await ctx.answerCallbackQuery({ text: `Failed: ${msg}`, show_alert: true });
+    await ctx.answerCallbackQuery({ text: `Échec : ${msg}`, show_alert: true });
   }
 });
 
@@ -324,69 +370,80 @@ treasuryComposer.callbackQuery(/^admin:exp_cfm:([a-f0-9-]+)$/, async (ctx) => {
 treasuryComposer.callbackQuery("admin:treasury_withdraw", async (ctx) => {
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    `📤 *RECORD WITHDRAWAL & SETTLEMENT*\n\n` +
-    `To record a Stars withdrawal and its settled fiat proceeds, send:\n\n` +
-    `*Command format:*\n` +
+    `📤 *ENREGISTRER UN RETRAIT ET SON RÈGLEMENT*\n\n` +
+    `Pour enregistrer un retrait d'Étoiles et le produit réglé en monnaie fiduciaire, envoyez :\n\n` +
+    `*Format de la commande :*\n` +
     `\`/record_withdrawal <stars> <tonReceived> [netCadSettled]\`\n\n` +
-    `*Example:*\n` +
+    `*Exemple :*\n` +
     `\`/record_withdrawal 5000 12.5 85.00\``,
     {
       parse_mode: "Markdown",
-      reply_markup: new InlineKeyboard().text("⬅️ Treasury Menu", "admin:treasury_menu"),
+      reply_markup: new InlineKeyboard().text("⬅️ Menu de la trésorerie", "admin:treasury_menu"),
     }
   );
 });
 
 treasuryComposer.command("record_withdrawal", async (ctx) => {
-  const parts = (ctx.message?.text ?? "").split(" ").slice(1);
+  const parts = (ctx.message?.text ?? "").trim().split(/\s+/).slice(1);
   if (parts.length < 2) {
     await ctx.reply(
-      `⚠️ *Usage:* \`/record_withdrawal <stars> <tonReceived> [netCadSettled]\`\n\n` +
-      `Example: \`/record_withdrawal 5000 12.5 85.00\``,
+      `⚠️ *Utilisation :* \`/record_withdrawal <stars> <tonReceived> [netCadSettled] [fragmentRef]\`\n\n` +
+      `Exemple : \`/record_withdrawal 5000 12.5 85.00 FRAG123\`\n` +
+      `Omettez le montant en CAD tant que le TON n'a pas été réellement converti en espèces.`,
       { parse_mode: "Markdown" }
     );
     return;
   }
 
-  const starsQuantity = parseInt(parts[0], 10);
-  const tonReceived = parseFloat(parts[1]);
-  const netCad = parts[2] ? parseFloat(parts[2]) : undefined;
+  const starsQuantity = /^\d+$/.test(parts[0]) ? Number(parts[0]) : NaN;
+  const tonNano = parseTonToNano(parts[1]);
+  const netMinor = parts[2] ? parseMoneyToMinor(parts[2]) : undefined;
+  const fragmentReference = parts[3];
 
-  if (isNaN(starsQuantity) || starsQuantity <= 0 || isNaN(tonReceived) || tonReceived <= 0) {
-    await ctx.reply("⚠️ Stars quantity and TON received must be positive numbers.");
+  if (!Number.isInteger(starsQuantity) || starsQuantity <= 0 || tonNano === null || tonNano <= 0) {
+    await ctx.reply("⚠️ Les Étoiles doivent être un nombre entier et le TON, un nombre positif (maximum 9 décimales).");
+    return;
+  }
+  if (parts[2] && (netMinor === null || netMinor === undefined || netMinor <= 0)) {
+    await ctx.reply("⚠️ Le montant réglé en CAD doit être positif, avec au plus 2 décimales.");
     return;
   }
 
-  const tonNano = Math.round(tonReceived * 1_000_000_000);
-  const settlement = netCad && netCad > 0 ? {
-    settlementDate: new Date().toISOString(),
-    amountExchangedTonNano: tonNano,
-    currencyReceived: "CAD",
-    netFundsReceivedMinor: Math.round(netCad * 100),
-    effectiveRate: netCad / tonReceived,
-    feeMinor: 0,
-  } : undefined;
+  const settlement = netMinor
+    ? {
+        settlementDate: new Date().toISOString(),
+        amountExchangedTonNano: tonNano,
+        currencyReceived: "CAD",
+        netFundsReceivedMinor: netMinor,
+        // CAD per TON, informational only (cash is the entered net amount)
+        effectiveRate: netMinor / 100 / (tonNano / 1_000_000_000),
+        feeMinor: 0,
+      }
+    : undefined;
 
   try {
     const record = await recordWithdrawalWithSettlement({
       starsQuantity,
       tonReceivedNano: tonNano,
+      fragmentReference,
       settlement,
       adminId: ctx.from!.id,
     });
 
-    let msg = `✅ *WITHDRAWAL RECORDED!*\n\n• *Stars Withdrawn:* ${record.starsQuantity} ⭐\n• *TON Received:* ${tonReceived} TON\n• *Status:* ${record.status.toUpperCase()}\n`;
+    let msg = `✅ *RETRAIT ENREGISTRÉ !*\n\n• *Étoiles retirées :* ${record.starsQuantity} ⭐\n• *TON reçus :* ${tonNano / 1_000_000_000} TON\n• *Statut :* ${record.status.toUpperCase()}\n`;
     if (record.settlement) {
-      msg += `• *Net Settled Cash:* ${formatMoney(record.settlement.netFundsReceivedMinor, "CAD")}\n\nAllocated funds have been credited to acquisitions, operations, and reserve!`;
+      msg += `• *Encaisse nette réglée :* ${formatMoney(record.settlement.netFundsReceivedMinor, "CAD")}\n\nLes fonds répartis ont été crédités aux acquisitions, à l'exploitation et à la réserve !`;
+    } else {
+      msg += `\n_Aucune encaisse n'est comptabilisée tant que le produit n'est pas réglé._`;
     }
 
     await ctx.reply(msg, {
       parse_mode: "Markdown",
-      reply_markup: new InlineKeyboard().text("💰 Treasury Overview", "admin:treasury_menu"),
+      reply_markup: new InlineKeyboard().text("💰 Aperçu de la trésorerie", "admin:treasury_menu"),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await ctx.reply(`⚠️ Failed to record withdrawal: ${msg}`);
+    await ctx.reply(`⚠️ Échec de l'enregistrement du retrait : ${msg}`);
   }
 });
 
@@ -395,21 +452,24 @@ treasuryComposer.command("record_withdrawal", async (ctx) => {
 // ==============================================================================
 
 treasuryComposer.callbackQuery("admin:treasury_reconcile", async (ctx) => {
-  await ctx.answerCallbackQuery({ text: "Reconciling Stars transactions..." });
+  await ctx.answerCallbackQuery({ text: "Rapprochement des transactions d'Étoiles en cours..." });
 
   const holdingResult = await reconcileStarHoldingStatuses();
   const apiResult = await reconcileStarTransactionsFromApi(ctx.api);
 
   await ctx.reply(
-    `🔄 *STARS RECONCILIATION COMPLETE*\n\n` +
-    `• *Eligible 21-Day Transitions:* ${holdingResult.transitionedCount} transactions advanced to withdrawable\n` +
-    `• *Currently Pending (<21 days):* ${holdingResult.totalPendingCount} transactions\n` +
-    `• *Withdrawable Estimate (>=21 days):* ${holdingResult.totalWithdrawableCount} transactions\n` +
-    `• *New API Transactions Recorded:* ${apiResult.newTransactionsRecorded}\n` +
-    `• *Duplicates Skipped:* ${apiResult.duplicatesSkipped}`,
+    `🔄 *RAPPROCHEMENT DES ÉTOILES TERMINÉ*\n\n` +
+    `• *Transitions admissibles (21 jours) :* ${holdingResult.transitionedCount} transactions devenues retirables\n` +
+    `• *Actuellement en attente (< 21 jours) :* ${holdingResult.totalPendingCount} transactions\n` +
+    `• *Estimation des retirables (≥ 21 jours) :* ${holdingResult.totalWithdrawableCount} transactions\n` +
+    `• *Nouvelles transactions API enregistrées :* ${apiResult.newTransactionsRecorded}\n` +
+    `• *Remboursements appliqués :* ${apiResult.refundsApplied}\n` +
+    `• *Retraits observés :* ${apiResult.withdrawalsObserved}\n` +
+    `• *Doublons ignorés :* ${apiResult.duplicatesSkipped}` +
+    (apiResult.errors.length ? `\n⚠️ ${apiResult.errors.join("; ")}` : ""),
     {
       parse_mode: "Markdown",
-      reply_markup: new InlineKeyboard().text("💰 Treasury Overview", "admin:treasury_menu"),
+      reply_markup: new InlineKeyboard().text("💰 Aperçu de la trésorerie", "admin:treasury_menu"),
     }
   );
 });
@@ -424,7 +484,7 @@ treasuryComposer.callbackQuery("admin:treasury_reports", async (ctx) => {
   const preview = formatPrivateMemberReport(report);
 
   await ctx.editMessageText(
-    `📊 *MONTHLY TREASURY REPORT PREVIEW*\n\n${preview}`,
+    `📊 *APERÇU DU RAPPORT MENSUEL DE TRÉSORERIE*\n\n${preview}`,
     {
       parse_mode: "Markdown",
       reply_markup: treasuryReportsKeyboard(report.period),
@@ -436,16 +496,16 @@ treasuryComposer.callbackQuery(/^admin:report_pub:([0-9-]+)$/, async (ctx) => {
   const period = ctx.match[1];
   const report = await getTreasuryReport(period);
   if (!report) {
-    await ctx.answerCallbackQuery({ text: "Report not found.", show_alert: true });
+    await ctx.answerCallbackQuery({ text: "Rapport introuvable.", show_alert: true });
     return;
   }
 
   const success = await publishMonthlyReportToChannel(ctx.api, report);
   if (success) {
-    await ctx.answerCallbackQuery({ text: "Report published to channel!" });
-    await ctx.reply(`📢 *Monthly Treasury Report for ${period} successfully published to channel!*`);
+    await ctx.answerCallbackQuery({ text: "Rapport publié dans le canal !" });
+    await ctx.reply(`📢 *Le rapport mensuel de trésorerie pour ${period} a été publié dans le canal avec succès !*`);
   } else {
-    await ctx.answerCallbackQuery({ text: "Failed to publish report to channel.", show_alert: true });
+    await ctx.answerCallbackQuery({ text: "Échec de la publication du rapport dans le canal.", show_alert: true });
   }
 });
 
@@ -453,7 +513,7 @@ treasuryComposer.callbackQuery(/^admin:report_audit:([0-9-]+)$/, async (ctx) => 
   const period = ctx.match[1];
   const report = await getTreasuryReport(period);
   if (!report) {
-    await ctx.answerCallbackQuery({ text: "Report not found.", show_alert: true });
+    await ctx.answerCallbackQuery({ text: "Rapport introuvable.", show_alert: true });
     return;
   }
 
@@ -461,7 +521,7 @@ treasuryComposer.callbackQuery(/^admin:report_audit:([0-9-]+)$/, async (ctx) => 
   const detailed = formatDetailedAdminReport(report);
   await ctx.reply(detailed, {
     parse_mode: "Markdown",
-    reply_markup: new InlineKeyboard().text("⬅️ Treasury Menu", "admin:treasury_menu"),
+    reply_markup: new InlineKeyboard().text("⬅️ Menu de la trésorerie", "admin:treasury_menu"),
   });
 });
 
@@ -477,14 +537,14 @@ treasuryComposer.callbackQuery("admin:treasury_allocations", async (ctx) => {
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    `⚙️ *TREASURY ALLOCATIONS & VALUATION*\n\n` +
-    `*Current Fund Allocation Percentages:*\n` +
-    `• Creator Acquisitions: *${alloc.acquisitionPct}%*\n` +
-    `• Platform Operations: *${alloc.operationsPct}%*\n` +
-    `• Protected Reserve: *${alloc.reservePct}%*\n\n` +
-    `*Stars Reward Reporting Valuation:*\n` +
-    `• Current Reference: *US$${val.starsRewardValuationUsd} / Star*\n\n` +
-    `Select a preset to adjust future allocation distributions:`,
+    `⚙️ *RÉPARTITION DE LA TRÉSORERIE ET ÉVALUATION*\n\n` +
+    `*Pourcentages actuels de répartition des fonds :*\n` +
+    `• Acquisitions de créateurs : *${alloc.acquisitionPct}%*\n` +
+    `• Exploitation de la plateforme : *${alloc.operationsPct}%*\n` +
+    `• Réserve protégée : *${alloc.reservePct}%*\n\n` +
+    `*Évaluation des récompenses en Étoiles (rapports) :*\n` +
+    `• Référence actuelle : *US$${val.starsRewardValuationUsd} / Étoile*\n\n` +
+    `Choisissez un préréglage pour ajuster les prochaines répartitions :`,
     {
       parse_mode: "Markdown",
       reply_markup: treasuryAllocationsKeyboard(),
@@ -504,16 +564,16 @@ treasuryComposer.callbackQuery(/^admin:alloc_preset:([0-9_]+)$/, async (ctx) => 
     updatedBy: ctx.from!.id,
   });
 
-  await ctx.answerCallbackQuery({ text: `Allocations updated to ${acq}/${ops}/${res}%!` });
+  await ctx.answerCallbackQuery({ text: `Répartition mise à jour : ${acq}/${ops}/${res} % !` });
   await ctx.editMessageText(
-    `✅ *TREASURY ALLOCATIONS UPDATED!*\n\n` +
-    `• Acquisitions: *${acq}%*\n` +
-    `• Operations: *${ops}%*\n` +
-    `• Contingency Reserve: *${res}%*\n\n` +
-    `This allocation rule applies prospectively to all new settlements.`,
+    `✅ *RÉPARTITION DE LA TRÉSORERIE MISE À JOUR !*\n\n` +
+    `• Acquisitions : *${acq} %*\n` +
+    `• Exploitation : *${ops} %*\n` +
+    `• Réserve de prévoyance : *${res} %*\n\n` +
+    `Cette règle de répartition s'applique de façon prospective à tous les nouveaux règlements.`,
     {
       parse_mode: "Markdown",
-      reply_markup: new InlineKeyboard().text("💰 Treasury Overview", "admin:treasury_menu"),
+      reply_markup: new InlineKeyboard().text("💰 Aperçu de la trésorerie", "admin:treasury_menu"),
     }
   );
 });
@@ -523,32 +583,35 @@ treasuryComposer.callbackQuery(/^admin:alloc_preset:([0-9_]+)$/, async (ctx) => 
 // ==============================================================================
 
 treasuryComposer.command("price", async (ctx) => {
-  const parts = (ctx.message?.text ?? "").split(" ").slice(1);
+  const parts = (ctx.message?.text ?? "").trim().split(/\s+/).slice(1);
   if (parts.length < 2) {
     await ctx.reply(
-      `⚠️ *Usage:* \`/price <candidateId> <amount> [currency]\`\n\n` +
-      `Example: \`/price 1234-abcd 20.00 CAD\``,
+      `⚠️ *Utilisation :* \`/price <candidateId> <amount> [currency]\`\n\n` +
+      `Exemple : \`/price 1234-abcd 20.00 CAD\``,
       { parse_mode: "Markdown" }
     );
     return;
   }
 
   const candidateId = parts[0];
-  const rawAmount = parseFloat(parts[1]);
-  const currency = (parts[2] ?? "CAD").toUpperCase();
+  const amountMinor = parseMoneyToMinor(parts[1]);
+  const currency = normalizeCurrency(parts[2] ?? "CAD");
 
-  if (isNaN(rawAmount) || rawAmount <= 0) {
-    await ctx.reply("⚠️ Amount must be a positive number.");
+  if (amountMinor === null || amountMinor <= 0) {
+    await ctx.reply("⚠️ Le montant doit être un nombre positif avec au plus 2 décimales.");
+    return;
+  }
+  if (!isSupportedExpenseCurrency(currency)) {
+    await ctx.reply("⚠️ Devise non prise en charge. Devises acceptées : CAD, USD, EUR, GBP.");
     return;
   }
 
   const candidate = await getWantedCandidate(candidateId);
   if (!candidate) {
-    await ctx.reply(`⚠️ Candidate with ID \`${candidateId}\` not found.`);
+    await ctx.reply(`⚠️ Le candidat portant l'ID \`${candidateId}\` est introuvable.`);
     return;
   }
 
-  const amountMinor = Math.round(rawAmount * 100);
   const { convertToBaseCurrency } = await import("../../treasury/conversion.ts");
   const { cadAmountMinor } = await convertToBaseCurrency(amountMinor, currency);
 
@@ -556,17 +619,128 @@ treasuryComposer.command("price", async (ctx) => {
     expectedPriceMinor: amountMinor,
     priceCurrency: currency,
     expectedCadMinor: cadAmountMinor,
-    rightsVerified: true,
+    // Rights must be confirmed explicitly by the administrator, never implied by pricing.
+    rightsVerified: candidate.rightsVerified ?? false,
   });
 
   const afford = await evaluateCandidateAffordability(candidateId);
 
   await ctx.reply(
-    `🏷️ *CANDIDATE PRICING UPDATED*\n\n` +
-    `• *Creator:* ${candidate.name}\n` +
-    `• *Expected Price:* ${formatMoney(amountMinor, currency)} (${formatMoney(cadAmountMinor, "CAD")})\n` +
-    `• *Affordability:* ${afford.affordable ? "✅ Affordable within Budget" : `❌ Shortfall: ${formatMoney(afford.shortfallMinor, "CAD")}`}\n` +
-    `• *Available Acquisition Budget:* ${formatMoney(afford.availableBudgetCadMinor, "CAD")}`,
+    `🏷️ *PRIX DU CANDIDAT MIS À JOUR*\n\n` +
+    `• *Créateur :* ${escapeMd(candidate.name)}\n` +
+    `• *Prix prévu :* ${formatMoney(amountMinor, currency)} (${formatMoney(cadAmountMinor, "CAD")})\n` +
+    `• *Capacité financière :* ${afford.affordable ? "✅ Abordable selon le budget" : `❌ Manque : ${formatMoney(afford.shortfallMinor, "CAD")}`}\n` +
+    `• *Budget d'acquisition disponible :* ${formatMoney(afford.availableBudgetCadMinor, "CAD")}`,
     { parse_mode: "Markdown" }
   );
+});
+
+// ==============================================================================
+// 9. Expense corrections & acquisition workflow
+// ==============================================================================
+
+treasuryComposer.command("refund_expense", async (ctx) => {
+  const parts = (ctx.message?.text ?? "").trim().split(/\s+/).slice(1);
+  if (parts.length < 1) {
+    await ctx.reply("Utilisation : `/refund_expense <expenseId> [montant]` (omettez le montant pour un remboursement complet)", {
+      parse_mode: "Markdown",
+    });
+    return;
+  }
+  const amountMinor = parts[1] ? parseMoneyToMinor(parts[1]) : undefined;
+  if (parts[1] && (amountMinor === null || amountMinor === undefined)) {
+    await ctx.reply("⚠️ Montant de remboursement invalide.");
+    return;
+  }
+  try {
+    const adj = await refundExpense({
+      expenseId: parts[0],
+      amountMinor: amountMinor ?? undefined,
+      actorId: ctx.from!.id,
+    });
+    await ctx.reply(`✅ Remboursement de ${formatMoney(-adj.cadAmountMinor, "CAD")} enregistré pour la dépense \`${parts[0]}\`.`, {
+      parse_mode: "Markdown",
+    });
+  } catch (err) {
+    await ctx.reply(`⚠️ ${err instanceof Error ? err.message : String(err)}`);
+  }
+});
+
+treasuryComposer.command("cancel_expense", async (ctx) => {
+  const id = (ctx.message?.text ?? "").trim().split(/\s+/)[1];
+  if (!id) {
+    await ctx.reply("Utilisation : `/cancel_expense <expenseId>`", { parse_mode: "Markdown" });
+    return;
+  }
+  try {
+    await cancelExpense(id, ctx.from!.id);
+    await ctx.reply("✅ Dépense annulée et tout budget réservé a été libéré.");
+  } catch (err) {
+    await ctx.reply(`⚠️ ${err instanceof Error ? err.message : String(err)}`);
+  }
+});
+
+// Approve the winning candidate: reserves budget (no purchase happens automatically).
+treasuryComposer.callbackQuery(/^admin:acq_approve:([a-f0-9-]+)$/, async (ctx) => {
+  try {
+    const { candidate, commitmentExpense } = await approveCandidateAcquisition(
+      ctx.match[1],
+      ctx.from!.id
+    );
+    await ctx.answerCallbackQuery({ text: "Budget réservé." });
+    await ctx.reply(
+      `✅ *Acquisition approuvée :* ${escapeMd(candidate.name)}\n` +
+      `${formatMoney(commitmentExpense.cadAmountMinor, "CAD")} du budget d'acquisition ont été réservés.\n\n` +
+      `_Rien n'a été acheté. Effectuez l'achat vous-même, puis confirmez le paiement ci-dessous._`,
+      {
+        parse_mode: "Markdown",
+        reply_markup: new InlineKeyboard()
+          .text("💳 Payé avec les fonds du club", `admin:acq_paid:${candidate.id}:club_funds`)
+          .row()
+          .text("👤 J'ai payé personnellement", `admin:acq_paid:${candidate.id}:admin_personal`)
+          .row()
+          .text("↩️ Annuler et libérer le budget", `admin:acq_cancel:${candidate.id}`),
+      }
+    );
+  } catch (err) {
+    await ctx.answerCallbackQuery({
+      text: `Échec : ${err instanceof Error ? err.message : String(err)}`.slice(0, 190),
+      show_alert: true,
+    });
+  }
+});
+
+treasuryComposer.callbackQuery(/^admin:acq_paid:([a-f0-9-]+):(club_funds|admin_personal)$/, async (ctx) => {
+  try {
+    const { candidate, expense } = await confirmCandidateAcquisitionPaid({
+      candidateId: ctx.match[1],
+      payer: ctx.match[2] as ExpensePayer,
+      adminId: ctx.from!.id,
+    });
+    await ctx.answerCallbackQuery({ text: "Paiement confirmé." });
+    await ctx.reply(
+      `🎉 *${escapeMd(candidate.name)}* marqué comme acquis. Payé : ${formatMoney(expense.cadAmountMinor, "CAD")} ` +
+      `(${expense.payer === "club_funds" ? "fonds du club" : "personnel de l'administrateur — remboursement en attente"}).`,
+      { parse_mode: "Markdown" }
+    );
+  } catch (err) {
+    await ctx.answerCallbackQuery({
+      text: `Échec : ${err instanceof Error ? err.message : String(err)}`.slice(0, 190),
+      show_alert: true,
+    });
+  }
+});
+
+treasuryComposer.callbackQuery(/^admin:acq_cancel:([a-f0-9-]+)$/, async (ctx) => {
+  try {
+    const { cancelCandidateAcquisition } = await import("../../treasury/service.ts");
+    const candidate = await cancelCandidateAcquisition(ctx.match[1], ctx.from!.id);
+    await ctx.answerCallbackQuery({ text: "Engagement libéré." });
+    await ctx.reply(`↩️ L'engagement pour *${escapeMd(candidate.name)}* a été libéré.`, { parse_mode: "Markdown" });
+  } catch (err) {
+    await ctx.answerCallbackQuery({
+      text: `Échec : ${err instanceof Error ? err.message : String(err)}`.slice(0, 190),
+      show_alert: true,
+    });
+  }
 });
