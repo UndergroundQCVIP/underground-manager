@@ -256,6 +256,17 @@ export async function registerOrRepairTopic(
 
   let creator = await getCreatorByTopic(chatId, topicId);
 
+  // One unified directory: a Retro topic may not duplicate a creator that already exists.
+  if (!creator && collectionForChat(chatId) === "retro") {
+    const sameName = await getCreatorByName(trimmed);
+    if (sameName) {
+      throw new Error(
+        `« ${sameName.name} » existe déjà (${(sameName.collection ?? "regular") === "retro" ? "Retro" : "Regular"}). ` +
+        `Utilisez « Passer à Retro » pour déplacer ce créateur, ou /relink_creator pour le relier à ce sujet.`
+      );
+    }
+  }
+
   if (creator) {
     creator = (await updateCreatorName(creator.id, trimmed))!;
   } else {

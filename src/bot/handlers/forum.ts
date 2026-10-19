@@ -59,12 +59,26 @@ forumComposer.on(["message:photo", "message:video"], async (ctx) => {
   if (threadId && senderId) {
     try {
       const msg = ctx.message;
-      await handleMediaUpload(ctx.chat.id, threadId, senderId, msg.date, {
+      const media = {
         messageId: msg.message_id,
-        kind: msg.photo ? "photo" : "video",
+        kind: (msg.photo ? "photo" : "video") as "photo" | "video",
         mediaGroupId: msg.media_group_id,
         hasCaption: !!msg.caption,
-      });
+      };
+      let creator = await handleMediaUpload(ctx.chat.id, threadId, senderId, msg.date, media);
+
+      // A topic that existed before the bot was in the forum was never registered. Telegram
+      // includes the topic's own name on messages posted inside it, so an ADMINISTRATOR's
+      // first upload registers it (Regular or Retro) and is then counted — no manual step.
+      if (!creator && isAdministrator(senderId)) {
+        const topicName = msg.reply_to_message?.forum_topic_created?.name;
+        if (topicName) {
+          const registered = await handleForumTopicCreated(ctx.chat.id, threadId, topicName);
+          if (registered) {
+            creator = await handleMediaUpload(ctx.chat.id, threadId, senderId, msg.date, media);
+          }
+        }
+      }
     } catch (err) {
       console.error("Error handling creator media upload:", err);
     }
