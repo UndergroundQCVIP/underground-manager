@@ -192,3 +192,112 @@ Deno.test("DIRECTORY — Menu explains how to register Retro when none is regist
     await kv.close();
   }
 });
+
+function groupCommand(chatId: number, userId: number, topicId: number, body: string, topicName: string | null, anonymous = false) {
+  const chat = { id: chatId, type: "supergroup" as const, title: "Forum", is_forum: true };
+  return {
+    update_id: 700000 + topicId,
+    message: {
+      message_id: 3000 + topicId,
+      date: Math.floor(Date.now() / 1000),
+      chat,
+      from: anonymous
+        ? { id: 1087968824, is_bot: true, first_name: "Group", username: "GroupAnonymousBot" }
+        : { id: userId, is_bot: false, first_name: "U" },
+      ...(anonymous ? { sender_chat: chat } : {}),
+      message_thread_id: topicId,
+      is_topic_message: true,
+      text: body,
+      entities: [{ type: "bot_command" as const, offset: 0, length: body.split(" ")[0].length }],
+      ...(topicName
+        ? { reply_to_message: { message_id: topicId, date: 0, chat, message_thread_id: topicId, forum_topic_created: { name: topicName, icon_color: 0 } } }
+        : {}),
+    },
+  };
+}
+
+Deno.test("RETRO — /register_here inside a topic registers it (name from the topic, or given explicitly); strangers are ignored", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    const { bot, calls } = makeBot();
+    await bot.handleUpdate(groupCommand(RETRO_CHAT, ADMIN, 71, "/register_here", "Sophie") as never);
+    const a = await getCreatorByTopic(RETRO_CHAT, 71);
+    assertEquals(a?.name, "Sophie");
+    assertEquals(a?.collection, "retro");
+    assertEquals(a?.hasContent, true);
+    assertStringIncludes(JSON.stringify(calls.filter((x) => x.method === "sendMessage")), "Retro");
+
+    // Topic name not provided by Telegram → explicit name
+    await bot.handleUpdate(groupCommand(RETRO_CHAT, ADMIN, 72, "/register_here Camille", null) as never);
+    assertEquals((await getCreatorByTopic(RETRO_CHAT, 72))?.name, "Camille");
+    // ...or a clear request for it
+    calls.length = 0;
+    await bot.handleUpdate(groupCommand(RETRO_CHAT, ADMIN, 73, "/register_here", null) as never);
+    assertEquals(await getCreatorByTopic(RETRO_CHAT, 73), null);
+    assertStringIncludes(JSON.stringify(calls.filter((x) => x.method === "sendMessage")), "Précisez");
+
+    // Anonymous admin works; a non-admin does nothing at all
+    await bot.handleUpdate(groupCommand(RETRO_CHAT, 0, 74, "/register_here", "Iris", true) as never);
+    assertEquals((await getCreatorByTopic(RETRO_CHAT, 74))?.name, "Iris");
+    calls.length = 0;
+    await bot.handleUpdate(groupCommand(RETRO_CHAT, 4242, 75, "/register_here", "Nope") as never);
+    assertEquals(await getCreatorByTopic(RETRO_CHAT, 75), null);
+    assertEquals(calls.filter((x) => x.method === "sendMessage").length, 0);
+
+    // The Regular forum works the same way
+    await bot.handleUpdate(groupCommand(REGULAR_CHAT, ADMIN, 76, "/register_here", "Emma") as never);
+    assertEquals((await getCreatorByTopic(REGULAR_CHAT, 76))?.collection, "regular");
+    assertEquals((await listCreators()).length, 4);
+  } finally {
+    await kv.close();
+  }
+});
+
+Deno.test("RETRO — If the Retro forum ID is missing from the running bot's configuration, admins are told exactly that", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    const { setConfigForTesting } = await import("../src/config.ts");
+    const { MOCK_CONFIG } = await import("./test_helpers.ts");
+    setConfigForTesting({ ...MOCK_CONFIG, TELEGRAM_RETRO_FORUM_CHAT_ID: 0 });
+    const { bot, calls } = makeBot();
+
+    // Upload in an unmanaged forum → one clear explanation (and only one per day)
+    await bot.handleUpdate(groupPhoto(RETRO_CHAT, ADMIN, 80, "Nova", 930) as never);
+    await bot.handleUpdate(groupPhoto(RETRO_CHAT, ADMIN, 80, "Nova", 931) as never);
+    const hints = calls.filter((x) => x.method === "sendMessage");
+    assertEquals(hints.length, 1);
+    assertStringIncludes(String(hints[0].payload.text), "TELEGRAM_RETRO_FORUM_CHAT_ID");
+
+    // /register_here says so too
+    calls.length = 0;
+    await bot.handleUpdate(groupCommand(RETRO_CHAT, ADMIN, 81, "/register_here", "Nova") as never);
+    assertStringIncludes(JSON.stringify(calls.filter((x) => x.method === "sendMessage")), "n'est pas géré");
+    assertEquals((await listCreators()).length, 0);
+
+    // The directory menu shows the live configuration state
+    calls.length = 0;
+    await bot.handleUpdate(cb(ADMIN, "admin:sync_dir_menu") as never);
+    assertStringIncludes(String((calls.filter((x) => x.method === "editMessageText").at(-1)!.payload as { text: string }).text), "NON — définissez TELEGRAM_RETRO_FORUM_CHAT_ID");
+  } finally {
+    await kv.close();
+  }
+});
+
+Deno.test("RETRO — A managed but unregistered topic gets a one-time hint to use /register_here", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    const { bot, calls } = makeBot();
+    // Telegram did not tell us the topic's name → cannot auto-register → hint
+    await bot.handleUpdate(groupPhoto(RETRO_CHAT, ADMIN, 90, null, 940) as never);
+    await bot.handleUpdate(groupPhoto(RETRO_CHAT, ADMIN, 90, null, 941) as never);
+    const hints = calls.filter((x) => x.method === "sendMessage");
+    assertEquals(hints.length, 1);
+    assertStringIncludes(String(hints[0].payload.text), "/register_here");
+    // a non-admin's upload never triggers a hint
+    calls.length = 0;
+    await bot.handleUpdate(groupPhoto(RETRO_CHAT, 4242, 91, null, 942) as never);
+    assertEquals(calls.filter((x) => x.method === "sendMessage").length, 0);
+  } finally {
+    await kv.close();
+  }
+});

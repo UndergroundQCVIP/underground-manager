@@ -4,7 +4,7 @@
 
 import { Composer, InlineKeyboard } from "grammy";
 import { formatTorontoDate } from "../../util/time.ts";
-import { getClubName } from "../../config.ts";
+import { getClubName, getConfig } from "../../config.ts";
 import { adminRouteGuard } from "../middleware/auth.ts";
 import {
   adminMenuKeyboard,
@@ -609,6 +609,7 @@ adminComposer.callbackQuery("admin:creator_register_help", async (ctx) => {
     `📝 *INSCRIRE UN CRÉATEUR*\n\n` +
     `Les nouveaux sujets créés dans le forum Regular ou Retro sont inscrits automatiquement.\n` +
     `Les sujets déjà existants sont aussi inscrits automatiquement dès qu'un administrateur y publie une photo ou une vidéo.\n` +
+    `*Le plus simple :* tapez \`/register_here\` à l'intérieur du sujet du créateur (en tant qu'administrateur).\n` +
     `Pour associer un sujet existant manuellement :\n\`/register_creator <id_sujet> <nom>\` (Regular)\n\`/register_creator retro <id_sujet> <nom>\` (Retro)\n` +
     `_L'ID du sujet est le dernier nombre d'un lien de message du sujet (t.me/c/…/ID_SUJET/…)._`,
     { parse_mode: "Markdown", reply_markup: new InlineKeyboard().text("⬅️ Créateurs", "admin:creators_menu") }
@@ -658,6 +659,7 @@ adminComposer.callbackQuery("admin:sync_dir_menu", async (ctx) => {
   await ctx.editMessageText(
     `📚 *RÉPERTOIRE*\n\n` +
     `• Créateurs listés : ${listed.length} (Regular ${listed.length - retro} · Retro ${retro})\n` +
+    `• Forum Retro configuré dans le robot en ligne : ${getConfig().TELEGRAM_RETRO_FORUM_CHAT_ID ? `oui (…${String(getConfig().TELEGRAM_RETRO_FORUM_CHAT_ID).slice(-4)})` : "⚠️ NON — définissez TELEGRAM_RETRO_FORUM_CHAT_ID dans Deno Deploy"}\n` +
     `• Retro inscrits : ${retroRegistered.length}${retroHidden ? ` (dont ${retroHidden} sans contenu détecté, donc non listés)` : ""}\n` +
     (state.lastError ? `• ⚠️ Dernière erreur de synchronisation : ${escapeMd(state.lastError)}\n` : "") +
     (retroRegistered.length === 0
