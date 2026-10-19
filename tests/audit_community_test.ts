@@ -156,7 +156,7 @@ Deno.test("AUDIT VOTING — only one ballot may be open; losers return to the po
     const [a, b, c] = await twoCandidates("A", "B", "C");
     for (const u of [11, 12, 13]) await paid(u);
     const ballot = await prepareMonthlyBallot({ adminId: 1 });
-    await assertRejects(() => prepareMonthlyBallot({ adminId: 1 }), Error, "already open");
+    await assertRejects(() => prepareMonthlyBallot({ adminId: 1 }), Error, "déjà ouvert");
 
     await castVote({ userId: 11, ballotId: ballot.id, candidateId: a.id });
     await castVote({ userId: 12, ballotId: ballot.id, candidateId: a.id });
@@ -172,7 +172,7 @@ Deno.test("AUDIT VOTING — only one ballot may be open; losers return to the po
 
     api.sendError = null;
     assertEquals(await retryUnannouncedBallots(api), 1);
-    assertEquals(api.sentMessages.filter((m) => String(m.text).includes("Winner")).length, 1);
+    assertEquals(api.sentMessages.filter((m) => String(m.text).includes("Gagnant")).length, 1);
     assert((await getBallot(ballot.id))!.resultsAnnouncedAt);
     assertEquals(await retryUnannouncedBallots(api), 0);
 

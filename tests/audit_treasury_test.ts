@@ -99,7 +99,7 @@ Deno.test("AUDIT TREASURY — duplicate withdrawal reference and identical doubl
     await settle(10000, "FRAG-9");
     await assertRejects(() => settle(10000, "FRAG-9"), Error, "already recorded");
     await settle(7777); // first unreferenced one is fine
-    await assertRejects(() => settle(7777), Error, "identical withdrawal");
+    await assertRejects(() => settle(7777), Error, "retrait identique");
     assertEquals((await getTreasuryOverview()).settledNetCashCadMinor, 10000 + 7777);
   } finally {
     await kv.close();
@@ -234,14 +234,14 @@ Deno.test("AUDIT TREASURY — currencies: unsupported/unknown rejected, provenan
   try {
     await assertRejects(() => recordExpenseWithJournal({
       description: "x", originalAmountMinor: 1000, originalCurrency: "JPY", category: "other",
-      status: "paid", payer: "club_funds", actorId: ADMIN }), Error, "Unsupported currency");
-    await assertRejects(() => getRate("XYZ", "CAD"), Error, "No exchange rate");
+      status: "paid", payer: "club_funds", actorId: ADMIN }), Error, "Devise non prise en charge");
+    await assertRejects(() => getRate("XYZ", "CAD"), Error, "Aucun taux de change");
     await assertRejects(() => recordExpenseWithJournal({
       description: "x", originalAmountMinor: 1000, originalCurrency: "CAD", category: "bogus" as never,
-      status: "paid", payer: "club_funds", actorId: ADMIN }), Error, "category");
+      status: "paid", payer: "club_funds", actorId: ADMIN }), Error, "Catégorie");
     await assertRejects(() => recordExpenseWithJournal({
       description: "x", originalAmountMinor: 1000, originalCurrency: "CAD", category: "other",
-      status: "paid", payer: "nobody" as never, actorId: ADMIN }), Error, "payer");
+      status: "paid", payer: "nobody" as never, actorId: ADMIN }), Error, "Payeur");
 
     const e = await recordExpenseWithJournal({
       description: "EU hosting", originalAmountMinor: 1999, originalCurrency: "eur", category: "platform_operations",
@@ -273,7 +273,7 @@ Deno.test("AUDIT TREASURY — refunds are linked adjustments; ledger and overvie
     assertEquals(o.cashOnHandCadMinor, 100000 - 3500);
 
     await refundExpense({ expenseId: e.id, actorId: ADMIN }); // remainder
-    await assertRejects(() => refundExpense({ expenseId: e.id, actorId: ADMIN }), Error, "fully refunded");
+    await assertRejects(() => refundExpense({ expenseId: e.id, actorId: ADMIN }), Error, "entièrement remboursée");
     await assertRejects(() => refundExpense({ expenseId: e.id, amountMinor: 1, actorId: ADMIN }), Error);
     o = await getTreasuryOverview();
     assertEquals(o.paidAcquisitionsCadMinor, 0);
@@ -317,13 +317,13 @@ Deno.test("AUDIT ACQUISITIONS — unpriced, wrong-status and double approvals ar
   try {
     await settle(100000, "AQ"); // acquisitions budget = 60000
     const unpriced = await createWantedCandidate({ name: "NoPrice", normalizedName: "noprice", status: "selected", suggestedBy: 1, supportCount: 1 });
-    await assertRejects(() => approveCandidateAcquisition(unpriced.id, ADMIN), Error, "no verified price");
+    await assertRejects(() => approveCandidateAcquisition(unpriced.id, ADMIN), Error, "pas de prix vérifié");
 
     const voting = await pricedCandidate("OnBallot", 1000);
     await updateCandidatePricing(voting.id, { expectedPriceMinor: 1000, priceCurrency: "CAD", expectedCadMinor: 1000 });
     const { updateWantedStatus } = await import("../src/db/wanted.ts");
     await updateWantedStatus(voting.id, "voting");
-    await assertRejects(() => approveCandidateAcquisition(voting.id, ADMIN), Error, "cannot be approved");
+    await assertRejects(() => approveCandidateAcquisition(voting.id, ADMIN), Error, "ne peut pas être approuvé");
 
     const a = await pricedCandidate("A", 40000);
     const b = await pricedCandidate("B", 40000);
@@ -376,7 +376,7 @@ Deno.test("AUDIT ACQUISITIONS — confirming payment is exactly-once, uses the A
     assertEquals(o.adminReimbursementsOwedCadMinor, 2800);
     assertEquals(o.cashOnHandCadMinor, 100000, "club cash untouched until reimbursed");
 
-    await assertRejects(() => confirmCandidateAcquisitionPaid({ candidateId: c.id, payer: "club_funds", adminId: ADMIN }), Error, "already been acquired");
+    await assertRejects(() => confirmCandidateAcquisitionPaid({ candidateId: c.id, payer: "club_funds", adminId: ADMIN }), Error, "déjà été acquis");
   } finally {
     await kv.close();
   }

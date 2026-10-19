@@ -127,7 +127,7 @@ export async function getRateInfo(
   const rateFrom = from === "USD" ? 1 : fromRec?.rate ?? FALLBACK_RATES_FROM_USD[from];
   const rateTo = to === "USD" ? 1 : toRec?.rate ?? FALLBACK_RATES_FROM_USD[to];
   if (!rateFrom || !rateTo) {
-    throw new Error(`No exchange rate available for ${from} -> ${to}`);
+    throw new Error(`Aucun taux de change disponible pour ${from} -> ${to}`);
   }
 
   const dates = [fromRec?.date, toRec?.date].filter((d): d is string => !!d).sort();
@@ -171,7 +171,7 @@ export async function convertCurrency(
   const to = normalizeCurrency(toCurrency);
 
   if (!Number.isInteger(amountMinor)) {
-    throw new Error("Amounts must be integer minor units");
+    throw new Error("Les montants doivent être des unités mineures entières");
   }
 
   if (from === to) {
@@ -214,7 +214,7 @@ export async function convertToBaseCurrency(
 
   if (!isSupportedExpenseCurrency(from)) {
     throw new Error(
-      `Unsupported currency "${fromCurrency}". Supported: ${SUPPORTED_EXPENSE_CURRENCIES.join(", ")}`
+      `Devise non prise en charge « ${fromCurrency} ». Devises acceptées : ${SUPPORTED_EXPENSE_CURRENCIES.join(", ")}`
     );
   }
 

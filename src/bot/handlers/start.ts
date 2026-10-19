@@ -30,8 +30,8 @@ startComposer.command("start", async (ctx) => {
     const creator = await getCreator(creatorId);
 
     if (!creator) {
-      await ctx.reply("⚠️ Creator collection not found or was moved.", {
-        reply_markup: new InlineKeyboard().text("⬅️ Main Menu", "member:home"),
+      await ctx.reply("⚠️ Collection de créateur introuvable ou déplacée.", {
+        reply_markup: new InlineKeyboard().text("⬅️ Menu principal", "member:home"),
       });
       return;
     }
@@ -43,14 +43,14 @@ startComposer.command("start", async (ctx) => {
       const topicUrl = `https://t.me/c/${cleanChatId}/${creator.topicId}`;
 
       const kb = new InlineKeyboard()
-        .url(`👉 Open ${creator.name} Topic`, topicUrl)
+        .url(`👉 Ouvrir le sujet de ${creator.name}`, topicUrl)
         .row()
-        .text("⬅️ Main Menu", "member:home");
+        .text("⬅️ Menu principal", "member:home");
 
       await ctx.reply(
-        `💎 *${escapeMd(creator.name)}* is available in *TOKEBEC VIP COLLECTIONS*!\n\n` +
-        `📅 *Last Content Update:* ${updatedStr}\n\n` +
-        `As an active VIP member, you can jump directly to this creator's topic:`,
+        `💎 *${escapeMd(creator.name)}* est disponible dans *TOKEBEC VIP COLLECTIONS* !\n\n` +
+        `📅 *Dernière mise à jour du contenu :* ${updatedStr}\n\n` +
+        `En tant que membre VIP actif, vous pouvez accéder directement au sujet de ce créateur :`,
         {
           parse_mode: "Markdown",
           reply_markup: kb,
@@ -58,15 +58,15 @@ startComposer.command("start", async (ctx) => {
       );
     } else {
       const kb = new InlineKeyboard()
-        .text(`🌟 Join Underground (${config.STARS_PRICE_AMOUNT} Stars)`, "member:join")
+        .text(`🌟 Joindre Underground (${config.STARS_PRICE_AMOUNT} Étoiles)`, "member:join")
         .row()
-        .text("⬅️ Main Menu", "member:home");
+        .text("⬅️ Menu principal", "member:home");
 
       await ctx.reply(
-        `💎 *${escapeMd(creator.name)}* is available in *TOKEBEC VIP COLLECTIONS*!\n\n` +
-        `📅 *Last Content Update:* ${updatedStr}\n\n` +
-        `🔒 This collection is exclusive to Underground VIP members.\n` +
-        `Subscribe with Telegram Stars to unlock instant access to all creator archives!`,
+        `💎 *${escapeMd(creator.name)}* est disponible dans *TOKEBEC VIP COLLECTIONS* !\n\n` +
+        `📅 *Dernière mise à jour du contenu :* ${updatedStr}\n\n` +
+        `🔒 Cette collection est réservée aux membres Underground VIP.\n` +
+        `Abonnez-vous avec les Étoiles Telegram pour débloquer l'accès immédiat à toutes les archives de créateurs !`,
         {
           parse_mode: "Markdown",
           reply_markup: kb,
@@ -83,12 +83,12 @@ startComposer.command("start", async (ctx) => {
     const activeBallot = await getActiveBallot();
 
     await ctx.reply(
-      `🎯 *UNDERGROUND | WANTED LIST*\n\n` +
-      `Tell us which creators we should acquire next!\n\n` +
-      `• *Suggest:* Submit new creator requests\n` +
-      `• *Support:* Vote on existing community nominations\n` +
-      `• *Rules:* 1 suggestion/support per paying member per monthly cycle\n\n` +
-      `Select an option below:`,
+      `🎯 *UNDERGROUND | LISTE DE SOUHAITS*\n\n` +
+      `Dites-nous quels créateurs nous devrions acquérir ensuite !\n\n` +
+      `• *Suggérer :* Soumettre de nouvelles demandes de créateurs\n` +
+      `• *Appuyer :* Voter pour les suggestions existantes de la communauté\n` +
+      `• *Règles :* 1 suggestion ou appui par membre payant par cycle mensuel\n\n` +
+      `Choisissez une option ci-dessous :`,
       {
         parse_mode: "Markdown",
         reply_markup: wantedMenuKeyboard(activeBallot !== null),
@@ -104,7 +104,7 @@ startComposer.command("start", async (ctx) => {
     return;
   }
 
-  const firstName = ctx.from?.first_name || "Member";
+  const firstName = ctx.from?.first_name || "Membre";
   const isAdmin = isAdministrator(userId);
 
   await ctx.reply(messages.welcome(firstName, summary.isMember), {
@@ -117,7 +117,7 @@ startComposer.callbackQuery("member:home", async (ctx) => {
   const userId = ctx.from?.id;
   if (!userId) return;
 
-  const firstName = ctx.from?.first_name || "Member";
+  const firstName = ctx.from?.first_name || "Membre";
   const summary = await getMembershipSummary(userId);
   const isAdmin = isAdministrator(userId);
 

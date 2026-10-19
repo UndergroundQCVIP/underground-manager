@@ -50,7 +50,7 @@ export async function prepareMonthlyBallot(
 
   const open = await getActiveBallot();
   if (open) {
-    throw new Error("A ballot is already open. Close it before starting a new one.");
+    throw new Error("Un scrutin est déjà ouvert. Fermez-le avant d'en commencer un nouveau.");
   }
 
   let candidates: BallotCandidate[] = [];
@@ -82,7 +82,7 @@ export async function prepareMonthlyBallot(
 
   if (candidates.length < 2) {
     throw new Error(
-      "At least 2 eligible candidates are required to prepare a voting ballot."
+      "Il faut au moins 2 candidats admissibles pour préparer un scrutin."
     );
   }
 
@@ -92,7 +92,7 @@ export async function prepareMonthlyBallot(
 
   const ballot = await createBallot({
     monthCycle: cycleId,
-    title: `Monthly Acquisition Ballot — ${formatTorontoDate(now, { month: "long", year: "numeric" })}`,
+    title: `Scrutin mensuel d'acquisition — ${formatTorontoDate(now, { month: "long", year: "numeric" })}`,
     candidates,
     status: "active",
     startsAt: now.toISOString(),
@@ -135,18 +135,18 @@ export async function castVote(
   if (!summary.hasPaid) {
     return {
       success: false,
-      error: "Only active paying subscribers are eligible to vote. Complimentary members are excluded from voting.",
+      error: "Seuls les abonnés payants actifs peuvent voter. Les membres ayant un accès gracieux sont exclus du vote.",
     };
   }
 
   // 2. Check if ballot exists and is active
   const ballot = await getBallot(ballotId);
   if (!ballot || ballot.status !== "active") {
-    return { success: false, error: "This voting ballot is no longer active." };
+    return { success: false, error: "Ce scrutin n'est plus actif." };
   }
 
   if (new Date(ballot.closesAt).getTime() <= Date.now()) {
-    return { success: false, error: "The voting deadline has expired." };
+    return { success: false, error: "La date limite de vote est dépassée." };
   }
 
   // 3. Cast vote atomically
@@ -216,7 +216,7 @@ export async function closeAndFinalizeBallot(
       const settings = await getSystemSettings();
       runoffDraft = {
         monthCycle: ballot.monthCycle,
-        title: `⚡ RUNOFF VOTE — ${ballot.title}`,
+        title: `⚡ VOTE DU SECOND TOUR — ${ballot.title}`,
         candidates: summary.tiedCandidates,
         status: "active",
         startsAt: new Date().toISOString(),
@@ -298,7 +298,7 @@ async function announceOutcome(
   if (!config.WANTED_LIST_CHAT_ID) return;
 
   const botLink = (start: string) => ({
-    inline_keyboard: [[{ text: "🗳️ Open in Underground Manager", url: `https://t.me/${config.BOT_USERNAME}?start=${start}` }]],
+    inline_keyboard: [[{ text: "🗳️ Ouvrir dans Underground Manager", url: `https://t.me/${config.BOT_USERNAME}?start=${start}` }]],
   });
 
   let text: string;
@@ -306,26 +306,26 @@ async function announceOutcome(
 
   if (summary.isTie && (runoff || (ballot.isTie && !ballot.isRunoff))) {
     text =
-      `⚡ *TIE DETECTED — RUNOFF VOTE OPEN!*\n\n` +
-      `The vote ended in a tie between:\n` +
+      `⚡ *ÉGALITÉ DÉTECTÉE — VOTE DU SECOND TOUR OUVERT!*\n\n` +
+      `Le vote s'est terminé par une égalité entre :\n` +
       summary.tiedCandidates.map((c) => `• *${escapeMd(c.creatorName)}*`).join("\n") +
-      `\n\nA runoff ballot is now open inside Underground Manager.`;
+      `\n\nUn scrutin de second tour est maintenant ouvert dans Underground Manager.`;
     options = { parse_mode: "Markdown", reply_markup: botLink("vote") };
   } else if (summary.winner) {
     text =
-      `🎉 *MONTHLY CREATOR VOTE RESULTS!*\n\n` +
-      `🏆 *Winner:* *${escapeMd(summary.winner.creatorName)}*\n` +
-      `📊 *Total Votes Cast:* ${summary.totalVotes}\n` +
-      `👥 *Member Turnout:* ${summary.eligibleTurnoutPct}%\n\n` +
-      `*Final Tallies:*\n` +
+      `🎉 *RÉSULTATS DU VOTE MENSUEL DES CRÉATEURS!*\n\n` +
+      `🏆 *Gagnant :* *${escapeMd(summary.winner.creatorName)}*\n` +
+      `📊 *Total des votes exprimés :* ${summary.totalVotes}\n` +
+      `👥 *Participation des membres :* ${summary.eligibleTurnoutPct}%\n\n` +
+      `*Décompte final :*\n` +
       summary.tally.map((t) => `• ${escapeMd(t.name)}: ${t.votes} votes`).join("\n") +
-      `\n\n_The result is submitted for administrator approval. Nothing is purchased automatically._`;
+      `\n\n_Le résultat est soumis à l'approbation d'un administrateur. Aucun achat n'est effectué automatiquement._`;
   } else if (summary.isTie) {
     text =
-      `⚖️ *RUNOFF ENDED IN A TIE*\n\nThe administrators will decide between:\n` +
+      `⚖️ *LE SECOND TOUR SE TERMINE EN ÉGALITÉ*\n\nLes administrateurs trancheront entre :\n` +
       summary.tiedCandidates.map((c) => `• *${escapeMd(c.creatorName)}*`).join("\n");
   } else {
-    text = `🗳️ *VOTE CLOSED*\n\nNo votes were cast this round, so no creator was selected.`;
+    text = `🗳️ *VOTE CLOS*\n\nAucun vote n'a été exprimé lors de ce tour; aucun créateur n'a donc été retenu.`;
   }
 
   try {

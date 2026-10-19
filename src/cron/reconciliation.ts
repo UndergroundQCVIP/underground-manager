@@ -43,7 +43,7 @@ export async function runHourlyReconciliation(bot: Bot): Promise<{
       await notifyAdmins(
         bot.api,
         "payment_recovery_failed",
-        `${rec.failed} payment(s) are recorded but could not be credited to memberships. Check logs; they are retried hourly.`
+        `${rec.failed} paiement(s) sont enregistrés mais n'ont pas pu être crédités aux abonnements. Consultez les journaux; une nouvelle tentative a lieu toutes les heures.`
       );
     }
   } catch (err) {
@@ -67,7 +67,7 @@ export async function runHourlyReconciliation(bot: Bot): Promise<{
     await notifyAdmins(
       bot.api,
       "reconcile_errors",
-      `Access reconciliation had ${reconciled.errors.length} error(s); failed removals are retried hourly.\n` +
+      `Le rapprochement des accès a produit ${reconciled.errors.length} erreur(s); les retraits échoués sont retentés toutes les heures.\n` +
         reconciled.errors.slice(0, 5).join("\n")
     );
   }
@@ -89,7 +89,7 @@ export async function runHourlyReconciliation(bot: Bot): Promise<{
     }
   } catch (err) {
     console.error("[Cron Error] Failed to auto-finalize expired ballot:", err);
-    await notifyAdmins(bot.api, "ballot_close_failed", `Failed to close the expired ballot: ${String(err)}`);
+    await notifyAdmins(bot.api, "ballot_close_failed", `Échec de la fermeture du scrutin expiré : ${String(err)}`);
   }
   try {
     await retryUnannouncedBallots(bot.api);
@@ -114,7 +114,7 @@ export async function runHourlyReconciliation(bot: Bot): Promise<{
     daily = await runDailyIfDue(bot);
   } catch (err) {
     console.error("[Cron Error] Daily synchronization failed:", err);
-    await notifyAdmins(bot.api, "daily_sync_failed", `Daily synchronization failed: ${String(err)}`);
+    await notifyAdmins(bot.api, "daily_sync_failed", `Échec de la synchronisation quotidienne : ${String(err)}`);
   }
 
   return { reconciled, reminders, ballotClosed, recoveredPayments, expiredEntitlements, daily };
@@ -167,7 +167,7 @@ export async function runDailySynchronization(bot: Bot): Promise<{
       `[Cron] Stars ledger: new=${stars.newTransactionsRecorded}, refunds=${stars.refundsApplied}, withdrawals=${stars.withdrawalsObserved}`
     );
     if (stars.errors.length > 0) {
-      await notifyAdmins(bot.api, "stars_reconcile_error", `Stars ledger sync failed: ${stars.errors.join("; ")}`);
+      await notifyAdmins(bot.api, "stars_reconcile_error", `Échec de la synchronisation du registre des Étoiles : ${stars.errors.join("; ")}`);
     }
   } catch (err) {
     console.error("[Cron Error] Stars ledger reconciliation failed:", err);
@@ -181,7 +181,7 @@ export async function runDailySynchronization(bot: Bot): Promise<{
         await notifyAdmins(
           bot.api,
           `permissions_${spaceId}`,
-          `Bot permissions problem in ${spaceId}: ${check.missingPermissions.join(", ")}`
+          `Problème de permissions du bot dans ${spaceId} : ${check.missingPermissions.join(", ")}`
         );
       }
     }
@@ -210,7 +210,7 @@ export function registerCronJobs(bot: Bot): void {
           if (!lease.ran) console.log("[Cron] Hourly job skipped: another run holds the lease.");
         } catch (err) {
           console.error("[Cron Fatal] Error running scheduled reconciliation:", err);
-          await notifyAdmins(bot.api, "hourly_fatal", `Hourly reconciliation crashed: ${String(err)}`).catch(() => {});
+          await notifyAdmins(bot.api, "hourly_fatal", `Le rapprochement horaire a planté : ${String(err)}`).catch(() => {});
         }
       });
       console.log(

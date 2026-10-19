@@ -49,5 +49,5 @@ export function formatTorontoDate(
   options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" }
 ): string {
   const date = typeof input === "string" ? new Date(input) : input;
-  return date.toLocaleString("en-US", { ...options, timeZone: APP_TIMEZONE });
+  return date.toLocaleString("fr-CA", { ...options, timeZone: APP_TIMEZONE });
 }

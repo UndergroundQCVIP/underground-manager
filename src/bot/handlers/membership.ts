@@ -30,32 +30,32 @@ membershipComposer.callbackQuery("member:pay_stars", async (ctx) => {
   const config = getConfig();
   const payload = TelegramStarsProvider.buildInvoicePayload(userId);
 
-  await ctx.answerCallbackQuery({ text: "Generating Telegram Stars subscription..." });
+  await ctx.answerCallbackQuery({ text: "Génération de l'abonnement par Étoiles Telegram..." });
 
   try {
     const link = await ctx.api.createInvoiceLink(
-      "Underground VIP Subscription",
-      `Recurring 30-day VIP access to TOKEBEC VIP COLLECTIONS, General Chat, and Wanted List.`,
+      "Abonnement Underground VIP",
+      `Accès VIP récurrent de 30 jours à TOKEBEC VIP COLLECTIONS, au clavardage général et à la Liste de souhaits.`,
       payload,
       "", // provider_token is empty string for Telegram Stars
       config.CURRENCY,
-      [{ label: "Underground VIP (30 Days)", amount: config.STARS_PRICE_AMOUNT }],
+      [{ label: "Underground VIP (30 jours)", amount: config.STARS_PRICE_AMOUNT }],
       {
         subscription_period: config.STARS_SUBSCRIPTION_PERIOD_SECONDS,
       }
     );
 
     const kb = new InlineKeyboard()
-      .url(`🌟 Subscribe (${config.STARS_PRICE_AMOUNT} Stars / 30 Days)`, link)
+      .url(`🌟 S'abonner (${config.STARS_PRICE_AMOUNT} Étoiles / 30 jours)`, link)
       .row()
-      .text("⬅️ Main Menu", "member:home");
+      .text("⬅️ Menu principal", "member:home");
 
     await ctx.reply(
-      `💎 *UNDERGROUND VIP SUBSCRIPTION*\n\n` +
-      `Click the button below to subscribe using Telegram Stars.\n` +
-      `• *Price:* ${config.STARS_PRICE_AMOUNT} Stars\n` +
-      `• *Duration:* 30 Days (auto-renewing)\n` +
-      `• *Cancel:* Anytime in Telegram Settings > Stars`,
+      `💎 *ABONNEMENT UNDERGROUND VIP*\n\n` +
+      `Cliquez sur le bouton ci-dessous pour vous abonner avec les Étoiles Telegram.\n` +
+      `• *Prix :* ${config.STARS_PRICE_AMOUNT} Étoiles\n` +
+      `• *Durée :* 30 jours (renouvellement automatique)\n` +
+      `• *Annulation :* En tout temps dans Paramètres Telegram > Étoiles`,
       {
         parse_mode: "Markdown",
         reply_markup: kb,
@@ -64,7 +64,7 @@ membershipComposer.callbackQuery("member:pay_stars", async (ctx) => {
   } catch (err) {
     console.error("Failed to create Stars subscription link:", err);
     await ctx.reply(
-      "⚠️ Could not generate subscription link at this moment. Please try again later or contact support."
+      "⚠️ Impossible de générer le lien d'abonnement pour le moment. Veuillez réessayer plus tard ou communiquer avec le soutien."
     );
   }
 });
@@ -78,11 +78,11 @@ membershipComposer.callbackQuery("member:status", async (ctx) => {
   const kb = new InlineKeyboard();
 
   if (summary.isMember) {
-    kb.text("🔓 Access My Channels", "member:channels").row();
+    kb.text("🔓 Accéder à mes canaux", "member:channels").row();
   } else {
-    kb.text("🌟 Join Underground", "member:join").row();
+    kb.text("🌟 Joindre Underground", "member:join").row();
   }
-  kb.text("⬅️ Main Menu", "member:home");
+  kb.text("⬅️ Menu principal", "member:home");
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(messages.membershipStatus(summary), {
@@ -107,7 +107,7 @@ membershipComposer.callbackQuery("member:channels", async (ctx) => {
     return;
   }
 
-  await ctx.answerCallbackQuery({ text: "Generating secure channel access links..." });
+  await ctx.answerCallbackQuery({ text: "Génération des liens d'accès sécurisés aux canaux..." });
 
   const spaceLinks: { spaceId: SpaceId; url: string }[] = [];
 
@@ -122,9 +122,9 @@ membershipComposer.callbackQuery("member:channels", async (ctx) => {
 
   if (spaceLinks.length === 0) {
     await ctx.reply(
-      "⚠️ Channel links are temporarily unavailable. Please alert an administrator.",
+      "⚠️ Les liens des canaux sont temporairement indisponibles. Veuillez en aviser un administrateur.",
       {
-        reply_markup: new InlineKeyboard().text("⬅️ Main Menu", "member:home"),
+        reply_markup: new InlineKeyboard().text("⬅️ Menu principal", "member:home"),
       }
     );
     return;

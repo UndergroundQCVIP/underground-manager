@@ -59,10 +59,10 @@ export type ComplimentaryReason =
   | "admin_exception";
 
 export const COMPLIMENTARY_REASONS: Record<ComplimentaryReason, string> = {
-  content_contribution: "Content contribution",
-  partnership: "Partnership",
+  content_contribution: "Contribution de contenu",
+  partnership: "Partenariat",
   promotion: "Promotion",
-  admin_exception: "Administrator exception",
+  admin_exception: "Exception administrative",
 };
 
 export type EntitlementSource = "telegram_stars" | "complimentary";
@@ -249,15 +249,15 @@ export type WantedCandidateStatus =
   | "rejected_unavailable";
 
 export const WANTED_STATUS_LABELS: Record<WantedCandidateStatus, string> = {
-  requested: "Requested",
-  pricing_review: "Pricing Review",
-  eligible_for_voting: "Eligible for Voting",
-  voting: "Voting in Progress",
-  selected: "Selected",
-  acquisition_pending: "Acquisition Pending",
-  acquired: "Acquired",
-  available: "Available in Collections",
-  rejected_unavailable: "Rejected / Unavailable",
+  requested: "Demandé",
+  pricing_review: "Évaluation du prix",
+  eligible_for_voting: "Admissible au vote",
+  voting: "Vote en cours",
+  selected: "Sélectionné",
+  acquisition_pending: "Acquisition en attente",
+  acquired: "Acquis",
+  available: "Disponible dans les collections",
+  rejected_unavailable: "Refusé / Indisponible",
 };
 
 export interface WantedCandidate {
@@ -433,12 +433,12 @@ export type ExpenseCategory =
   | "other";
 
 export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
-  creator_subscription: "Creator Subscription",
-  creator_content_license: "Creator Content / License",
-  platform_operations: "Platform Operations",
+  creator_subscription: "Abonnement à un créateur",
+  creator_content_license: "Contenu / licence de créateur",
+  platform_operations: "Exploitation de la plateforme",
   marketing: "Marketing",
-  transaction_fees: "Transaction Fees",
-  other: "Other",
+  transaction_fees: "Frais de transaction",
+  other: "Autre",
 };
 
 export type ExpenseStatus =

@@ -109,8 +109,8 @@ export function formatPrivateMemberReport(report: TreasuryMonthlyReport): string
   const o = report.overview;
 
   const monthNames = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
+    "janvier", "février", "mars", "avril", "mai", "juin",
+    "juillet", "août", "septembre", "octobre", "novembre", "décembre",
   ];
   const [yearStr, monthStr] = report.period.split("-");
   const monthIdx = parseInt(monthStr, 10) - 1;
@@ -119,37 +119,37 @@ export function formatPrivateMemberReport(report: TreasuryMonthlyReport): string
   const acquiredList =
     report.creatorsAcquiredThisMonth.length > 0
       ? report.creatorsAcquiredThisMonth.map(escapeMd).join(", ")
-      : "None this cycle";
+      : "Aucun ce cycle";
 
   return (
-    `🏛️ *UNDERGROUND TREASURY REPORT*\n` +
+    `🏛️ *RAPPORT DE TRÉSORERIE UNDERGROUND*\n` +
     `📅 *${periodLabel}*\n\n` +
     (report.periodActivity
-      ? `📆 *This Month:*\n` +
-        `• Stars Received: *${report.periodActivity.starsReceived.toLocaleString()} ⭐*\n` +
-        `• Cash Settled: *${formatMoney(report.periodActivity.settledCashCadMinor, "CAD")}*\n` +
-        `• Expenses Paid: *${formatMoney(report.periodActivity.paidExpensesCadMinor, "CAD")}*\n\n`
+      ? `📆 *Ce mois-ci :*\n` +
+        `• Étoiles reçues : *${report.periodActivity.starsReceived.toLocaleString()} ⭐*\n` +
+        `• Encaisse réglée : *${formatMoney(report.periodActivity.settledCashCadMinor, "CAD")}*\n` +
+        `• Dépenses payées : *${formatMoney(report.periodActivity.paidExpensesCadMinor, "CAD")}*\n\n`
       : "") +
-    `💰 *Revenue & Inflows (all time):*\n` +
-    `• Stars Received: *${o.totalStarsReceived.toLocaleString()} ⭐*\n` +
-    `• Pending Settlement (21-Day Hold): *${o.pendingStars.toLocaleString()} ⭐* (~${formatMoney(o.estimatedPendingRewardsCadMinor, "CAD")} est.)\n` +
-    `• Potentially Withdrawable: *${o.potentiallyWithdrawableStars.toLocaleString()} ⭐* (~${formatMoney(o.estimatedWithdrawableRewardsCadMinor, "CAD")} est.)\n` +
-    `• Confirmed Settled Cash: *${formatMoney(o.settledNetCashCadMinor, "CAD")}*\n` +
-    `• Cash On Hand: *${formatMoney(o.cashOnHandCadMinor, "CAD")}*\n\n` +
-    `💸 *Expenses & Commitments:*\n` +
-    `• Creator Acquisitions: *${formatMoney(o.paidAcquisitionsCadMinor, "CAD")}*\n` +
-    `• Platform Operations & Mktg: *${formatMoney(o.paidOperationsCadMinor, "CAD")}*\n` +
-    `• Active Commitments: *${formatMoney(o.committedAcquisitionsCadMinor, "CAD")}*\n\n` +
-    `🎯 *Budget & Allocations:*\n` +
-    `• Acquisition Budget Available: *${formatMoney(o.availableAcquisitionBudgetCadMinor, "CAD")}*\n` +
-    `• Operations Allocation: *${formatMoney(o.allocatedOperationsCadMinor, "CAD")}*\n` +
-    `• Protected Contingency Reserve: *${formatMoney(o.allocatedReserveCadMinor, "CAD")}*\n\n` +
-    `👥 *Community & Governance:*\n` +
-    `• Active Paying Subscribers: *${report.activePaidSubscribersCount}*\n` +
-    `• Complimentary Members: *${report.complimentaryMembersCount}*\n` +
-    `• Creators Acquired: *${acquiredList}*\n` +
-    `• New Nominations: *${report.newNominationsCount}*\n\n` +
-    `_All acquisition decisions are governed by active subscriber votes._`
+    `💰 *Revenus et entrées de fonds (cumulatif) :*\n` +
+    `• Étoiles reçues : *${o.totalStarsReceived.toLocaleString()} ⭐*\n` +
+    `• En attente de règlement (détention de 21 jours) : *${o.pendingStars.toLocaleString()} ⭐* (~${formatMoney(o.estimatedPendingRewardsCadMinor, "CAD")} env.)\n` +
+    `• Potentiellement retirables : *${o.potentiallyWithdrawableStars.toLocaleString()} ⭐* (~${formatMoney(o.estimatedWithdrawableRewardsCadMinor, "CAD")} env.)\n` +
+    `• Encaisse réglée confirmée : *${formatMoney(o.settledNetCashCadMinor, "CAD")}*\n` +
+    `• Encaisse disponible : *${formatMoney(o.cashOnHandCadMinor, "CAD")}*\n\n` +
+    `💸 *Dépenses et engagements :*\n` +
+    `• Acquisitions de créateurs : *${formatMoney(o.paidAcquisitionsCadMinor, "CAD")}*\n` +
+    `• Exploitation de la plateforme et marketing : *${formatMoney(o.paidOperationsCadMinor, "CAD")}*\n` +
+    `• Engagements actifs : *${formatMoney(o.committedAcquisitionsCadMinor, "CAD")}*\n\n` +
+    `🎯 *Budget et répartition :*\n` +
+    `• Budget d'acquisition disponible : *${formatMoney(o.availableAcquisitionBudgetCadMinor, "CAD")}*\n` +
+    `• Répartition à l'exploitation : *${formatMoney(o.allocatedOperationsCadMinor, "CAD")}*\n` +
+    `• Réserve de prévoyance protégée : *${formatMoney(o.allocatedReserveCadMinor, "CAD")}*\n\n` +
+    `👥 *Communauté et gouvernance :*\n` +
+    `• Abonnés payants actifs : *${report.activePaidSubscribersCount}*\n` +
+    `• Membres avec accès gratuit : *${report.complimentaryMembersCount}*\n` +
+    `• Créateurs acquis : *${acquiredList}*\n` +
+    `• Nouvelles candidatures : *${report.newNominationsCount}*\n\n` +
+    `_Toutes les décisions d'acquisition sont régies par les votes des abonnés actifs._`
   );
 }
 
@@ -160,28 +160,28 @@ export function formatDetailedAdminReport(report: TreasuryMonthlyReport): string
   const o = report.overview;
 
   return (
-    `📊 *DETAILED TREASURY AUDIT REPORT*\n` +
-    `*Period:* ${report.period} | *Generated:* ${formatTorontoDate(report.generatedAt, { dateStyle: "medium", timeStyle: "short" })}\n\n` +
-    `*1. Telegram Stars Breakdown:*\n` +
-    `• Total Stars Received: ${o.totalStarsReceived} ⭐\n` +
-    `• Pending Stars (< 21 days): ${o.pendingStars} ⭐ (${formatMoney(o.estimatedPendingRewardsCadMinor, "CAD")} est.)\n` +
-    `• Withdrawable Stars (>= 21 days): ${o.potentiallyWithdrawableStars} ⭐ (${formatMoney(o.estimatedWithdrawableRewardsCadMinor, "CAD")} est.)\n` +
-    `• Withdrawn Stars: ${o.withdrawnStars} ⭐ (recorded withdrawals: ${o.recordedWithdrawalStars} ⭐, Telegram reports: ${o.telegramWithdrawnStars} ⭐)\n` +
-    `• Refunded Stars (excluded): ${o.refundedStars} ⭐\n\n` +
-    `*2. Settled Fiat Cash (CAD):*\n` +
-    `• Total Settled Cash: ${formatMoney(o.settledNetCashCadMinor, "CAD")}\n` +
-    `• Allocated to Acquisitions: ${formatMoney(o.allocatedAcquisitionsCadMinor, "CAD")}\n` +
-    `• Allocated to Operations: ${formatMoney(o.allocatedOperationsCadMinor, "CAD")}\n` +
-    `• Allocated to Reserve: ${formatMoney(o.allocatedReserveCadMinor, "CAD")}\n\n` +
-    `*3. Outlays & Obligations:*\n` +
-    `• Paid Acquisitions: ${formatMoney(o.paidAcquisitionsCadMinor, "CAD")}\n` +
-    `• Paid Operations: ${formatMoney(o.paidOperationsCadMinor, "CAD")}\n` +
-    `• Paid Other: ${formatMoney(o.paidOtherCadMinor, "CAD")}\n` +
-    `• Total Paid: ${formatMoney(o.totalPaidExpensesCadMinor, "CAD")}\n` +
-    `• Active Commitments: ${formatMoney(o.committedAcquisitionsCadMinor, "CAD")}\n` +
-    `• Unreimbursed Admin Outlays: ${formatMoney(o.adminReimbursementsOwedCadMinor, "CAD")}\n\n` +
-    `*4. Net Acquisition Purchasing Power:*\n` +
-    `• Available Acquisition Budget: *${formatMoney(o.availableAcquisitionBudgetCadMinor, "CAD")}*`
+    `📊 *RAPPORT D'AUDIT DÉTAILLÉ DE LA TRÉSORERIE*\n` +
+    `*Période :* ${report.period} | *Généré le :* ${formatTorontoDate(report.generatedAt, { dateStyle: "medium", timeStyle: "short" })}\n\n` +
+    `*1. Ventilation des Étoiles Telegram :*\n` +
+    `• Total des Étoiles reçues : ${o.totalStarsReceived} ⭐\n` +
+    `• Étoiles en attente (< 21 jours) : ${o.pendingStars} ⭐ (${formatMoney(o.estimatedPendingRewardsCadMinor, "CAD")} env.)\n` +
+    `• Étoiles retirables (≥ 21 jours) : ${o.potentiallyWithdrawableStars} ⭐ (${formatMoney(o.estimatedWithdrawableRewardsCadMinor, "CAD")} env.)\n` +
+    `• Étoiles retirées : ${o.withdrawnStars} ⭐ (retraits enregistrés : ${o.recordedWithdrawalStars} ⭐, selon Telegram : ${o.telegramWithdrawnStars} ⭐)\n` +
+    `• Étoiles remboursées (exclues) : ${o.refundedStars} ⭐\n\n` +
+    `*2. Encaisse réglée en monnaie fiduciaire (CAD) :*\n` +
+    `• Total de l'encaisse réglée : ${formatMoney(o.settledNetCashCadMinor, "CAD")}\n` +
+    `• Affecté aux acquisitions : ${formatMoney(o.allocatedAcquisitionsCadMinor, "CAD")}\n` +
+    `• Affecté à l'exploitation : ${formatMoney(o.allocatedOperationsCadMinor, "CAD")}\n` +
+    `• Affecté à la réserve : ${formatMoney(o.allocatedReserveCadMinor, "CAD")}\n\n` +
+    `*3. Débours et obligations :*\n` +
+    `• Acquisitions payées : ${formatMoney(o.paidAcquisitionsCadMinor, "CAD")}\n` +
+    `• Exploitation payée : ${formatMoney(o.paidOperationsCadMinor, "CAD")}\n` +
+    `• Autres dépenses payées : ${formatMoney(o.paidOtherCadMinor, "CAD")}\n` +
+    `• Total payé : ${formatMoney(o.totalPaidExpensesCadMinor, "CAD")}\n` +
+    `• Engagements actifs : ${formatMoney(o.committedAcquisitionsCadMinor, "CAD")}\n` +
+    `• Débours d'administrateurs non remboursés : ${formatMoney(o.adminReimbursementsOwedCadMinor, "CAD")}\n\n` +
+    `*4. Pouvoir d'achat net pour les acquisitions :*\n` +
+    `• Budget d'acquisition disponible : *${formatMoney(o.availableAcquisitionBudgetCadMinor, "CAD")}*`
   );
 }
 

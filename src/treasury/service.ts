@@ -46,6 +46,7 @@ import {
   ExpenseRecord,
   ExpenseStatus,
   TreasuryOverview,
+  WANTED_STATUS_LABELS,
   WantedCandidate,
   WithdrawalRecord,
   WithdrawalSettlement,
@@ -307,12 +308,12 @@ function validateSettlement(settlement: WithdrawalSettlement): void {
   const base = getConfig().BASE_CURRENCY;
   if (normalizeCurrency(settlement.currencyReceived) !== normalizeCurrency(base)) {
     throw new Error(
-      `Settlement proceeds must be entered in ${base} (the reporting currency); got ${settlement.currencyReceived}. ` +
-        `Convert at the actual exchange you received before recording.`
+      `Le produit du règlement doit être saisi en ${base} (la devise de présentation); reçu : ${settlement.currencyReceived}. ` +
+        `Convertissez au taux de change réel obtenu avant d'enregistrer.`
     );
   }
   if (!isPositiveInt(settlement.netFundsReceivedMinor)) {
-    throw new Error("Net settled funds must be a positive whole number of minor units");
+    throw new Error("Les fonds nets réglés doivent être un nombre entier positif d'unités mineures");
   }
 }
 
@@ -328,7 +329,7 @@ export async function settleWithdrawal(
   validateSettlement(settlement);
 
   const withdrawal = await getWithdrawal(withdrawalId);
-  if (!withdrawal) throw new Error(`Withdrawal ${withdrawalId} not found`);
+  if (!withdrawal) throw new Error(`Retrait ${withdrawalId} introuvable`);
 
   const journal = await buildSettlementJournal(
     withdrawal.id,
@@ -339,7 +340,7 @@ export async function settleWithdrawal(
 
   // CAS inside: throws if already settled or changed concurrently.
   const settled = await recordWithdrawalSettlement(withdrawalId, settlement, journal);
-  if (!settled) throw new Error(`Withdrawal ${withdrawalId} not found`);
+  if (!settled) throw new Error(`Retrait ${withdrawalId} introuvable`);
 
   await logAuditEvent(
     "withdrawal_settled",
@@ -370,10 +371,10 @@ export async function recordWithdrawalWithSettlement(params: {
   adminId: number;
 }): Promise<WithdrawalRecord> {
   if (!isPositiveInt(params.starsQuantity)) {
-    throw new Error("Stars quantity must be a positive whole number");
+    throw new Error("La quantité d'Étoiles doit être un nombre entier positif");
   }
   if (!Number.isInteger(params.tonReceivedNano) || params.tonReceivedNano < 0) {
-    throw new Error("TON received must be a non-negative whole number of nanoTON");
+    throw new Error("Le TON reçu doit être un nombre entier non négatif de nanoTON");
   }
   // Reject a bad settlement BEFORE anything is recorded (no orphan "requested" row).
   if (params.settlement) validateSettlement(params.settlement);
@@ -392,8 +393,8 @@ export async function recordWithdrawalWithSettlement(params: {
     );
     if (recent) {
       throw new Error(
-        `An identical withdrawal was recorded moments ago (${recent.id}). ` +
-          `If this is a genuinely separate withdrawal, include its Fragment reference.`
+        `Un retrait identique a été enregistré il y a quelques instants (${recent.id}). ` +
+          `S'il s'agit réellement d'un retrait distinct, indiquez sa référence Fragment.`
       );
     }
   }
@@ -472,19 +473,19 @@ export async function recordExpenseWithJournal(params: {
   expectedBudgetVersion?: string | null;
 }): Promise<ExpenseRecord> {
   if (!isPositiveInt(params.originalAmountMinor)) {
-    throw new Error("Expense amount must be a positive whole number of minor units");
+    throw new Error("Le montant de la dépense doit être un nombre entier positif d'unités mineures");
   }
   if (!(params.category in EXPENSE_CATEGORY_LABELS)) {
-    throw new Error(`Unknown expense category "${params.category}"`);
+    throw new Error(`Catégorie de dépense inconnue « ${params.category} »`);
   }
   if (!EXPENSE_PAYERS.includes(params.payer)) {
-    throw new Error(`Unknown payer "${params.payer}"`);
+    throw new Error(`Payeur inconnu « ${params.payer} »`);
   }
   if (!RECORDABLE_STATUSES.includes(params.status)) {
-    throw new Error(`Expenses cannot be recorded with status "${params.status}"`);
+    throw new Error(`Impossible d'enregistrer des dépenses avec le statut « ${params.status} »`);
   }
   if (!isSupportedExpenseCurrency(params.originalCurrency)) {
-    throw new Error(`Unsupported currency "${params.originalCurrency}"`);
+    throw new Error(`Devise non prise en charge « ${params.originalCurrency} »`);
   }
   const currency = normalizeCurrency(params.originalCurrency);
 
@@ -553,7 +554,7 @@ export async function reimburseAdminExpense(
   adminActorId: number
 ): Promise<ExpenseRecord> {
   const current = await getExpense(expenseId);
-  if (!current) throw new Error(`Expense ${expenseId} not found`);
+  if (!current) throw new Error(`Dépense ${expenseId} introuvable`);
 
   const net = await getNetExpenseCad(current);
   const updated = await markExpenseReimbursed(expenseId, [
@@ -573,7 +574,7 @@ export async function reimburseAdminExpense(
     },
   ]);
   if (!updated) {
-    throw new Error(`Expense ${expenseId} could not be marked as reimbursed`);
+    throw new Error(`La dépense ${expenseId} n'a pas pu être marquée comme remboursée`);
   }
 
   await logAuditEvent(
@@ -597,9 +598,9 @@ export async function refundExpense(params: {
   actorId: number;
 }): Promise<ExpenseRecord> {
   const original = await getExpense(params.expenseId);
-  if (!original) throw new Error(`Expense ${params.expenseId} not found`);
-  if (original.adjustmentOfId) throw new Error("Refund the original expense, not an adjustment");
-  if (original.status !== "paid") throw new Error(`Only paid expenses can be refunded (status: ${original.status})`);
+  if (!original) throw new Error(`Dépense ${params.expenseId} introuvable`);
+  if (original.adjustmentOfId) throw new Error("Remboursez la dépense d'origine, et non un ajustement");
+  if (original.status !== "paid") throw new Error(`Seules les dépenses payées peuvent être remboursées (statut : ${original.status})`);
 
   const adjustments = (await listExpenseAdjustments(original.id)).filter(
     (a) => a.status === "paid" || a.status === "refunded"
@@ -607,12 +608,12 @@ export async function refundExpense(params: {
   const alreadyRefundedOrig = -adjustments.reduce((s, a) => s + a.originalAmountMinor, 0);
   const alreadyRefundedCad = -adjustments.reduce((s, a) => s + a.cadAmountMinor, 0);
   const remainingOrig = original.originalAmountMinor - alreadyRefundedOrig;
-  if (remainingOrig <= 0) throw new Error("Expense has already been fully refunded");
+  if (remainingOrig <= 0) throw new Error("La dépense a déjà été entièrement remboursée");
 
   const refundOrig = params.amountMinor ?? remainingOrig;
   if (!isPositiveInt(refundOrig) || refundOrig > remainingOrig) {
     throw new Error(
-      `Refund must be between 1 and ${remainingOrig} minor units of ${original.originalCurrency}`
+      `Le remboursement doit être compris entre 1 et ${remainingOrig} unités mineures en ${original.originalCurrency}`
     );
   }
 
@@ -692,9 +693,9 @@ export async function refundExpense(params: {
 /** Cancel a planned/committed expense (releases any reserved budget). */
 export async function cancelExpense(expenseId: string, actorId: number): Promise<ExpenseRecord> {
   const expense = await getExpense(expenseId);
-  if (!expense) throw new Error(`Expense ${expenseId} not found`);
+  if (!expense) throw new Error(`Dépense ${expenseId} introuvable`);
   if (expense.status !== "planned" && expense.status !== "committed") {
-    throw new Error(`Only planned or committed expenses can be cancelled (status: ${expense.status})`);
+    throw new Error(`Seules les dépenses planifiées ou engagées peuvent être annulées (statut : ${expense.status})`);
   }
   const cancelled = await transitionExpense(expenseId, expense.status, "cancelled", {});
   if (expense.candidateId) {
@@ -717,7 +718,7 @@ export async function evaluateCandidateAffordability(candidateId: string): Promi
 }> {
   const candidate = await getWantedCandidate(candidateId);
   if (!candidate) {
-    throw new Error(`Candidate ${candidateId} not found`);
+    throw new Error(`Candidat ${candidateId} introuvable`);
   }
 
   const expectedCadMinor = candidate.expectedCadMinor ?? 0;
@@ -759,12 +760,12 @@ export async function approveCandidateAcquisition(
   commitmentExpense: ExpenseRecord;
 }> {
   const existing = await getWantedCandidate(candidateId);
-  if (!existing) throw new Error(`Candidate ${candidateId} not found`);
+  if (!existing) throw new Error(`Candidat ${candidateId} introuvable`);
   if (NON_APPROVABLE_STATUSES.has(existing.status)) {
-    throw new Error(`Candidate "${existing.name}" cannot be approved from status "${existing.status}".`);
+    throw new Error(`Le candidat « ${existing.name} » ne peut pas être approuvé à partir du statut « ${WANTED_STATUS_LABELS[existing.status]} ».`);
   }
   if (!existing.expectedCadMinor || existing.expectedCadMinor <= 0) {
-    throw new Error(`Candidate "${existing.name}" has no verified price. Use /price first.`);
+    throw new Error(`Le candidat « ${existing.name} » n'a pas de prix vérifié. Utilisez d'abord /price.`);
   }
 
   // Read the budget version BEFORE computing affordability; the commit fails if
@@ -773,7 +774,7 @@ export async function approveCandidateAcquisition(
   const evalResult = await evaluateCandidateAffordability(candidateId);
   if (!evalResult.affordable) {
     throw new Error(
-      `Insufficient acquisition budget. Need ${formatMoney(evalResult.expectedCadMinor, "CAD")}, available ${formatMoney(evalResult.availableBudgetCadMinor, "CAD")}. Shortfall: ${formatMoney(evalResult.shortfallMinor, "CAD")}`
+      `Budget d'acquisition insuffisant. Requis : ${formatMoney(evalResult.expectedCadMinor, "CAD")}, disponible : ${formatMoney(evalResult.availableBudgetCadMinor, "CAD")}. Manque : ${formatMoney(evalResult.shortfallMinor, "CAD")}`
     );
   }
 
@@ -832,9 +833,9 @@ export async function cancelCandidateAcquisition(
   adminId: number
 ): Promise<WantedCandidate> {
   const candidate = await getWantedCandidate(candidateId);
-  if (!candidate) throw new Error(`Candidate ${candidateId} not found`);
+  if (!candidate) throw new Error(`Candidat ${candidateId} introuvable`);
   const committed = await listExpenses({ candidateId, status: "committed" });
-  if (committed.length === 0) throw new Error("No active commitment for this candidate");
+  if (committed.length === 0) throw new Error("Aucun engagement actif pour ce candidat");
   for (const exp of committed) {
     await cancelExpense(exp.id, adminId);
   }
@@ -863,16 +864,16 @@ export async function confirmCandidateAcquisitionPaid(params: {
 }> {
   const candidate = await getWantedCandidate(params.candidateId);
   if (!candidate) {
-    throw new Error(`Candidate ${params.candidateId} not found`);
+    throw new Error(`Candidat ${params.candidateId} introuvable`);
   }
   if (!EXPENSE_PAYERS.includes(params.payer)) {
-    throw new Error(`Unknown payer "${params.payer}"`);
+    throw new Error(`Payeur inconnu « ${params.payer} »`);
   }
   if (candidate.status === "acquired" || candidate.status === "available") {
-    throw new Error(`"${candidate.name}" has already been acquired.`);
+    throw new Error(`« ${candidate.name} » a déjà été acquis.`);
   }
   if (candidate.status === "rejected_unavailable") {
-    throw new Error(`"${candidate.name}" is marked unavailable.`);
+    throw new Error(`« ${candidate.name} » est marqué comme non disponible.`);
   }
 
   const committed = await listExpenses({ candidateId: candidate.id, status: "committed" });
@@ -889,12 +890,12 @@ export async function confirmCandidateAcquisitionPaid(params: {
 
     if (params.actualAmountMinor !== undefined) {
       if (!isPositiveInt(params.actualAmountMinor)) {
-        throw new Error("Actual amount must be a positive whole number of minor units");
+        throw new Error("Le montant réel doit être un nombre entier positif d'unités mineures");
       }
       const currency = normalizeCurrency(
         params.currency ?? candidate.priceCurrency ?? getConfig().BASE_CURRENCY
       );
-      if (!isSupportedExpenseCurrency(currency)) throw new Error(`Unsupported currency "${currency}"`);
+      if (!isSupportedExpenseCurrency(currency)) throw new Error(`Devise non prise en charge « ${currency} »`);
       const conv = await convertToBaseCurrency(params.actualAmountMinor, currency);
       Object.assign(patch, {
         originalAmountMinor: params.actualAmountMinor,
@@ -929,14 +930,14 @@ export async function confirmCandidateAcquisitionPaid(params: {
     const amountMinor = params.actualAmountMinor ?? candidate.expectedPriceMinor ?? 0;
     const currency = params.currency ?? candidate.priceCurrency ?? getConfig().BASE_CURRENCY;
     if (!isPositiveInt(amountMinor)) {
-      throw new Error("No price on record: supply the actual amount paid.");
+      throw new Error("Aucun prix enregistré : indiquez le montant réel payé.");
     }
     if (params.payer === "club_funds") {
       const conv = await convertToBaseCurrency(amountMinor, currency);
       const overview = await getTreasuryOverview();
       if (conv.cadAmountMinor > overview.availableAcquisitionBudgetCadMinor) {
         throw new Error(
-          `Insufficient acquisition budget for a club-funds payment of ${formatMoney(conv.cadAmountMinor, "CAD")}.`
+          `Budget d'acquisition insuffisant pour un paiement avec les fonds du club de ${formatMoney(conv.cadAmountMinor, "CAD")}.`
         );
       }
     }

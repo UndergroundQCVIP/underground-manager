@@ -178,7 +178,7 @@ export async function recordMemberSupport(
       return {
         success: false,
         alreadySupportedThisCycle: true,
-        error: "You have already used your nomination or support selection for this monthly cycle.",
+        error: "Vous avez déjà utilisé votre suggestion ou votre appui pour ce cycle mensuel.",
       };
     }
 
@@ -188,7 +188,7 @@ export async function recordMemberSupport(
       return {
         success: false,
         alreadySupportedThisCandidate: true,
-        error: "You have already supported this creator previously.",
+        error: "Vous avez déjà appuyé ce créateur.",
       };
     }
 
@@ -196,7 +196,7 @@ export async function recordMemberSupport(
     const candidateRes = await kv.get<WantedCandidate>(["wanted_candidates", candidateId]);
     const candidate = candidateRes.value;
     if (!candidate) {
-      return { success: false, error: "Candidate not found." };
+      return { success: false, error: "Candidat introuvable." };
     }
 
     const now = new Date().toISOString();
@@ -232,7 +232,7 @@ export async function recordMemberSupport(
 
   return {
     success: false,
-    error: "The Wanted List is very busy right now. Please try again in a moment.",
+    error: "La Liste de souhaits est très sollicitée en ce moment. Veuillez réessayer dans un instant.",
   };
 }
 

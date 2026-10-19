@@ -68,20 +68,20 @@ adminComposer.callbackQuery("admin:members_list", async (ctx) => {
   const members = await listMembers(15);
   const total = await countMembers();
 
-  let text = `👥 *REGISTERED MEMBERS* (Total: ${total})\n\n`;
+  let text = `👥 *MEMBRES INSCRITS* (Total : ${total})\n\n`;
 
   const kb = new InlineKeyboard();
   if (members.length === 0) {
-    text += "_No members recorded yet._\n";
+    text += "_Aucun membre enregistré pour le moment._\n";
   } else {
     for (const m of members) {
       const name = m.username ? `@${m.username}` : m.firstName;
       text += `• \`${m.userId}\` — ${escapeMd(name)}\n`;
-      kb.text(`Manage ${name}`, `admin:manage:${m.userId}`).row();
+      kb.text(`Gérer ${name}`, `admin:manage:${m.userId}`).row();
     }
   }
 
-  kb.text("⬅️ Admin Menu", "admin:menu");
+  kb.text("⬅️ Menu administrateur", "admin:menu");
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(text, {
@@ -94,14 +94,14 @@ adminComposer.callbackQuery("admin:members_list", async (ctx) => {
 adminComposer.callbackQuery("admin:lookup_prompt", async (ctx) => {
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    `🔍 *MEMBER LOOKUP*\n\n` +
-    `To look up a member, send the command with their numeric Telegram ID or @username:\n\n` +
-    `Example:\n` +
+    `🔍 *RECHERCHE DE MEMBRE*\n\n` +
+    `Pour rechercher un membre, envoyez la commande avec son identifiant Telegram numérique ou son @nom_d'utilisateur :\n\n` +
+    `Exemple :\n` +
     `\`/lookup 123456789\`\n` +
     `\`/lookup @username\``,
     {
       parse_mode: "Markdown",
-      reply_markup: new InlineKeyboard().text("⬅️ Admin Menu", "admin:menu"),
+      reply_markup: new InlineKeyboard().text("⬅️ Menu administrateur", "admin:menu"),
     }
   );
 });
@@ -110,7 +110,7 @@ adminComposer.callbackQuery("admin:lookup_prompt", async (ctx) => {
 adminComposer.command("lookup", async (ctx) => {
   const input = ctx.match?.trim();
   if (!input) {
-    await ctx.reply("Please specify a user ID or @username: `/lookup 123456789`", {
+    await ctx.reply("Veuillez indiquer un identifiant d'utilisateur ou un @nom_d'utilisateur : `/lookup 123456789`", {
       parse_mode: "Markdown",
     });
     return;
@@ -124,9 +124,9 @@ adminComposer.command("lookup", async (ctx) => {
   }
 
   if (!member) {
-    await ctx.reply(`❌ Member \`${input}\` not found in database.`, {
+    await ctx.reply(`❌ Membre \`${input}\` introuvable dans la base de données.`, {
       parse_mode: "Markdown",
-      reply_markup: new InlineKeyboard().text("⬅️ Admin Menu", "admin:menu"),
+      reply_markup: new InlineKeyboard().text("⬅️ Menu administrateur", "admin:menu"),
     });
     return;
   }
@@ -135,22 +135,22 @@ adminComposer.command("lookup", async (ctx) => {
   const allEntitlements = await getUserEntitlements(member.userId);
 
   let text =
-    `👤 *MEMBER DETAILS*\n\n` +
-    `*User ID:* \`${member.userId}\`\n` +
-    `*Name:* ${escapeMd(member.firstName)} ${escapeMd(member.lastName || "")}\n` +
-    `*Username:* ${member.username ? `@${escapeMd(member.username)}` : "None"}\n` +
-    `*First Seen:* ${formatTorontoDate(member.firstSeenAt, { dateStyle: "medium", timeStyle: "short" })}\n` +
-    `*Membership:* ${summary.primaryType}\n` +
-    `*Active Spaces:* ${summary.accessibleSpaces.join(", ") || "None"}\n` +
-    `*Expires:* ${summary.effectiveExpiry ? formatTorontoDate(summary.effectiveExpiry, { dateStyle: "medium", timeStyle: "short" }) : "N/A"}\n\n` +
-    `*Entitlements History:*\n`;
+    `👤 *DÉTAILS DU MEMBRE*\n\n` +
+    `*ID utilisateur :* \`${member.userId}\`\n` +
+    `*Nom :* ${escapeMd(member.firstName)} ${escapeMd(member.lastName || "")}\n` +
+    `*Nom d'utilisateur :* ${member.username ? `@${escapeMd(member.username)}` : "Aucun"}\n` +
+    `*Première apparition :* ${formatTorontoDate(member.firstSeenAt, { dateStyle: "medium", timeStyle: "short" })}\n` +
+    `*Adhésion :* ${summary.primaryType}\n` +
+    `*Espaces actifs :* ${summary.accessibleSpaces.join(", ") || "Aucun"}\n` +
+    `*Expiration :* ${summary.effectiveExpiry ? formatTorontoDate(summary.effectiveExpiry, { dateStyle: "medium", timeStyle: "short" }) : "s.o."}\n\n` +
+    `*Historique des accès :*\n`;
 
   if (allEntitlements.length === 0) {
-    text += "_No entitlement records found._\n";
+    text += "_Aucun enregistrement d'accès trouvé._\n";
   } else {
     for (const ent of allEntitlements.slice(0, 5)) {
       const statusIcon = ent.status === "active" ? "🟢" : "⚪";
-      text += `${statusIcon} *${ent.source}* (${ent.status})\n  Expires: ${formatTorontoDate(ent.expiresAt)}\n`;
+      text += `${statusIcon} *${ent.source}* (${ent.status})\n  Expiration : ${formatTorontoDate(ent.expiresAt)}\n`;
     }
   }
 
@@ -169,7 +169,7 @@ adminComposer.callbackQuery(/^admin:manage:(\d+)$/, async (ctx) => {
   const userId = Number(ctx.match[1]);
   const member = await getMember(userId);
   if (!member) {
-    await ctx.answerCallbackQuery({ text: "Member not found" });
+    await ctx.answerCallbackQuery({ text: "Membre introuvable" });
     return;
   }
 
@@ -180,11 +180,11 @@ adminComposer.callbackQuery(/^admin:manage:(\d+)$/, async (ctx) => {
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    `👤 *MANAGE MEMBER: \`${userId}\`*\n\n` +
-    `*Name:* ${escapeMd(member.firstName)}\n` +
-    `*Username:* ${member.username ? `@${escapeMd(member.username)}` : "None"}\n` +
-    `*Membership:* ${summary.primaryType}\n` +
-    `*Expires:* ${summary.effectiveExpiry ? formatTorontoDate(summary.effectiveExpiry) : "None"}`,
+    `👤 *GÉRER LE MEMBRE : \`${userId}\`*\n\n` +
+    `*Nom :* ${escapeMd(member.firstName)}\n` +
+    `*Nom d'utilisateur :* ${member.username ? `@${escapeMd(member.username)}` : "Aucun"}\n` +
+    `*Adhésion :* ${summary.primaryType}\n` +
+    `*Expiration :* ${summary.effectiveExpiry ? formatTorontoDate(summary.effectiveExpiry) : "Aucune"}`,
     {
       parse_mode: "Markdown",
       reply_markup: memberManageKeyboard(userId, activeComp?.id),
@@ -201,14 +201,14 @@ adminComposer.callbackQuery("admin:grant_wizard", async (ctx) => {
     const label = m.username ? `@${m.username}` : `${m.firstName} (${m.userId})`;
     kb.text(label, `admin:grant_dur:${m.userId}:30`).row();
   }
-  kb.text("⬅️ Admin Menu", "admin:menu");
+  kb.text("⬅️ Menu administrateur", "admin:menu");
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    `🎁 *GRANT COMPLIMENTARY ACCESS — STEP 1*\n\n` +
-    `Select a registered member below, or send command:\n\n` +
+    `🎁 *ACCORDER UN ACCÈS GRACIEUX — ÉTAPE 1*\n\n` +
+    `Sélectionnez un membre inscrit ci-dessous, ou envoyez la commande :\n\n` +
     `\`/grant <userId> [days]\`\n` +
-    `Example: \`/grant 123456789 30\``,
+    `Exemple : \`/grant 123456789 30\``,
     {
       parse_mode: "Markdown",
       reply_markup: kb,
@@ -223,14 +223,14 @@ adminComposer.command("grant", async (ctx) => {
   const days = args[1] ? Number(args[1]) : 30;
 
   if (!targetId || isNaN(targetId)) {
-    await ctx.reply("Usage: `/grant <numeric_user_id> [days]`\nExample: `/grant 123456789 30`", {
+    await ctx.reply("Utilisation : `/grant <id_utilisateur_numérique> [jours]`\nExemple : `/grant 123456789 30`", {
       parse_mode: "Markdown",
     });
     return;
   }
 
   await ctx.reply(
-    `🎁 *GRANT COMPLIMENTARY ACCESS*\n\nTarget User ID: \`${targetId}\`\nSelect duration:`,
+    `🎁 *ACCORDER UN ACCÈS GRACIEUX*\n\nID de l'utilisateur ciblé : \`${targetId}\`\nChoisissez la durée :`,
     {
       parse_mode: "Markdown",
       reply_markup: grantDurationKeyboard(targetId),
@@ -245,10 +245,10 @@ adminComposer.callbackQuery(/^admin:grant_dur:(\d+):(\d+)$/, async (ctx) => {
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    `🎁 *GRANT COMPLIMENTARY ACCESS — STEP 2*\n\n` +
-    `*Target Member:* \`${userId}\`\n` +
-    `*Duration:* ${duration} Days\n\n` +
-    `Select the reason for this grant:`,
+    `🎁 *ACCORDER UN ACCÈS GRACIEUX — ÉTAPE 2*\n\n` +
+    `*Membre ciblé :* \`${userId}\`\n` +
+    `*Durée :* ${duration} jours\n\n` +
+    `Choisissez le motif de cet accès :`,
     {
       parse_mode: "Markdown",
       reply_markup: grantReasonKeyboard(userId, duration),
@@ -264,11 +264,11 @@ adminComposer.callbackQuery(/^admin:grant_rsn:(\d+):(\d+):([a-z_]+)$/, async (ct
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    `🎁 *GRANT COMPLIMENTARY ACCESS — STEP 3*\n\n` +
-    `*Target Member:* \`${userId}\`\n` +
-    `*Duration:* ${duration} Days\n` +
-    `*Reason:* ${reason}\n\n` +
-    `Select authorized spaces:`,
+    `🎁 *ACCORDER UN ACCÈS GRACIEUX — ÉTAPE 3*\n\n` +
+    `*Membre ciblé :* \`${userId}\`\n` +
+    `*Durée :* ${duration} jours\n` +
+    `*Motif :* ${reason}\n\n` +
+    `Choisissez les espaces autorisés :`,
     {
       parse_mode: "Markdown",
       reply_markup: grantSpacesKeyboard(userId, duration, reason),
@@ -287,12 +287,12 @@ adminComposer.callbackQuery(
 
     await ctx.answerCallbackQuery();
     await ctx.editMessageText(
-      `🎁 *CONFIRM COMPLIMENTARY GRANT*\n\n` +
-      `*Target Member:* \`${userId}\`\n` +
-      `*Duration:* ${duration} Days\n` +
-      `*Reason:* ${reason}\n` +
-      `*Access Level:* ${level}\n\n` +
-      `Please confirm to activate access immediately:`,
+      `🎁 *CONFIRMER L'ACCÈS GRACIEUX*\n\n` +
+      `*Membre ciblé :* \`${userId}\`\n` +
+      `*Durée :* ${duration} jours\n` +
+      `*Motif :* ${reason}\n` +
+      `*Niveau d'accès :* ${level}\n\n` +
+      `Veuillez confirmer pour activer l'accès immédiatement :`,
       {
         parse_mode: "Markdown",
         reply_markup: grantConfirmKeyboard(userId, duration, reason, level),
@@ -321,22 +321,22 @@ adminComposer.callbackQuery(
 
     if (!result.success || !result.entitlement) {
       await ctx.answerCallbackQuery({
-        text: `Error: ${result.error ?? "Failed to grant"}`,
+        text: `Erreur : ${result.error ?? "Échec de l'octroi"}`,
         show_alert: true,
       });
       return;
     }
 
-    await ctx.answerCallbackQuery({ text: "Complimentary access granted!" });
+    await ctx.answerCallbackQuery({ text: "Accès gracieux accordé!" });
     await ctx.editMessageText(
-      `✅ *COMPLIMENTARY ACCESS ACTIVATED*\n\n` +
-      `*Member:* \`${userId}\`\n` +
-      `*Duration:* ${duration} Days\n` +
-      `*Expires:* ${formatTorontoDate(result.entitlement.expiresAt)}\n` +
-      `*Spaces:* ${result.entitlement.spaces.join(", ")}`,
+      `✅ *ACCÈS GRACIEUX ACTIVÉ*\n\n` +
+      `*Membre :* \`${userId}\`\n` +
+      `*Durée :* ${duration} jours\n` +
+      `*Expiration :* ${formatTorontoDate(result.entitlement.expiresAt)}\n` +
+      `*Espaces :* ${result.entitlement.spaces.join(", ")}`,
       {
         parse_mode: "Markdown",
-        reply_markup: new InlineKeyboard().text("⬅️ Admin Menu", "admin:menu"),
+        reply_markup: new InlineKeyboard().text("⬅️ Menu administrateur", "admin:menu"),
       }
     );
 
@@ -344,15 +344,15 @@ adminComposer.callbackQuery(
     try {
       await ctx.api.sendMessage(
         userId,
-        `🎁 *You have been granted complimentary VIP access!*\n\n` +
-        `Access is active for *${duration} days* (until ${formatTorontoDate(
+        `🎁 *Vous avez reçu un accès VIP gracieux!*\n\n` +
+        `L'accès est actif pour *${duration} jours* (jusqu'au ${formatTorontoDate(
           result.entitlement.expiresAt
         )}).\n\n` +
-        `Tap below to join your spaces:`,
+        `Touchez ci-dessous pour rejoindre vos espaces :`,
         {
           parse_mode: "Markdown",
           reply_markup: new InlineKeyboard().text(
-            "🔓 Access My Channels",
+            "🔓 Accéder à mes canaux",
             "member:channels"
           ),
         }
@@ -371,17 +371,17 @@ adminComposer.callbackQuery(/^admin:extend_ent:(\d+):([^:]+):(\d+)$/, async (ctx
 
   const result = await extendComplimentaryAccess(adminId, entitlementId, days);
   if (!result.success || !result.entitlement) {
-    await ctx.answerCallbackQuery({ text: `Failed: ${result.error}` });
+    await ctx.answerCallbackQuery({ text: `Échec : ${result.error}` });
     return;
   }
 
-  await ctx.answerCallbackQuery({ text: `Extended by ${days} days!` });
+  await ctx.answerCallbackQuery({ text: `Prolongé de ${days} jours!` });
   await ctx.reply(
-    `✅ Entitlement extended by ${days} days.\nNew expiry: ${formatTorontoDate(
+    `✅ Accès prolongé de ${days} jours.\nNouvelle expiration : ${formatTorontoDate(
       result.entitlement.expiresAt
     , { dateStyle: "medium", timeStyle: "short" })}`,
     {
-      reply_markup: new InlineKeyboard().text("⬅️ Admin Menu", "admin:menu"),
+      reply_markup: new InlineKeyboard().text("⬅️ Menu administrateur", "admin:menu"),
     }
   );
 });
@@ -397,13 +397,13 @@ adminComposer.callbackQuery(/^admin:revoke_ent:(\d+):([^:]+)$/, async (ctx) => {
     "Revoked via admin dashboard"
   );
   if (!result.success) {
-    await ctx.answerCallbackQuery({ text: `Failed: ${result.error}` });
+    await ctx.answerCallbackQuery({ text: `Échec : ${result.error}` });
     return;
   }
 
-  await ctx.answerCallbackQuery({ text: "Access revoked!" });
-  await ctx.reply(`⛔ Entitlement revoked successfully.`, {
-    reply_markup: new InlineKeyboard().text("⬅️ Admin Menu", "admin:menu"),
+  await ctx.answerCallbackQuery({ text: "Accès révoqué!" });
+  await ctx.reply(`⛔ Accès révoqué avec succès.`, {
+    reply_markup: new InlineKeyboard().text("⬅️ Menu administrateur", "admin:menu"),
   });
 });
 
@@ -432,73 +432,73 @@ adminComposer.callbackQuery("admin:subs_overview", async (ctx) => {
   ).length;
 
   const text =
-    `📊 *SUBSCRIPTION & REVENUE OVERVIEW*\n\n` +
-    `*Total Registered Users:* ${totalMembers}\n` +
-    `*Active Paid Subscribers:* ${activePaid}\n` +
-    `*Active Complimentary:* ${activeComp}\n` +
-    `*Confirmed Stars Transactions:* ${payments.length}\n` +
-    `*Total Stars Revenue:* ⭐️ ${totalPaidRevenue}\n\n` +
-    `_Full financial treasury and payout controls will be handled in UG-03._`;
+    `📊 *APERÇU DES ABONNEMENTS ET DES REVENUS*\n\n` +
+    `*Total des utilisateurs inscrits :* ${totalMembers}\n` +
+    `*Abonnés payants actifs :* ${activePaid}\n` +
+    `*Accès gracieux actifs :* ${activeComp}\n` +
+    `*Transactions en Étoiles confirmées :* ${payments.length}\n` +
+    `*Revenus totaux en Étoiles :* ⭐️ ${totalPaidRevenue}\n\n` +
+    `_Les contrôles complets de la trésorerie et des versements seront gérés dans UG-03._`;
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(text, {
     parse_mode: "Markdown",
-    reply_markup: new InlineKeyboard().text("⬅️ Admin Menu", "admin:menu"),
+    reply_markup: new InlineKeyboard().text("⬅️ Menu administrateur", "admin:menu"),
   });
 });
 
 // System Status & Permissions Check
 adminComposer.callbackQuery("admin:status", async (ctx) => {
-  await ctx.answerCallbackQuery({ text: "Checking space permissions..." });
+  await ctx.answerCallbackQuery({ text: "Vérification des permissions des espaces..." });
 
-  let text = `⚙️ *SYSTEM STATUS & BOT PERMISSIONS*\n\n`;
+  let text = `⚙️ *ÉTAT DU SYSTÈME ET PERMISSIONS DU ROBOT*\n\n`;
 
   for (const spaceId of SPACE_IDS) {
     const perm = await checkBotPermissions(ctx.api, spaceId);
     const title = getSpaceTitle(spaceId);
     if (perm.ok) {
-      text += `🟢 *${title}:* OK (Admin permissions verified)\n`;
+      text += `🟢 *${title}:* OK (permissions d'administrateur vérifiées)\n`;
     } else {
-      text += `🔴 *${title}:* Missing [${perm.missingPermissions.join(", ")}]\n`;
+      text += `🔴 *${title}:* Manquantes [${perm.missingPermissions.join(", ")}]\n`;
     }
   }
 
-  text += `\n*Database:* Deno KV (Connected)\n` +
-    `*Reconciliation:* Hourly via Deno Cron\n` +
-    `*Payment Mode:* Official Telegram Stars (XTR)`;
+  text += `\n*Base de données :* Deno KV (connectée)\n` +
+    `*Réconciliation :* toutes les heures via Deno Cron\n` +
+    `*Mode de paiement :* Étoiles Telegram officielles (XTR)`;
 
   await ctx.editMessageText(text, {
     parse_mode: "Markdown",
     reply_markup: new InlineKeyboard()
-      .text("🔄 Trigger Safe Resync", "admin:resync")
+      .text("🔄 Lancer une resynchronisation sécuritaire", "admin:resync")
       .row()
-      .text("⬅️ Admin Menu", "admin:menu"),
+      .text("⬅️ Menu administrateur", "admin:menu"),
   });
 });
 
 // Trigger Safe Resynchronization
 adminComposer.callbackQuery("admin:resync", async (ctx) => {
-  await ctx.answerCallbackQuery({ text: "Running access reconciliation..." });
+  await ctx.answerCallbackQuery({ text: "Réconciliation des accès en cours..." });
 
   try {
     const result = await reconcileAllMembers(ctx.api);
 
     await ctx.reply(
-      `🔄 *ACCESS RECONCILIATION COMPLETE*\n\n` +
-      `*Checked Members:* ${result.checkedUsers}\n` +
-      `*Expired Members Removed:* ${result.removedCount}\n` +
-      `*Errors Encountered:* ${result.errors.length}\n` +
+      `🔄 *RÉCONCILIATION DES ACCÈS TERMINÉE*\n\n` +
+      `*Membres vérifiés :* ${result.checkedUsers}\n` +
+      `*Membres expirés retirés :* ${result.removedCount}\n` +
+      `*Erreurs rencontrées :* ${result.errors.length}\n` +
       (result.errors.length > 0
-        ? `\n_Errors:_\n${result.errors.slice(0, 3).join("\n")}`
+        ? `\n_Erreurs :_\n${result.errors.slice(0, 3).join("\n")}`
         : ""),
       {
         parse_mode: "Markdown",
-        reply_markup: new InlineKeyboard().text("⬅️ Admin Menu", "admin:menu"),
+        reply_markup: new InlineKeyboard().text("⬅️ Menu administrateur", "admin:menu"),
       }
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await ctx.reply(`⚠️ Reconciliation error: ${msg}`);
+    await ctx.reply(`⚠️ Erreur de réconciliation : ${msg}`);
   }
 });
 
@@ -513,27 +513,27 @@ adminComposer.callbackQuery("admin:creators_menu", async (ctx) => {
   const withContent = creators.filter((c) => c.hasContent).length;
 
   let text =
-    `👩‍🎤 *CREATOR DIRECTORY MANAGEMENT*\n\n` +
-    `*Total Registered Creators:* ${creators.length}\n` +
-    `*Available in Directory (with media):* ${withContent}\n\n` +
-    `*Recent Creators:*\n`;
+    `👩‍🎤 *GESTION DU RÉPERTOIRE DES CRÉATEURS*\n\n` +
+    `*Total des créateurs inscrits :* ${creators.length}\n` +
+    `*Disponibles dans le répertoire (avec médias) :* ${withContent}\n\n` +
+    `*Créateurs récents :*\n`;
 
   if (creators.length === 0) {
-    text += `_No creators registered yet. Topics created in TOKEBEC VIP COLLECTIONS will appear here._\n\n`;
+    text += `_Aucun créateur inscrit pour le moment. Les sujets créés dans TOKEBEC VIP COLLECTIONS apparaîtront ici._\n\n`;
   } else {
     for (const c of creators.slice(0, 10)) {
       const statusIcon = c.status === "archived" ? "📦" : (c.hasContent ? "🟢" : "⚪");
-      text += `${statusIcon} *${escapeMd(c.name)}* (Thread: \`${c.topicId}\`)\n`;
+      text += `${statusIcon} *${escapeMd(c.name)}* (Fil : \`${c.topicId}\`)\n`;
     }
     text += "\n";
   }
 
-  text += `💡 _To manually pair an existing topic:_ \`/register_creator <thread_id> <name>\``;
+  text += `💡 _Pour associer manuellement un sujet existant :_ \`/register_creator <thread_id> <name>\``;
 
   const kb = new InlineKeyboard()
-    .text("🔄 Sync Public Directory Now", "admin:sync_dir")
+    .text("🔄 Synchroniser le répertoire public maintenant", "admin:sync_dir")
     .row()
-    .text("⬅️ Admin Menu", "admin:menu");
+    .text("⬅️ Menu administrateur", "admin:menu");
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(text, {
@@ -545,17 +545,17 @@ adminComposer.callbackQuery("admin:creators_menu", async (ctx) => {
 // Trigger Public Directory Sync
 adminComposer.callbackQuery("admin:sync_dir", async (ctx) => {
   const { syncPublicDirectory } = await import("../../directory/sync.ts");
-  await ctx.answerCallbackQuery({ text: "Synchronizing Public Creator Directory..." });
+  await ctx.answerCallbackQuery({ text: "Synchronisation du répertoire public des créateurs..." });
 
   const result = await syncPublicDirectory(ctx.api, true);
   if (result.updated) {
-    await ctx.reply(`✅ *Public Directory Synchronized!*\nPublished/updated ${result.publishedCount} message(s).`, {
+    await ctx.reply(`✅ *Répertoire public synchronisé!*\n${result.publishedCount} message(s) publié(s) ou mis à jour.`, {
       parse_mode: "Markdown",
-      reply_markup: new InlineKeyboard().text("⬅️ Creators Menu", "admin:creators_menu"),
+      reply_markup: new InlineKeyboard().text("⬅️ Menu des créateurs", "admin:creators_menu"),
     });
   } else {
-    await ctx.reply(`ℹ️ Directory sync completed: ${result.reason || result.error || "No updates needed."}`, {
-      reply_markup: new InlineKeyboard().text("⬅️ Creators Menu", "admin:creators_menu"),
+    await ctx.reply(`ℹ️ Synchronisation du répertoire terminée : ${result.reason || result.error || "Aucune mise à jour nécessaire."}`, {
+      reply_markup: new InlineKeyboard().text("⬅️ Menu des créateurs", "admin:creators_menu"),
     });
   }
 });
@@ -564,7 +564,7 @@ adminComposer.callbackQuery("admin:sync_dir", async (ctx) => {
 adminComposer.command("register_creator", async (ctx) => {
   const args = ctx.match?.trim().split(/\s+/);
   if (!args || args.length < 2) {
-    await ctx.reply("Usage: `/register_creator <numeric_topic_id> <Creator Name>`\nExample: `/register_creator 42 Aria`", {
+    await ctx.reply("Utilisation : `/register_creator <id_sujet_numérique> <Nom du créateur>`\nExemple : `/register_creator 42 Aria`", {
       parse_mode: "Markdown",
     });
     return;
@@ -575,7 +575,7 @@ adminComposer.command("register_creator", async (ctx) => {
   const config = (await import("../../config.ts")).getConfig();
 
   if (isNaN(topicId) || topicId <= 0) {
-    await ctx.reply("Invalid topic ID. Must be a positive numeric thread ID.");
+    await ctx.reply("ID de sujet invalide. Il doit s'agir d'un ID de fil numérique positif.");
     return;
   }
 
@@ -588,14 +588,14 @@ adminComposer.command("register_creator", async (ctx) => {
   );
 
   await ctx.reply(
-    `✅ *Creator Registered!*\n\n` +
-    `• *Name:* ${escapeMd(creator.name)}\n` +
-    `• *Topic ID:* \`${creator.topicId}\`\n` +
-    `• *Chat ID:* \`${creator.chatId}\`\n` +
-    `• *Status:* Active`,
+    `✅ *Créateur inscrit!*\n\n` +
+    `• *Nom :* ${escapeMd(creator.name)}\n` +
+    `• *ID du sujet :* \`${creator.topicId}\`\n` +
+    `• *ID du clavardage :* \`${creator.chatId}\`\n` +
+    `• *Statut :* Actif`,
     {
       parse_mode: "Markdown",
-      reply_markup: new InlineKeyboard().text("👩‍🎤 Creators Menu", "admin:creators_menu"),
+      reply_markup: new InlineKeyboard().text("👩‍🎤 Menu des créateurs", "admin:creators_menu"),
     }
   );
 });
@@ -609,26 +609,26 @@ adminComposer.callbackQuery("admin:wanted_menu", async (ctx) => {
   const pendingReview = candidates.filter((c) => c.status === "requested" || c.status === "pricing_review");
 
   let text =
-    `🎯 *WANTED LIST ADMINISTRATION*\n\n` +
-    `*Total Candidates:* ${candidates.length}\n` +
-    `*Pending Review:* ${pendingReview.length}\n\n` +
-    `*Top Community Nominations:*\n`;
+    `🎯 *ADMINISTRATION DE LA LISTE DE SOUHAITS*\n\n` +
+    `*Total des candidats :* ${candidates.length}\n` +
+    `*En attente de révision :* ${pendingReview.length}\n\n` +
+    `*Principales suggestions de la communauté :*\n`;
 
   const kb = new InlineKeyboard();
   if (candidates.length === 0) {
-    text += `_No candidates on Wanted List yet._\n\n`;
+    text += `_Aucun candidat dans la Liste de souhaits pour le moment._\n\n`;
   } else {
     for (const c of candidates.slice(0, 8)) {
       const statusLabel = WANTED_STATUS_LABELS[c.status] || c.status;
-      text += `• *${escapeMd(c.name)}* — ${c.supportCount} supporters \`[${statusLabel}]\`\n`;
-      kb.text(`Manage ${c.name}`, `admin:manage_cand:${c.id}`).row();
+      text += `• *${escapeMd(c.name)}* — ${c.supportCount} appuis \`[${statusLabel}]\`\n`;
+      kb.text(`Gérer ${c.name}`, `admin:manage_cand:${c.id}`).row();
     }
     text += "\n";
   }
 
-  kb.text("🔄 Sync Wanted Channel", "admin:sync_wanted_channel")
+  kb.text("🔄 Synchroniser le canal des souhaits", "admin:sync_wanted_channel")
     .row()
-    .text("⬅️ Admin Menu", "admin:menu");
+    .text("⬅️ Menu administrateur", "admin:menu");
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(text, {
@@ -645,41 +645,41 @@ adminComposer.callbackQuery(/^admin:manage_cand:([a-f0-9-]+)$/, async (ctx) => {
 
   const candidate = await getWantedCandidate(candidateId);
   if (!candidate) {
-    await ctx.answerCallbackQuery({ text: "Candidate not found." });
+    await ctx.answerCallbackQuery({ text: "Candidat introuvable." });
     return;
   }
 
   const statusLabel = WANTED_STATUS_LABELS[candidate.status] || candidate.status;
   const text =
-    `🎯 *MANAGE CANDIDATE: ${escapeMd(candidate.name)}*\n\n` +
-    `*Supporters:* ${candidate.supportCount}\n` +
-    `*Current Status:* \`${statusLabel}\`\n` +
-    `*Profile URL:* ${candidate.profileUrl || "None"}\n` +
-    `*Suggested Date:* ${formatTorontoDate(candidate.createdAt)}\n\n` +
-    `Update status:`;
+    `🎯 *GÉRER LE CANDIDAT : ${escapeMd(candidate.name)}*\n\n` +
+    `*Appuis :* ${candidate.supportCount}\n` +
+    `*Statut actuel :* \`${statusLabel}\`\n` +
+    `*URL du profil :* ${candidate.profileUrl || "Aucune"}\n` +
+    `*Date de suggestion :* ${formatTorontoDate(candidate.createdAt)}\n\n` +
+    `Mettre à jour le statut :`;
 
   const kb = new InlineKeyboard()
-    .text("✅ Approve for Voting", `admin:set_stat:${candidate.id}:eligible_for_voting`)
-    .text("💰 Pricing Review", `admin:set_stat:${candidate.id}:pricing_review`)
+    .text("✅ Approuver pour le vote", `admin:set_stat:${candidate.id}:eligible_for_voting`)
+    .text("💰 Révision du prix", `admin:set_stat:${candidate.id}:pricing_review`)
     .row();
 
   // Acquisition money flow goes through the treasury (budget check, commitment,
   // ledger) — never a bare status flip.
   if (candidate.status === "selected") {
-    kb.text("💳 Approve Acquisition (reserve budget)", `admin:acq_approve:${candidate.id}`).row();
+    kb.text("💳 Approuver l'acquisition (réserver le budget)", `admin:acq_approve:${candidate.id}`).row();
   } else if (candidate.status === "acquisition_pending") {
-    kb.text("🏦 Paid from club funds", `admin:acq_paid:${candidate.id}:club_funds`)
-      .text("👤 I paid personally", `admin:acq_paid:${candidate.id}:admin_personal`)
+    kb.text("🏦 Payé avec les fonds du club", `admin:acq_paid:${candidate.id}:club_funds`)
+      .text("👤 J'ai payé personnellement", `admin:acq_paid:${candidate.id}:admin_personal`)
       .row()
-      .text("↩️ Cancel & release budget", `admin:acq_cancel:${candidate.id}`)
+      .text("↩️ Annuler et libérer le budget", `admin:acq_cancel:${candidate.id}`)
       .row();
   }
 
-  kb.text("🟢 Mark Available", `admin:set_stat:${candidate.id}:available`)
+  kb.text("🟢 Marquer comme disponible", `admin:set_stat:${candidate.id}:available`)
     .row()
-    .text("⛔ Reject / Unavailable", `admin:set_stat:${candidate.id}:rejected_unavailable`)
+    .text("⛔ Rejeter / indisponible", `admin:set_stat:${candidate.id}:rejected_unavailable`)
     .row()
-    .text("⬅️ Wanted Admin", "admin:wanted_menu");
+    .text("⬅️ Admin des souhaits", "admin:wanted_menu");
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(text, {
@@ -698,36 +698,36 @@ adminComposer.callbackQuery(/^admin:set_stat:([a-f0-9-]+):([a-z_]+)$/, async (ct
   // ballot and treasury workflows and cannot be set by hand.
   const MANUAL_STATUSES = ["requested", "pricing_review", "eligible_for_voting", "available", "rejected_unavailable"];
   if (!MANUAL_STATUSES.includes(newStatus)) {
-    await ctx.answerCallbackQuery({ text: "That status is managed automatically.", show_alert: true });
+    await ctx.answerCallbackQuery({ text: "Ce statut est géré automatiquement.", show_alert: true });
     return;
   }
 
   const updated = await updateWantedStatus(candidateId, newStatus, `Updated by admin ${ctx.from!.id}`);
   if (!updated) {
-    await ctx.answerCallbackQuery({ text: "Failed to update status." });
+    await ctx.answerCallbackQuery({ text: "Échec de la mise à jour du statut." });
     return;
   }
 
-  await ctx.answerCallbackQuery({ text: `Status updated to ${newStatus}` });
-  await ctx.reply(`✅ Candidate *${escapeMd(updated.name)}* status updated to \`${newStatus}\`.`, {
+  await ctx.answerCallbackQuery({ text: `Statut mis à jour : ${newStatus}` });
+  await ctx.reply(`✅ Le statut du candidat *${escapeMd(updated.name)}* est maintenant \`${newStatus}\`.`, {
     parse_mode: "Markdown",
-    reply_markup: new InlineKeyboard().text("🎯 Wanted Admin", "admin:wanted_menu"),
+    reply_markup: new InlineKeyboard().text("🎯 Admin des souhaits", "admin:wanted_menu"),
   });
 });
 
 // Sync Wanted List Channel
 adminComposer.callbackQuery("admin:sync_wanted_channel", async (ctx) => {
   const { syncWantedListChannel } = await import("../../wanted/service.ts");
-  await ctx.answerCallbackQuery({ text: "Syncing Wanted List channel..." });
+  await ctx.answerCallbackQuery({ text: "Synchronisation du canal de la Liste de souhaits..." });
 
   const result = await syncWantedListChannel(ctx.api);
   if (result.success) {
-    await ctx.reply("✅ Wanted List channel synchronized successfully!", {
-      reply_markup: new InlineKeyboard().text("🎯 Wanted Admin", "admin:wanted_menu"),
+    await ctx.reply("✅ Canal de la Liste de souhaits synchronisé avec succès!", {
+      reply_markup: new InlineKeyboard().text("🎯 Admin des souhaits", "admin:wanted_menu"),
     });
   } else {
-    await ctx.reply(`⚠️ Failed to sync Wanted List channel: ${result.error}`, {
-      reply_markup: new InlineKeyboard().text("🎯 Wanted Admin", "admin:wanted_menu"),
+    await ctx.reply(`⚠️ Échec de la synchronisation du canal de la Liste de souhaits : ${result.error}`, {
+      reply_markup: new InlineKeyboard().text("🎯 Admin des souhaits", "admin:wanted_menu"),
     });
   }
 });
@@ -738,7 +738,7 @@ adminComposer.callbackQuery("admin:voting_menu", async (ctx) => {
   const activeBallot = await getActiveBallot();
   const past = await listPastBallots(3);
 
-  let text = `🗳️ *ACQUISITION VOTING ADMINISTRATION*\n\n`;
+  let text = `🗳️ *ADMINISTRATION DU VOTE D'ACQUISITION*\n\n`;
 
   const kb = new InlineKeyboard();
 
@@ -752,25 +752,25 @@ adminComposer.callbackQuery("admin:voting_menu", async (ctx) => {
     });
 
     text +=
-      `🟢 *ACTIVE BALLOT: ${escapeMd(activeBallot.title)}*\n` +
-      `*Closes:* ${closesStr}\n` +
-      `*Votes Cast So Far:* ${summary.totalVotes}\n` +
-      `*Candidates:* ${activeBallot.candidates.map((c) => escapeMd(c.creatorName)).join(", ")}\n\n`;
+      `🟢 *SCRUTIN ACTIF : ${escapeMd(activeBallot.title)}*\n` +
+      `*Clôture :* ${closesStr}\n` +
+      `*Votes exprimés jusqu'à maintenant :* ${summary.totalVotes}\n` +
+      `*Candidats :* ${activeBallot.candidates.map((c) => escapeMd(c.creatorName)).join(", ")}\n\n`;
 
-    kb.text("🛑 Close Ballot Early & Tally", `admin:close_ballot:${activeBallot.id}`).row();
+    kb.text("🛑 Clore le scrutin maintenant et compter les votes", `admin:close_ballot:${activeBallot.id}`).row();
   } else {
-    text += `⚪ _No active voting ballot in progress._\n\n`;
-    kb.text("📝 Prepare Monthly Ballot", "admin:prepare_ballot").row();
+    text += `⚪ _Aucun scrutin actif en cours._\n\n`;
+    kb.text("📝 Préparer le scrutin mensuel", "admin:prepare_ballot").row();
   }
 
   if (past.length > 0) {
-    text += `*Past Ballots:*\n`;
+    text += `*Scrutins passés :*\n`;
     for (const b of past) {
       text += `• ${escapeMd(b.title)} (${b.status})\n`;
     }
   }
 
-  kb.text("⬅️ Admin Menu", "admin:menu");
+  kb.text("⬅️ Menu administrateur", "admin:menu");
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(text, {
@@ -791,23 +791,23 @@ adminComposer.callbackQuery("admin:prepare_ballot", async (ctx) => {
 
   if (eligible.length < 2) {
     await ctx.answerCallbackQuery({
-      text: "Need at least 2 candidates with supporters to create a ballot.",
+      text: "Il faut au moins 2 candidats ayant des appuis pour créer un scrutin.",
       show_alert: true,
     });
     return;
   }
 
   const kb = new InlineKeyboard()
-    .text("🚀 Open Ballot Now (Top 5 Candidates)", "admin:launch_ballot")
+    .text("🚀 Ouvrir le scrutin maintenant (5 meilleurs candidats)", "admin:launch_ballot")
     .row()
-    .text("❌ Cancel", "admin:voting_menu");
+    .text("❌ Annuler", "admin:voting_menu");
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    `🗳️ *PREPARE MONTHLY CREATOR BALLOT*\n\n` +
-    `*Eligible Candidates for Shortlist:*\n` +
-    eligible.slice(0, 5).map((c, i) => `${i + 1}. *${escapeMd(c.name)}* (${c.supportCount} supporters)`).join("\n") +
-    `\n\nVoting will run for the configured voting period (VOTING_PERIOD_DAYS). Confirm to launch:`,
+    `🗳️ *PRÉPARER LE SCRUTIN MENSUEL DES CRÉATEURS*\n\n` +
+    `*Candidats admissibles à la liste restreinte :*\n` +
+    eligible.slice(0, 5).map((c, i) => `${i + 1}. *${escapeMd(c.name)}* (${c.supportCount} appuis)`).join("\n") +
+    `\n\nLe vote se déroulera pendant la période de vote configurée (VOTING_PERIOD_DAYS). Confirmez pour lancer :`,
     {
       parse_mode: "Markdown",
       reply_markup: kb,
@@ -824,20 +824,20 @@ adminComposer.callbackQuery("admin:launch_ballot", async (ctx) => {
       adminId: ctx.from!.id,
     });
 
-    await ctx.answerCallbackQuery({ text: "Ballot published!" });
+    await ctx.answerCallbackQuery({ text: "Scrutin publié!" });
     await ctx.reply(
-      `🎉 *BALLOT SUCCESSFULLY OPENED!*\n\n` +
-      `*Title:* ${escapeMd(ballot.title)}\n` +
-      `*Candidates:* ${ballot.candidates.map((c) => escapeMd(c.creatorName)).join(", ")}\n` +
-      `*Closes:* ${formatTorontoDate(ballot.closesAt, { dateStyle: "medium", timeStyle: "short" })}`,
+      `🎉 *SCRUTIN OUVERT AVEC SUCCÈS!*\n\n` +
+      `*Titre :* ${escapeMd(ballot.title)}\n` +
+      `*Candidats :* ${ballot.candidates.map((c) => escapeMd(c.creatorName)).join(", ")}\n` +
+      `*Clôture :* ${formatTorontoDate(ballot.closesAt, { dateStyle: "medium", timeStyle: "short" })}`,
       {
         parse_mode: "Markdown",
-        reply_markup: new InlineKeyboard().text("🗳️ Voting Admin", "admin:voting_menu"),
+        reply_markup: new InlineKeyboard().text("🗳️ Admin du vote", "admin:voting_menu"),
       }
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await ctx.answerCallbackQuery({ text: `Failed: ${msg}`, show_alert: true });
+    await ctx.answerCallbackQuery({ text: `Échec : ${msg}`, show_alert: true });
   }
 });
 
@@ -846,26 +846,26 @@ adminComposer.callbackQuery(/^admin:close_ballot:([a-f0-9-]+)$/, async (ctx) => 
   const ballotId = ctx.match[1];
   const { closeAndFinalizeBallot } = await import("../../voting/service.ts");
 
-  await ctx.answerCallbackQuery({ text: "Closing ballot and computing tallies..." });
+  await ctx.answerCallbackQuery({ text: "Clôture du scrutin et décompte des votes..." });
 
   try {
     const summary = await closeAndFinalizeBallot(ballotId, ctx.api);
 
     await ctx.reply(
-      `📊 *BALLOT CLOSED!*\n\n` +
-      `*Total Votes Cast:* ${summary.totalVotes}\n` +
-      `*Turnout:* ${summary.eligibleTurnoutPct}%\n` +
-      `*Outcome:* ${summary.isTie ? "TIE (Runoff Scheduled)" : (summary.winner ? `Winner: *${escapeMd(summary.winner.creatorName)}*` : "No votes cast")}\n\n` +
-      `*Candidate Tallies:*\n` +
+      `📊 *SCRUTIN CLOS!*\n\n` +
+      `*Total des votes exprimés :* ${summary.totalVotes}\n` +
+      `*Participation :* ${summary.eligibleTurnoutPct}%\n` +
+      `*Résultat :* ${summary.isTie ? "ÉGALITÉ (second tour prévu)" : (summary.winner ? `Gagnant : *${escapeMd(summary.winner.creatorName)}*` : "Aucun vote exprimé")}\n\n` +
+      `*Décompte par candidat :*\n` +
       summary.tally.map((t) => `• ${escapeMd(t.name)}: ${t.votes} votes`).join("\n"),
       {
         parse_mode: "Markdown",
-        reply_markup: new InlineKeyboard().text("🗳️ Voting Admin", "admin:voting_menu"),
+        reply_markup: new InlineKeyboard().text("🗳️ Admin du vote", "admin:voting_menu"),
       }
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await ctx.reply(`⚠️ Failed closing ballot: ${msg}`);
+    await ctx.reply(`⚠️ Échec de la clôture du scrutin : ${msg}`);
   }
 });
 

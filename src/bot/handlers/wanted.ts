@@ -22,20 +22,20 @@ export const wantedComposer = new Composer();
 
 export function wantedMenuKeyboard(hasActiveVote: boolean): InlineKeyboard {
   const kb = new InlineKeyboard()
-    .text("📋 View Wanted Creators", "wanted:view")
-    .text("💡 Suggest a Creator", "wanted:suggest_prompt")
+    .text("📋 Voir les créateurs souhaités", "wanted:view")
+    .text("💡 Suggérer un créateur", "wanted:suggest_prompt")
     .row()
-    .text("👍 Support a Creator", "wanted:support_list");
+    .text("👍 Appuyer un créateur", "wanted:support_list");
 
   if (hasActiveVote) {
-    kb.text("🗳️ Current Vote", "vote:open").row();
+    kb.text("🗳️ Vote en cours", "vote:open").row();
   } else {
     kb.row();
   }
 
-  kb.text("📊 Previous Results", "wanted:results")
+  kb.text("📊 Résultats précédents", "wanted:results")
     .row()
-    .text("⬅️ Main Menu", "member:home");
+    .text("⬅️ Menu principal", "member:home");
 
   return kb;
 }
@@ -45,12 +45,12 @@ wantedComposer.callbackQuery("wanted:menu", async (ctx) => {
   const activeBallot = await getActiveBallot();
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    `🎯 *UNDERGROUND | WANTED LIST*\n\n` +
-    `Tell us which creators we should acquire next!\n\n` +
-    `• *Suggest:* Submit new creator requests\n` +
-    `• *Support:* Vote on existing community nominations\n` +
-    `• *Rules:* 1 suggestion/support per paying member per monthly cycle\n\n` +
-    `Select an option below:`,
+    `🎯 *UNDERGROUND | LISTE DE SOUHAITS*\n\n` +
+    `Dites-nous quels créateurs nous devrions acquérir ensuite!\n\n` +
+    `• *Suggérer :* soumettez de nouvelles demandes de créateurs\n` +
+    `• *Appuyer :* appuyez les suggestions existantes de la communauté\n` +
+    `• *Règles :* 1 suggestion ou appui par membre payant par cycle mensuel\n\n` +
+    `Choisissez une option ci-dessous :`,
     {
       parse_mode: "Markdown",
       reply_markup: wantedMenuKeyboard(activeBallot !== null),
@@ -65,23 +65,23 @@ wantedComposer.callbackQuery("wanted:view", async (ctx) => {
     (c) => c.status !== "available" && c.status !== "rejected_unavailable"
   );
 
-  let text = `🎯 *CURRENT WANTED CREATORS*\n\n`;
+  let text = `🎯 *CRÉATEURS ACTUELLEMENT SOUHAITÉS*\n\n`;
 
   if (active.length === 0) {
-    text += `_No active requests on the Wanted List right now._\n`;
+    text += `_Aucune demande active dans la Liste de souhaits pour le moment._\n`;
   } else {
     active.slice(0, 15).forEach((c, idx) => {
       const statusLabel = WANTED_STATUS_LABELS[c.status] || c.status;
-      const countLabel = c.supportCount === 1 ? "1 supporter" : `${c.supportCount} supporters`;
+      const countLabel = c.supportCount === 1 ? "1 appui" : `${c.supportCount} appuis`;
       text += `${idx + 1}. *${escapeMd(c.name)}* — ${countLabel} \`[${statusLabel}]\`\n`;
     });
   }
 
   const kb = new InlineKeyboard()
-    .text("👍 Support a Creator", "wanted:support_list")
-    .text("💡 Suggest a Creator", "wanted:suggest_prompt")
+    .text("👍 Appuyer un créateur", "wanted:support_list")
+    .text("💡 Suggérer un créateur", "wanted:suggest_prompt")
     .row()
-    .text("⬅️ Wanted Menu", "wanted:menu");
+    .text("⬅️ Menu des souhaits", "wanted:menu");
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(text, {
@@ -98,7 +98,7 @@ wantedComposer.callbackQuery("wanted:suggest_prompt", async (ctx) => {
   const summary = await getMembershipSummary(userId);
   if (!summary.hasPaid) {
     await ctx.answerCallbackQuery({
-      text: "Voting & nominations are reserved for paid subscribers.",
+      text: "Le vote et les suggestions sont réservés aux abonnés payants.",
       show_alert: true,
     });
     return;
@@ -108,7 +108,7 @@ wantedComposer.callbackQuery("wanted:suggest_prompt", async (ctx) => {
   const existingSupport = await getUserSupportForCycle(cycleId, userId);
   if (existingSupport) {
     await ctx.answerCallbackQuery({
-      text: "You have already used your nomination or support for this month.",
+      text: "Vous avez déjà utilisé votre suggestion ou votre appui pour ce mois-ci.",
       show_alert: true,
     });
     return;
@@ -116,16 +116,16 @@ wantedComposer.callbackQuery("wanted:suggest_prompt", async (ctx) => {
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    `💡 *SUGGEST A CREATOR FOR ACQUISITION*\n\n` +
-    `To submit a nomination, send the command:\n\n` +
-    `\`/suggest <Creator Name> [Optional Profile URL]\`\n\n` +
-    `*Examples:*\n` +
+    `💡 *SUGGÉRER UN CRÉATEUR À ACQUÉRIR*\n\n` +
+    `Pour soumettre une suggestion, envoyez la commande :\n\n` +
+    `\`/suggest <Nom du créateur> [URL du profil facultative]\`\n\n` +
+    `*Exemples :*\n` +
     `• \`/suggest Ashley\`\n` +
     `• \`/suggest Nicole https://onlyfans.com/...\`\n\n` +
-    `⚠️ _Your suggestion automatically counts as your monthly support selection._`,
+    `⚠️ _Votre suggestion compte automatiquement comme votre appui du mois._`,
     {
       parse_mode: "Markdown",
-      reply_markup: new InlineKeyboard().text("⬅️ Wanted Menu", "wanted:menu"),
+      reply_markup: new InlineKeyboard().text("⬅️ Menu des souhaits", "wanted:menu"),
     }
   );
 });
@@ -137,7 +137,7 @@ wantedComposer.command("suggest", async (ctx) => {
 
   const text = ctx.match?.trim();
   if (!text) {
-    await ctx.reply("Usage: `/suggest <Creator Name> [Profile Link]`", {
+    await ctx.reply("Utilisation : `/suggest <Nom du créateur> [lien du profil]`", {
       parse_mode: "Markdown",
     });
     return;
@@ -161,30 +161,30 @@ wantedComposer.command("suggest", async (ctx) => {
   });
 
   if (!result.success || !result.candidate) {
-    await ctx.reply(`⚠️ ${result.error ?? "Could not record nomination."}`, {
-      reply_markup: new InlineKeyboard().text("⬅️ Wanted Menu", "wanted:menu"),
+    await ctx.reply(`⚠️ ${result.error ?? "Impossible d'enregistrer la suggestion."}`, {
+      reply_markup: new InlineKeyboard().text("⬅️ Menu des souhaits", "wanted:menu"),
     });
     return;
   }
 
   if (result.isExistingCandidate) {
     await ctx.reply(
-      `✅ *${escapeMd(result.candidate.name)}* is already on the Wanted List!\n\n` +
-      `Your support has been added. Current supporters: *${result.candidate.supportCount}*.\n\n` +
-      `Thank you for helping curate Underground!`,
+      `✅ *${escapeMd(result.candidate.name)}* figure déjà dans la Liste de souhaits!\n\n` +
+      `Votre appui a été ajouté. Appuis actuels : *${result.candidate.supportCount}*.\n\n` +
+      `Merci de nous aider à bâtir Underground!`,
       {
         parse_mode: "Markdown",
-        reply_markup: new InlineKeyboard().text("🎯 View Wanted List", "wanted:view"),
+        reply_markup: new InlineKeyboard().text("🎯 Voir la Liste de souhaits", "wanted:view"),
       }
     );
   } else {
     await ctx.reply(
-      `🎉 *Nomination Submitted!*\n\n` +
-      `*${escapeMd(result.candidate.name)}* has been added to the Wanted List with 1 supporter.\n\n` +
-      `The community can now support this creator for upcoming voting rounds.`,
+      `🎉 *Suggestion soumise!*\n\n` +
+      `*${escapeMd(result.candidate.name)}* a été ajouté à la Liste de souhaits avec 1 appui.\n\n` +
+      `La communauté peut maintenant appuyer ce créateur pour les prochains tours de vote.`,
       {
         parse_mode: "Markdown",
-        reply_markup: new InlineKeyboard().text("🎯 View Wanted List", "wanted:view"),
+        reply_markup: new InlineKeyboard().text("🎯 Voir la Liste de souhaits", "wanted:view"),
       }
     );
   }
@@ -198,7 +198,7 @@ wantedComposer.callbackQuery("wanted:support_list", async (ctx) => {
   const summary = await getMembershipSummary(userId);
   if (!summary.hasPaid) {
     await ctx.answerCallbackQuery({
-      text: "Only active paying subscribers can support creators.",
+      text: "Seuls les abonnés payants actifs peuvent appuyer des créateurs.",
       show_alert: true,
     });
     return;
@@ -208,7 +208,7 @@ wantedComposer.callbackQuery("wanted:support_list", async (ctx) => {
   const existingSupport = await getUserSupportForCycle(cycleId, userId);
   if (existingSupport) {
     await ctx.answerCallbackQuery({
-      text: "You have already used your support selection for this month.",
+      text: "Vous avez déjà utilisé votre appui pour ce mois-ci.",
       show_alert: true,
     });
     return;
@@ -223,12 +223,12 @@ wantedComposer.callbackQuery("wanted:support_list", async (ctx) => {
   for (const c of active.slice(0, 10)) {
     kb.text(`👍 ${c.name} (${c.supportCount})`, `wanted:sup_confirm:${c.id}`).row();
   }
-  kb.text("⬅️ Wanted Menu", "wanted:menu");
+  kb.text("⬅️ Menu des souhaits", "wanted:menu");
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    `👍 *SUPPORT A CREATOR ON THE WANTED LIST*\n\n` +
-    `Select a creator below to add your monthly support:`,
+    `👍 *APPUYER UN CRÉATEUR DE LA LISTE DE SOUHAITS*\n\n` +
+    `Choisissez un créateur ci-dessous pour lui accorder votre appui mensuel :`,
     {
       parse_mode: "Markdown",
       reply_markup: kb,
@@ -241,20 +241,20 @@ wantedComposer.callbackQuery(/^wanted:sup_confirm:([a-f0-9-]+)$/, async (ctx) =>
   const candidateId = ctx.match[1];
   const candidate = await getWantedCandidate(candidateId);
   if (!candidate) {
-    await ctx.answerCallbackQuery({ text: "Candidate not found." });
+    await ctx.answerCallbackQuery({ text: "Candidat introuvable." });
     return;
   }
 
   const kb = new InlineKeyboard()
-    .text(`✅ Confirm Support: ${candidate.name}`, `wanted:sup_exec:${candidate.id}`)
+    .text(`✅ Confirmer l'appui : ${candidate.name}`, `wanted:sup_exec:${candidate.id}`)
     .row()
-    .text("❌ Cancel", "wanted:menu");
+    .text("❌ Annuler", "wanted:menu");
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    `👍 *CONFIRM YOUR SUPPORT*\n\n` +
-    `Are you sure you want to support *${escapeMd(candidate.name)}*?\n\n` +
-    `⚠️ _Once confirmed, your support selection for this month is final and cannot be withdrawn or changed._`,
+    `👍 *CONFIRMEZ VOTRE APPUI*\n\n` +
+    `Voulez-vous vraiment appuyer *${escapeMd(candidate.name)}*?\n\n` +
+    `⚠️ _Une fois confirmé, votre appui pour ce mois-ci est définitif et ne peut être retiré ni modifié._`,
     {
       parse_mode: "Markdown",
       reply_markup: kb,
@@ -271,21 +271,21 @@ wantedComposer.callbackQuery(/^wanted:sup_exec:([a-f0-9-]+)$/, async (ctx) => {
   const result = await supportExistingCandidate(userId, candidateId);
   if (!result.success || !result.candidate) {
     await ctx.answerCallbackQuery({
-      text: result.error ?? "Could not register support.",
+      text: result.error ?? "Impossible d'enregistrer l'appui.",
       show_alert: true,
     });
     return;
   }
 
-  await ctx.answerCallbackQuery({ text: "Support registered!" });
+  await ctx.answerCallbackQuery({ text: "Appui enregistré!" });
   await ctx.editMessageText(
-    `✅ *SUPPORT CONFIRMED!*\n\n` +
-    `You have supported *${escapeMd(result.candidate.name)}*.\n` +
-    `Total supporters: *${result.candidate.supportCount}*.\n\n` +
-    `Thank you for contributing to Underground acquisitions!`,
+    `✅ *APPUI CONFIRMÉ!*\n\n` +
+    `Vous avez appuyé *${escapeMd(result.candidate.name)}*.\n` +
+    `Total des appuis : *${result.candidate.supportCount}*.\n\n` +
+    `Merci de contribuer aux acquisitions d'Underground!`,
     {
       parse_mode: "Markdown",
-      reply_markup: new InlineKeyboard().text("🎯 View Wanted List", "wanted:view"),
+      reply_markup: new InlineKeyboard().text("🎯 Voir la Liste de souhaits", "wanted:view"),
     }
   );
 });
@@ -294,20 +294,20 @@ wantedComposer.callbackQuery(/^wanted:sup_exec:([a-f0-9-]+)$/, async (ctx) => {
 wantedComposer.callbackQuery("wanted:results", async (ctx) => {
   const past = await listPastBallots(5);
 
-  let text = `📊 *PREVIOUS VOTING RESULTS*\n\n`;
+  let text = `📊 *RÉSULTATS DES VOTES PRÉCÉDENTS*\n\n`;
   if (past.length === 0) {
-    text += `_No completed voting ballots yet._\n`;
+    text += `_Aucun scrutin terminé pour le moment._\n`;
   } else {
     for (const b of past) {
       const winnerCandidate = b.winnerCandidateId
         ? b.candidates.find((c) => c.candidateId === b.winnerCandidateId)
         : undefined;
-      const winnerName = winnerCandidate ? winnerCandidate.creatorName : (b.isTie ? "Tie / Runoff" : "Closed");
-      text += `• *${escapeMd(b.title)}*\n  Winner: *${escapeMd(winnerName)}* | Votes: ${b.totalVotesCount ?? 0}\n`;
+      const winnerName = winnerCandidate ? winnerCandidate.creatorName : (b.isTie ? "Égalité / second tour" : "Clos");
+      text += `• *${escapeMd(b.title)}*\n  Gagnant : *${escapeMd(winnerName)}* | Votes : ${b.totalVotesCount ?? 0}\n`;
     }
   }
 
-  const kb = new InlineKeyboard().text("⬅️ Wanted Menu", "wanted:menu");
+  const kb = new InlineKeyboard().text("⬅️ Menu des souhaits", "wanted:menu");
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(text, {
     parse_mode: "Markdown",

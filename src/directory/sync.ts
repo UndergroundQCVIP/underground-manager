@@ -36,7 +36,7 @@ export interface DirectoryApiLike {
 }
 
 export function formatCreatorDate(isoString?: string): string {
-  if (!isoString) return "Available";
+  if (!isoString) return "Disponible";
   return formatTorontoDate(isoString, { month: "short", day: "numeric", year: "numeric" });
 }
 
@@ -46,9 +46,9 @@ export function buildDirectorySections(
 ): string[] {
   if (creators.length === 0) {
     return [
-      `💎 *UNDERGROUND | CREATOR DIRECTORY*\n\n` +
-      `_No public collections are currently available._\n` +
-      `_New collections are added regularly by our curators._`,
+      `💎 *UNDERGROUND | RÉPERTOIRE DES CRÉATEURS*\n\n` +
+      `_Aucune collection publique n'est disponible actuellement._\n` +
+      `_De nouvelles collections sont ajoutées régulièrement par nos conservateurs._`,
     ];
   }
 
@@ -73,24 +73,24 @@ export function buildDirectorySections(
   const chunks: string[] = [];
 
   let currentChunk =
-    `💎 *UNDERGROUND | CREATOR DIRECTORY*\n` +
-    `_Curated archives in TOKEBEC VIP COLLECTIONS_\n` +
-    `📅 *Directory Updated:* ${nowFormatted}\n` +
-    `🔒 _Subscribe via Underground Manager for instant access_\n\n`;
+    `💎 *UNDERGROUND | RÉPERTOIRE DES CRÉATEURS*\n` +
+    `_Archives sélectionnées dans TOKEBEC VIP COLLECTIONS_\n` +
+    `📅 *Répertoire mis à jour :* ${nowFormatted}\n` +
+    `🔒 _Abonnez-vous via Underground Manager pour un accès instantané_\n\n`;
 
   for (const letter of sortedLetters) {
     let sectionText = `*${letter}*\n`;
     for (const c of grouped[letter]) {
       const updateStr = formatCreatorDate(c.lastContentUpdatedAt);
       const deepLink = `https://t.me/${botUsername}?start=creator_${c.id}`;
-      sectionText += `• *${escapeMd(c.name)}* — ${updateStr} [🔍 View](${deepLink})\n`;
+      sectionText += `• *${escapeMd(c.name)}* — ${updateStr} [🔍 Voir](${deepLink})\n`;
     }
     sectionText += "\n";
 
     // If adding this section exceeds Telegram safe chunk size (3500 chars), push and start new chunk
     if (currentChunk.length + sectionText.length > 3500) {
       chunks.push(currentChunk.trim());
-      currentChunk = `💎 *UNDERGROUND | CREATOR DIRECTORY (Cont.)*\n\n${sectionText}`;
+      currentChunk = `💎 *UNDERGROUND | CREATOR DIRECTORY (suite)*\n\n${sectionText}`;
     } else {
       currentChunk += sectionText;
     }
@@ -143,7 +143,7 @@ export async function syncPublicDirectory(
   // Hash the creator-driven content, not the "Updated: <today>" header, so a
   // day passing never by itself triggers an edit.
   const contentHash = await computeContentHash(
-    chunks.map((c) => c.replace(/📅 \*Directory Updated:\*[^\n]*\n/, ""))
+    chunks.map((c) => c.replace(/📅 \*Répertoire mis à jour :\*[^\n]*\n/, ""))
   );
 
   if (!force && syncState.lastContentHash === contentHash) {

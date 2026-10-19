@@ -47,7 +47,7 @@ export async function submitCreatorNomination(
   const cleanName = name.trim();
 
   if (cleanName.length < 2) {
-    return { success: false, isExistingCandidate: false, error: "Creator name is too short." };
+    return { success: false, isExistingCandidate: false, error: "Le nom du créateur est trop court." };
   }
 
   // 1. Eligibility Check: Active PAYING subscriber required!
@@ -57,7 +57,7 @@ export async function submitCreatorNomination(
     return {
       success: false,
       isExistingCandidate: false,
-      error: "Only active paying subscribers can nominate creators. Complimentary members are not eligible for nominations.",
+      error: "Seuls les abonnés payants actifs peuvent suggérer des créateurs. Les membres ayant un accès gracieux ne sont pas admissibles aux suggestions.",
     };
   }
 
@@ -67,7 +67,7 @@ export async function submitCreatorNomination(
     return {
       success: false,
       isExistingCandidate: false,
-      error: `"${cleanName}" is already available in TOKEBEC VIP COLLECTIONS!`,
+      error: `« ${cleanName} » est déjà disponible dans TOKEBEC VIP COLLECTIONS!`,
     };
   }
 
@@ -80,7 +80,7 @@ export async function submitCreatorNomination(
       success: false,
       isExistingCandidate: false,
       alreadySupportedThisCycle: true,
-      error: "You have already used your nomination/support selection for this monthly cycle.",
+      error: "Vous avez déjà utilisé votre suggestion ou votre appui pour ce cycle mensuel.",
     };
   }
 
@@ -101,7 +101,7 @@ export async function submitCreatorNomination(
     return {
       success: false,
       isExistingCandidate: true,
-      error: `"${candidate.name}" is already "${WANTED_STATUS_LABELS[candidate.status]}" and can no longer receive support.`,
+      error: `« ${candidate.name} » a déjà le statut « ${WANTED_STATUS_LABELS[candidate.status]} » et ne peut plus recevoir d'appuis.`,
     };
   }
 
@@ -126,7 +126,7 @@ export async function submitCreatorNomination(
     return {
       success: false,
       isExistingCandidate: isExisting,
-      error: supportResult.error ?? "Failed to register support.",
+      error: supportResult.error ?? "Échec de l'enregistrement de l'appui.",
     };
   }
 
@@ -165,18 +165,18 @@ export async function supportExistingCandidate(
   if (!summary.hasPaid) {
     return {
       success: false,
-      error: "Only active paying subscribers can support creators.",
+      error: "Seuls les abonnés payants actifs peuvent appuyer des créateurs.",
     };
   }
 
   const target = await getWantedCandidate(candidateId);
   if (!target) {
-    return { success: false, error: "Candidate not found." };
+    return { success: false, error: "Candidat introuvable." };
   }
   if (!SUPPORTABLE_STATUSES.has(target.status)) {
     return {
       success: false,
-      error: `"${target.name}" is already "${WANTED_STATUS_LABELS[target.status]}" and can no longer receive support.`,
+      error: `« ${target.name} » a déjà le statut « ${WANTED_STATUS_LABELS[target.status]} » et ne peut plus recevoir d'appuis.`,
     };
   }
 
@@ -191,7 +191,7 @@ export async function supportExistingCandidate(
   if (!supportResult.success || !supportResult.candidate) {
     return {
       success: false,
-      error: supportResult.error ?? "Failed to register support.",
+      error: supportResult.error ?? "Échec de l'enregistrement de l'appui.",
     };
   }
 
@@ -236,7 +236,7 @@ export async function syncWantedListChannel(
   const channelId = config.WANTED_LIST_CHAT_ID;
 
   if (!channelId) {
-    return { success: false, error: "WANTED_LIST_CHAT_ID not configured" };
+    return { success: false, error: "WANTED_LIST_CHAT_ID non configuré" };
   }
 
   const candidates = await listWantedCandidates();
@@ -251,22 +251,22 @@ export async function syncWantedListChannel(
   });
 
   let text =
-    `🎯 *UNDERGROUND | WANTED LIST*\n` +
-    `_Upcoming creator acquisition requests & rankings_\n` +
-    `📅 *Updated:* ${nowFormatted}\n\n`;
+    `🎯 *UNDERGROUND | LISTE DE SOUHAITS*\n` +
+    `_Demandes d'acquisition de créateurs à venir et classement_\n` +
+    `📅 *Mis à jour :* ${nowFormatted}\n\n`;
 
   if (activeCandidates.length === 0) {
-    text += `_No active creator requests yet. Be the first to suggest one in Underground Manager!_\n\n`;
+    text += `_Aucune demande de créateur active pour le moment. Soyez le premier à en suggérer une dans Underground Manager!_\n\n`;
   } else {
     activeCandidates.slice(0, 25).forEach((c, index) => {
       const statusLabel = WANTED_STATUS_LABELS[c.status] || c.status;
-      const countLabel = c.supportCount === 1 ? "1 supporter" : `${c.supportCount} supporters`;
+      const countLabel = c.supportCount === 1 ? "1 appui" : `${c.supportCount} appuis`;
       text += `${index + 1}. *${escapeMd(c.name)}* — ${countLabel} \`[${statusLabel}]\`\n`;
     });
     text += "\n";
   }
 
-  text += `💡 _Paid members can suggest and support creators privately inside the bot._`;
+  text += `💡 _Les membres payants peuvent suggérer et appuyer des créateurs en privé dans le robot._`;
 
   const options = {
     parse_mode: "Markdown",
@@ -274,7 +274,7 @@ export async function syncWantedListChannel(
       inline_keyboard: [
         [
           {
-            text: "🗳️ Open Wanted List in Bot",
+            text: "🗳️ Ouvrir la Liste de souhaits dans le robot",
             url: `https://t.me/${config.BOT_USERNAME}?start=wanted`,
           },
         ],

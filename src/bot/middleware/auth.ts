@@ -39,7 +39,7 @@ export async function adminOnlyMiddleware(ctx: Context, next: NextFunction): Pro
 
     if (ctx.callbackQuery) {
       await ctx.answerCallbackQuery({
-        text: "⛔ Access Denied: Administrator privileges required.",
+        text: "⛔ Accès refusé : privilèges d'administrateur requis.",
         show_alert: true,
       });
     } else if (ctx.chat?.type === "private") {

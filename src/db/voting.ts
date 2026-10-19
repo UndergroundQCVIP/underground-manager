@@ -151,7 +151,7 @@ export async function recordVote(
     return {
       success: false,
       alreadyVoted: false,
-      error: "This ballot is no longer active for voting.",
+      error: "Ce scrutin n'est plus ouvert au vote.",
     };
   }
 
@@ -160,7 +160,7 @@ export async function recordVote(
     return {
       success: false,
       alreadyVoted: false,
-      error: "The voting window for this ballot has closed.",
+      error: "La période de vote de ce scrutin est terminée.",
     };
   }
 
@@ -172,7 +172,7 @@ export async function recordVote(
     return {
       success: false,
       alreadyVoted: false,
-      error: "Invalid candidate choice for this ballot.",
+      error: "Choix de candidat invalide pour ce scrutin.",
     };
   }
 
@@ -183,7 +183,7 @@ export async function recordVote(
     return {
       success: false,
       alreadyVoted: true,
-      error: "You have already voted in this ballot. Votes cannot be changed.",
+      error: "Vous avez déjà voté à ce scrutin. Les votes ne peuvent pas être modifiés.",
     };
   }
 
@@ -207,7 +207,7 @@ export async function recordVote(
     return {
       success: false,
       alreadyVoted: true,
-      error: "Vote already submitted concurrently.",
+      error: "Votre vote a déjà été soumis.",
     };
   }
 

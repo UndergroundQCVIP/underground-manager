@@ -31,9 +31,9 @@ export async function handleOpenVote(ctx: any) {
   // 1. Eligibility Check
   if (!summary.hasPaid) {
     const text =
-      `🔒 *MONTHLY CREATOR VOTING*\n\n` +
-      `Creator acquisition voting is an exclusive benefit reserved for active paying subscribers.\n\n` +
-      `Subscribe with Telegram Stars below to participate in choosing our next creator additions:`;
+      `🔒 *VOTE MENSUEL DES CRÉATEURS*\n\n` +
+      `Le vote d'acquisition de créateurs est un avantage exclusif réservé aux abonnés payants actifs.\n\n` +
+      `Abonnez-vous avec les Étoiles Telegram ci-dessous pour participer au choix de nos prochains créateurs :`;
 
     if (ctx.callbackQuery) {
       await ctx.answerCallbackQuery();
@@ -54,14 +54,14 @@ export async function handleOpenVote(ctx: any) {
   const ballot = await getActiveBallot();
   if (!ballot) {
     const text =
-      `🗳️ *NO ACTIVE VOTING ROUND*\n\n` +
-      `There is currently no active acquisition vote in progress.\n\n` +
-      `Monthly creator votes open after community nominations on the Wanted List. Check back soon!`;
+      `🗳️ *AUCUN TOUR DE VOTE ACTIF*\n\n` +
+      `Aucun vote d'acquisition n'est en cours actuellement.\n\n` +
+      `Les votes mensuels pour les créateurs s'ouvrent après les suggestions de la communauté dans la Liste de souhaits. Revenez bientôt!`;
 
     const kb = new InlineKeyboard()
-      .text("🎯 View Wanted List", "wanted:view")
+      .text("🎯 Voir la Liste de souhaits", "wanted:view")
       .row()
-      .text("⬅️ Main Menu", "member:home");
+      .text("⬅️ Menu principal", "member:home");
 
     if (ctx.callbackQuery) {
       await ctx.answerCallbackQuery();
@@ -89,15 +89,15 @@ export async function handleOpenVote(ctx: any) {
     });
 
     const text =
-      `✅ *VOTE ALREADY RECORDED*\n\n` +
-      `You have already cast your vote in *${escapeMd(ballot.title)}*.\n\n` +
-      `🔒 In accordance with Underground voting rules, votes are final, unchangeable, and confidential.\n` +
-      `📅 Results will be announced on *${closesDate}*.`;
+      `✅ *VOTE DÉJÀ ENREGISTRÉ*\n\n` +
+      `Vous avez déjà voté dans *${escapeMd(ballot.title)}*.\n\n` +
+      `🔒 Conformément aux règles de vote d'Underground, les votes sont définitifs, non modifiables et confidentiels.\n` +
+      `📅 Les résultats seront annoncés le *${closesDate}*.`;
 
     const kb = new InlineKeyboard()
-      .text("🎯 Wanted List", "wanted:view")
+      .text("🎯 Liste de souhaits", "wanted:view")
       .row()
-      .text("⬅️ Main Menu", "member:home");
+      .text("⬅️ Menu principal", "member:home");
 
     if (ctx.callbackQuery) {
       await ctx.answerCallbackQuery();
@@ -119,9 +119,9 @@ export async function handleOpenVote(ctx: any) {
   const kb = new InlineKeyboard();
 
   for (const c of shuffled) {
-    kb.text(`🗳️ Vote for ${c.creatorName}`, `vote:sel:${ballot.id}:${c.candidateId}`).row();
+    kb.text(`🗳️ Voter pour ${c.creatorName}`, `vote:sel:${ballot.id}:${c.candidateId}`).row();
   }
-  kb.text("⬅️ Main Menu", "member:home");
+  kb.text("⬅️ Menu principal", "member:home");
 
   const closesDate = formatTorontoDate(ballot.closesAt, {
     month: "short",
@@ -132,10 +132,10 @@ export async function handleOpenVote(ctx: any) {
 
   const text =
     `🗳️ *${escapeMd(ballot.title)}*\n\n` +
-    `Which creator should Underground acquire next?\n\n` +
-    `⏳ *Voting Closes:* ${closesDate}\n` +
-    `⚠️ *Rules:* 1 irrevocable vote per paid member. Candidate order is randomized.\n\n` +
-    `Select your choice below:`;
+    `Quel créateur Underground devrait-il acquérir ensuite?\n\n` +
+    `⏳ *Clôture du vote :* ${closesDate}\n` +
+    `⚠️ *Règles :* 1 vote irrévocable par membre payant. L'ordre des candidats est aléatoire.\n\n` +
+    `Faites votre choix ci-dessous :`;
 
   if (ctx.callbackQuery) {
     await ctx.answerCallbackQuery();
@@ -161,26 +161,26 @@ votingComposer.callbackQuery(/^vote:sel:([a-f0-9-]+):([a-f0-9-]+)$/, async (ctx)
 
   const ballot = await getBallot(ballotId);
   if (!ballot) {
-    await ctx.answerCallbackQuery({ text: "Ballot not found." });
+    await ctx.answerCallbackQuery({ text: "Scrutin introuvable." });
     return;
   }
 
   const candidate = ballot.candidates.find((c) => c.candidateId === candidateId);
   if (!candidate) {
-    await ctx.answerCallbackQuery({ text: "Candidate not found." });
+    await ctx.answerCallbackQuery({ text: "Candidat introuvable." });
     return;
   }
 
   const kb = new InlineKeyboard()
-    .text(`✅ Confirm Vote: ${candidate.creatorName}`, `vote:exec:${ballotId}:${candidateId}`)
+    .text(`✅ Confirmer le vote : ${candidate.creatorName}`, `vote:exec:${ballotId}:${candidateId}`)
     .row()
-    .text("❌ Cancel / Pick Another", "vote:open");
+    .text("❌ Annuler / en choisir un autre", "vote:open");
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    `🗳️ *CONFIRM YOUR ACQUISITION VOTE*\n\n` +
-    `Are you sure you want to cast your vote for *${escapeMd(candidate.creatorName)}*?\n\n` +
-    `⚠️ _Once confirmed, your vote is recorded atomically and cannot be withdrawn or changed._`,
+    `🗳️ *CONFIRMEZ VOTRE VOTE D'ACQUISITION*\n\n` +
+    `Voulez-vous vraiment voter pour *${escapeMd(candidate.creatorName)}*?\n\n` +
+    `⚠️ _Une fois confirmé, votre vote est enregistré de façon atomique et ne peut être retiré ni modifié._`,
     {
       parse_mode: "Markdown",
       reply_markup: kb,
@@ -199,24 +199,24 @@ votingComposer.callbackQuery(/^vote:exec:([a-f0-9-]+):([a-f0-9-]+)$/, async (ctx
   const result = await castVote({ userId, ballotId, candidateId });
   if (!result.success) {
     await ctx.answerCallbackQuery({
-      text: result.error ?? "Failed to record vote.",
+      text: result.error ?? "Échec de l'enregistrement du vote.",
       show_alert: true,
     });
     return;
   }
 
-  await ctx.answerCallbackQuery({ text: "Vote recorded!" });
+  await ctx.answerCallbackQuery({ text: "Vote enregistré!" });
   await ctx.editMessageText(
-    `🎉 *VOTE SUCCESSFULLY RECORDED!*\n\n` +
-    `Your vote has been securely and privately registered.\n\n` +
-    `Final results and acquisition decisions will be announced in the Wanted List channel when the voting window closes.\n\n` +
-    `Thank you for shaping the Underground collections!`,
+    `🎉 *VOTE ENREGISTRÉ AVEC SUCCÈS!*\n\n` +
+    `Votre vote a été enregistré de façon sécurisée et confidentielle.\n\n` +
+    `Les résultats finaux et les décisions d'acquisition seront annoncés dans le canal de la Liste de souhaits à la fermeture du vote.\n\n` +
+    `Merci de façonner les collections d'Underground!`,
     {
       parse_mode: "Markdown",
       reply_markup: new InlineKeyboard()
-        .text("🎯 View Wanted List", "wanted:view")
+        .text("🎯 Voir la Liste de souhaits", "wanted:view")
         .row()
-        .text("⬅️ Main Menu", "member:home"),
+        .text("⬅️ Menu principal", "member:home"),
     }
   );
 });

@@ -392,16 +392,16 @@ Deno.test("E2E E — Nominate, support, ballot, vote, winner awaits administrato
     // Members use the bot (this is the path that the old global admin gate blocked)
     tg.reset();
     await tg.send(privateMessage(m1, "/suggest Aria Moon"));
-    assert(String(tg.callsOf("sendMessage").at(-1)!.payload.text).includes("Nomination Submitted"));
+    assert(String(tg.callsOf("sendMessage").at(-1)!.payload.text).includes("Suggestion soumise"));
     await tg.send(privateMessage(m2, "/suggest  aria   moon")); // duplicate with other casing/spaces
     await tg.send(privateMessage(m3, "/suggest Bella Rose"));
     await tg.send(privateMessage(m4, "/suggest Chloe Sky"));
     // one selection per cycle
     await tg.send(privateMessage(m1, "/suggest Someone Else"));
-    assert(String(tg.callsOf("sendMessage").at(-1)!.payload.text).includes("already used"));
+    assert(String(tg.callsOf("sendMessage").at(-1)!.payload.text).includes("déjà utilisé"));
     // complimentary members are excluded
     await tg.send(privateMessage(comp, "/suggest Dina Vale"));
-    assert(String(tg.callsOf("sendMessage").at(-1)!.payload.text).includes("paying"));
+    assert(String(tg.callsOf("sendMessage").at(-1)!.payload.text).includes("payants"));
 
     let candidates = await listWantedCandidates();
     assertEquals(candidates.length, 3, "Aria nominated twice -> one candidate");
@@ -419,7 +419,7 @@ Deno.test("E2E E — Nominate, support, ballot, vote, winner awaits administrato
     // A second ballot cannot be opened over a running one
     tg.reset();
     await tg.send(callback(ADMIN, "admin:launch_ballot"));
-    assert(String(tg.callsOf("answerCallbackQuery").at(-1)!.payload.text).includes("already open"));
+    assert(String(tg.callsOf("answerCallbackQuery").at(-1)!.payload.text).includes("déjà ouvert"));
 
     const ariaId = aria.id;
     const bella = candidates.find((c) => c.name === "Bella Rose")!;
@@ -430,9 +430,9 @@ Deno.test("E2E E — Nominate, support, ballot, vote, winner awaits administrato
     // Votes are final; complimentary members cannot vote
     tg.reset();
     await tg.send(callback(m4, `vote:exec:${ballot.id}:${ariaId}`));
-    assert(String(tg.callsOf("answerCallbackQuery").at(-1)!.payload.text).includes("already voted"));
+    assert(String(tg.callsOf("answerCallbackQuery").at(-1)!.payload.text).includes("déjà voté"));
     await tg.send(callback(comp, `vote:exec:${ballot.id}:${ariaId}`));
-    assert(String(tg.callsOf("answerCallbackQuery").at(-1)!.payload.text).includes("paying"));
+    assert(String(tg.callsOf("answerCallbackQuery").at(-1)!.payload.text).includes("payants"));
 
     // The voting screen never discloses running results
     tg.reset();
@@ -459,7 +459,7 @@ Deno.test("E2E E — Nominate, support, ballot, vote, winner awaits administrato
     assertEquals(closed.winnerCandidateId, ariaId);
     assertEquals((await getWantedCandidate(ariaId))!.status, "selected");
     assertEquals((await getWantedCandidate(bella.id))!.status, "eligible_for_voting", "losers return to the pool");
-    assert(restarted.callsOf("sendMessage").some((c) => String(c.payload.text).includes("Winner")));
+    assert(restarted.callsOf("sendMessage").some((c) => String(c.payload.text).includes("Gagnant")));
     // Awaiting administrator approval: nothing purchased or committed automatically
     assertEquals((await listExpenses()).length, 0);
     assertEquals((await getActiveBallot()), null);
@@ -490,7 +490,7 @@ Deno.test("E2E E — Tie opens exactly one runoff, even if two workers close sim
     assertEquals(runoffs.length, 1);
     assertEquals(runoffs[0].status, "active");
     assertEquals((await getActiveBallot())!.id, runoffs[0].id);
-    const announcements = tg.callsOf("sendMessage").filter((c) => String(c.payload.text).includes("RUNOFF"));
+    const announcements = tg.callsOf("sendMessage").filter((c) => String(c.payload.text).includes("SECOND TOUR"));
     assertEquals(announcements.length, 1, "tie announced once");
   });
 });

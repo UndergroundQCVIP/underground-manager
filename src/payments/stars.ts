@@ -101,7 +101,7 @@ export class TelegramStarsProvider implements PaymentProvider {
     if (query.currency !== config.CURRENCY) {
       return {
         ok: false,
-        errorMessage: `Invalid currency. Expected ${config.CURRENCY}, got ${query.currency}.`,
+        errorMessage: `Devise invalide. Attendue : ${config.CURRENCY}, reçue : ${query.currency}.`,
       };
     }
 
@@ -109,7 +109,7 @@ export class TelegramStarsProvider implements PaymentProvider {
     if (query.total_amount !== config.STARS_PRICE_AMOUNT) {
       return {
         ok: false,
-        errorMessage: `Invalid price amount. Expected ${config.STARS_PRICE_AMOUNT} Stars, got ${query.total_amount}.`,
+        errorMessage: `Montant invalide. Attendu : ${config.STARS_PRICE_AMOUNT} Étoiles, reçu : ${query.total_amount}.`,
       };
     }
 
@@ -118,12 +118,12 @@ export class TelegramStarsProvider implements PaymentProvider {
     if (!payload) {
       return {
         ok: false,
-        errorMessage: "Malformed or unrecognized invoice payload.",
+        errorMessage: "Données de facture mal formées ou non reconnues.",
       };
     }
 
     if (payload.amount !== undefined && payload.amount !== query.total_amount) {
-      return { ok: false, errorMessage: "Invoice amount mismatch." };
+      return { ok: false, errorMessage: "Le montant de la facture ne correspond pas." };
     }
 
     if (payload.userId !== query.from.id) {
@@ -139,7 +139,7 @@ export class TelegramStarsProvider implements PaymentProvider {
       );
       return {
         ok: false,
-        errorMessage: "Payer does not match invoice recipient.",
+        errorMessage: "Le payeur ne correspond pas au destinataire de la facture.",
       };
     }
 
@@ -152,7 +152,7 @@ export class TelegramStarsProvider implements PaymentProvider {
       if (remainingMs > 25 * 24 * 3600 * 1000) {
         return {
           ok: false,
-          errorMessage: "You already have an active subscription with ample time remaining.",
+          errorMessage: "Vous avez déjà un abonnement actif avec beaucoup de temps restant.",
         };
       }
     }

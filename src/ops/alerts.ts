@@ -30,7 +30,7 @@ export async function notifyAdmins(
 
   await kv.set(stamp, Date.now(), { expireIn: cooldownMs });
 
-  const text = `🚨 Underground Manager alert\n\n${message}`.slice(0, 3900);
+  const text = `🚨 Alerte Underground Manager\n\n${message}`.slice(0, 3900);
   let delivered = false;
   for (const adminId of getConfig().ADMIN_USER_IDS) {
     try {
