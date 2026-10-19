@@ -11,7 +11,7 @@ import { isAdministrator } from "../../config.ts";
 import { adminRouteGuard } from "../middleware/auth.ts";
 import { collectionForChat, handleForumTopicCreated } from "../../creators/service.ts";
 import { getCreatorByTopic } from "../../db/creators.ts";
-import { getImportJob } from "../../db/imports.ts";
+import { getImportJob, listImportJobs } from "../../db/imports.ts";
 import {
   cancelImport,
   importProgress,
@@ -119,9 +119,38 @@ importsComposer.command("import", async (ctx, next) => {
   }
 });
 
+/** /imports — recent imports with a way to open, stop or undo each one (if the original message is lost). */
+importsComposer.command("imports", async (ctx, next) => {
+  if (ctx.chat.type !== "private") return next();
+  if (!isAdministrator(ctx.from?.id ?? 0)) return;
+  const jobs = (await listImportJobs()).slice(0, 8);
+  const kb = new InlineKeyboard();
+  let text = "📥 *IMPORTS RÉCENTS*\n\n";
+  if (jobs.length === 0) text += "_Aucun import._";
+  for (const j of jobs) {
+    text += `• *${mdEsc(j.creatorName)}* — ${j.status} (${j.copied} copiés)\n`;
+    kb.text(`${j.creatorName} · ${j.status}`.slice(0, 60), `imp:st:${j.id}`).row();
+  }
+  await ctx.reply(text, { parse_mode: "Markdown", reply_markup: kb });
+});
+
 // ---- Administrator callbacks (imp:*) ---------------------------------------------------------
 
 importsComposer.use(adminRouteGuard({ callbackPrefixes: ["imp:"], commands: [] }));
+
+/** Every state offers a way out: stop, resume, or undo what was already copied. */
+function importKeyboard(j: NonNullable<Awaited<ReturnType<typeof getImportJob>>>): InlineKeyboard {
+  const kb = new InlineKeyboard().text("🔄 Actualiser", `imp:st:${j.id}`);
+  if (j.status === "failed" || j.status === "needs_review") kb.row().text("▶️ Reprendre", `imp:resume:${j.id}`);
+  if (j.status === "prepared" || j.status === "blocked") kb.row().text("❌ Annuler cet import", `imp:no:${j.id}`);
+  if (["running", "failed", "needs_review"].includes(j.status)) {
+    kb.row().text("⏹ Arrêter (garder ce qui est copié)", `imp:stop:${j.id}`);
+  }
+  if (["running", "failed", "needs_review", "done"].includes(j.status)) {
+    kb.row().text("↩️ Annuler et supprimer les copies…", `imp:undo:${j.id}`);
+  }
+  return kb;
+}
 
 function statusText(j: NonNullable<Awaited<ReturnType<typeof getImportJob>>>): string {
   const label: Record<string, string> = {
@@ -146,7 +175,7 @@ importsComposer.callbackQuery(/^imp:go:([\w-]+)$/, async (ctx) => {
         : ""),
     {
       parse_mode: "Markdown",
-      reply_markup: new InlineKeyboard().text("🔄 Actualiser", `imp:st:${j.id}`),
+      reply_markup: importKeyboard(j),
     }
   );
 });
@@ -155,17 +184,26 @@ importsComposer.callbackQuery(/^imp:st:([\w-]+)$/, async (ctx) => {
   const j = await getImportJob(ctx.match[1]);
   await ctx.answerCallbackQuery();
   if (!j) return;
-  const kb = new InlineKeyboard().text("🔄 Actualiser", `imp:st:${j.id}`);
-  if (j.status === "failed" || j.status === "needs_review") kb.row().text("▶️ Reprendre", `imp:resume:${j.id}`);
-  if (j.status === "done") kb.row().text("↩️ Annuler cet import…", `imp:undo:${j.id}`);
-  await ctx.editMessageText(statusText(j), { parse_mode: "Markdown", reply_markup: kb });
+  await ctx.editMessageText(statusText(j), { parse_mode: "Markdown", reply_markup: importKeyboard(j) });
 });
 
 importsComposer.callbackQuery(/^imp:resume:([\w-]+)$/, async (ctx) => {
   await ctx.answerCallbackQuery({ text: "Reprise…" });
   await resumeImport(ctx.api, ctx.match[1]);
   const j = await getImportJob(ctx.match[1]);
-  if (j) await ctx.editMessageText(statusText(j), { parse_mode: "Markdown", reply_markup: new InlineKeyboard().text("🔄 Actualiser", `imp:st:${j.id}`) });
+  if (j) await ctx.editMessageText(statusText(j), { parse_mode: "Markdown", reply_markup: importKeyboard(j) });
+});
+
+importsComposer.callbackQuery(/^imp:stop:([\w-]+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const ok = await cancelImport(ctx.match[1], ctx.from.id);
+  const j = await getImportJob(ctx.match[1]);
+  await ctx.editMessageText(
+    ok && j
+      ? `⏹ Import arrêté. Ce qui était déjà copié (${j.copied} message(s)) reste dans le sujet. Pour le supprimer aussi, utilisez « Annuler et supprimer les copies ».`
+      : "Cet import ne peut plus être arrêté.",
+    { reply_markup: j ? new InlineKeyboard().text("↩️ Annuler et supprimer les copies…", `imp:undo:${j.id}`) : undefined }
+  );
 });
 
 importsComposer.callbackQuery(/^imp:no:([\w-]+)$/, async (ctx) => {

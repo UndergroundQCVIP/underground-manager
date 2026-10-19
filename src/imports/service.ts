@@ -346,8 +346,10 @@ export async function resumeImport(api: ImportApiLike, jobId: string): Promise<I
 }
 
 export async function cancelImport(jobId: string, adminId: number): Promise<boolean> {
-  const j = await updateImportJob(jobId, ["prepared", "blocked", "failed", "needs_review"], (x) => {
+  // A running import stops at its next batch boundary (the worker re-reads the status every batch).
+  const j = await updateImportJob(jobId, ["prepared", "blocked", "failed", "needs_review", "running"], (x) => {
     x.status = "cancelled";
+    x.inflight = undefined;
   });
   if (j) await logAuditEvent("import_cancelled", { jobId }, adminId);
   return !!j;

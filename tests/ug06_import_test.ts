@@ -450,3 +450,60 @@ Deno.test("UG06 PUBLISH — A rate limit pauses publication; the cron finishes i
     await kv.close();
   }
 });
+
+Deno.test("UG06 CANCEL — Every state has a way out: cancel before start, stop while running (keeps copies), undo (removes them)", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    const api = srcApi();
+    const c = await seedCreator({ name: "Aria", topicId: 101 });
+    const { bot, calls } = makeBot();
+
+    // 1) before confirming: the preview offers "Annuler" and nothing is ever copied
+    const a = await prepareImport(api, { adminId: ADMIN, creatorId: c.id, link1: link(1), link2: link(50), isNewCreator: false });
+    await bot.handleUpdate(cb(ADMIN, `imp:no:${a.job!.id}`) as never);
+    assertEquals((await getImportJob(a.job!.id))!.status, "cancelled");
+    assertEquals(api.copyCalls.filter((x) => x.to === REGULAR_CHAT).length, 0);
+    // a stranger cannot cancel someone's import
+    const b = await prepareImport(api, { adminId: ADMIN, creatorId: c.id, link1: link(1), link2: link(450), isNewCreator: false });
+    await bot.handleUpdate(cb(5555, `imp:no:${b.job!.id}`) as never);
+    assertEquals((await getImportJob(b.job!.id))!.status, "prepared");
+
+    // 2) stop while running: the worker halts at the next batch; what was copied stays
+    await updateImportJob(b.job!.id, null, (x) => { x.status = "running"; x.cursor = 201; x.copied = 200; x.batchesDone = 2; });
+    await bot.handleUpdate(cb(ADMIN, `imp:st:${b.job!.id}`) as never);
+    const shown = JSON.stringify(calls.filter((x) => x.method === "editMessageText").at(-1));
+    for (const label of ["Arrêter", "Annuler et supprimer les copies", "Actualiser"]) assertStringIncludes(shown, label);
+    await bot.handleUpdate(cb(ADMIN, `imp:stop:${b.job!.id}`) as never);
+    assertEquals((await getImportJob(b.job!.id))!.status, "cancelled");
+    api.copyCalls.length = 0;
+    await runImportStep(api, b.job!.id); // a late cron tick must not copy anything
+    assertEquals(api.copyCalls.length, 0);
+    assertEquals(api.deletedMessages.length, 0); // "stop" never deletes
+  } finally {
+    await kv.close();
+  }
+});
+
+Deno.test("UG06 CANCEL — Undo from the bot UI deletes the copies; /imports lists recent imports", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    const api = srcApi();
+    const c = await seedCreator({ name: "Aria", topicId: 101 });
+    const { job } = await prepareImport(api, { adminId: ADMIN, creatorId: c.id, link1: link(1), link2: link(30), isNewCreator: false });
+    await startImport(api, job!.id, ADMIN, true);
+    assertEquals((await getImportJob(job!.id))!.status, "done");
+
+    const { bot, calls } = makeBot();
+    await bot.handleUpdate({ update_id: 9_100_001, message: { message_id: 1, date: 0, chat: { id: ADMIN, type: "private", first_name: "A" }, from: { id: ADMIN, is_bot: false, first_name: "A" }, text: "/imports", entities: [{ type: "bot_command", offset: 0, length: 8 }] } } as never);
+    const listing = JSON.stringify(calls.filter((x) => x.method === "sendMessage").at(-1));
+    assertStringIncludes(listing, "Aria");
+    assertStringIncludes(listing, `imp:st:${job!.id}`);
+
+    // non-admins get nothing from /imports
+    calls.length = 0;
+    await bot.handleUpdate({ update_id: 9_100_002, message: { message_id: 2, date: 0, chat: { id: 5555, type: "private", first_name: "X" }, from: { id: 5555, is_bot: false, first_name: "X" }, text: "/imports", entities: [{ type: "bot_command", offset: 0, length: 8 }] } } as never);
+    assertEquals(calls.filter((x) => x.method === "sendMessage").length, 0);
+  } finally {
+    await kv.close();
+  }
+});
