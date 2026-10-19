@@ -59,10 +59,10 @@ export type ComplimentaryReason =
   | "admin_exception";
 
 export const COMPLIMENTARY_REASONS: Record<ComplimentaryReason, string> = {
-  content_contribution: "Content contribution",
-  partnership: "Partnership",
+  content_contribution: "Contribution de contenu",
+  partnership: "Partenariat",
   promotion: "Promotion",
-  admin_exception: "Administrator exception",
+  admin_exception: "Exception administrative",
 };
 
 export type EntitlementSource = "telegram_stars" | "complimentary";
@@ -132,6 +132,8 @@ export type AuditEventType =
   | "member_registered"
   | "payment_received"
   | "payment_refunded"
+  | "payment_anomaly"
+  | "alert_sent"
   | "entitlement_granted"
   | "entitlement_extended"
   | "entitlement_revoked"
@@ -202,6 +204,7 @@ export interface InvoicePayloadData {
   userId: number;
   planId: string;
   periodSeconds: number;
+  amount?: number; // Stars price the invoice was issued at
   timestamp: number;
 }
 
@@ -231,6 +234,8 @@ export interface DirectorySyncState {
   lastContentHash?: string; // Hash to detect actual changes and avoid redundant edits
   publishedMessageIds: number[]; // Channel message IDs for directory sections
   isDirty: boolean; // Flag set whenever creator name/media changes
+  lastNewKey?: string; // creators flagged 🆕 at the last sync
+  dirtySeq?: number; // Bumped on every change so an in-flight sync cannot clear a newer one
 }
 
 export type WantedCandidateStatus =
@@ -245,15 +250,15 @@ export type WantedCandidateStatus =
   | "rejected_unavailable";
 
 export const WANTED_STATUS_LABELS: Record<WantedCandidateStatus, string> = {
-  requested: "Requested",
-  pricing_review: "Pricing Review",
-  eligible_for_voting: "Eligible for Voting",
-  voting: "Voting in Progress",
-  selected: "Selected",
-  acquisition_pending: "Acquisition Pending",
-  acquired: "Acquired",
-  available: "Available in Collections",
-  rejected_unavailable: "Rejected / Unavailable",
+  requested: "Demandé",
+  pricing_review: "Évaluation du prix",
+  eligible_for_voting: "Admissible au vote",
+  voting: "Vote en cours",
+  selected: "Sélectionné",
+  acquisition_pending: "Acquisition en attente",
+  acquired: "Acquis",
+  available: "Disponible dans les collections",
+  rejected_unavailable: "Refusé / Indisponible",
 };
 
 export interface WantedCandidate {
@@ -311,6 +316,8 @@ export interface Ballot {
   isRunoff?: boolean;
   parentBallotId?: string; // If this ballot is a runoff from a tie
   publishedMessageId?: number; // Telegram message ID in Wanted List channel
+  resultsAnnouncedAt?: string; // Set once the closing announcement was delivered
+  needsAdminDecision?: boolean; // Runoff tied again, or no votes were cast
   createdAt: string;
   updatedAt: string;
 }
@@ -427,12 +434,12 @@ export type ExpenseCategory =
   | "other";
 
 export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
-  creator_subscription: "Creator Subscription",
-  creator_content_license: "Creator Content / License",
-  platform_operations: "Platform Operations",
+  creator_subscription: "Abonnement à un créateur",
+  creator_content_license: "Contenu / licence de créateur",
+  platform_operations: "Exploitation de la plateforme",
   marketing: "Marketing",
-  transaction_fees: "Transaction Fees",
-  other: "Other",
+  transaction_fees: "Frais de transaction",
+  other: "Autre",
 };
 
 export type ExpenseStatus =
@@ -454,6 +461,9 @@ export interface ExpenseRecord {
   cadAmountMinor: number; // Base reporting currency in cents
   usdAmountMinor: number; // USD equivalent in cents
   indicativeStarsAmount: number; // Informational estimate based on valuation
+  fxRate?: number; // original currency -> CAD rate applied
+  fxRateDate?: string; // publication date of the quote used
+  fxRateSource?: string; // open_er_api | manual | fallback | identity
   category: ExpenseCategory;
   creatorId?: string; // Optional link to Creator
   candidateId?: string; // Optional link to WantedCandidate
@@ -539,6 +549,10 @@ export interface TreasuryOverview {
   committedAcquisitionsCadMinor: number; // Approved outstanding acquisition commitments
   availableAcquisitionBudgetCadMinor: number; // (allocatedAcquisitions) - (paidAcquisitions) - (committedAcquisitions)
   adminReimbursementsOwedCadMinor: number; // Unreimbursed personal expenses
+  cashOnHandCadMinor: number; // settled cash - club-paid expenses - reimbursements
+  telegramWithdrawnStars: number; // Stars Telegram reports as withdrawn (getStarTransactions)
+  recordedWithdrawalStars: number; // Stars covered by recorded withdrawal records
+  refundedStars: number; // Stars of refunded transactions (excluded from received)
 }
 
 export interface TreasuryMonthlyReport {
@@ -549,6 +563,12 @@ export interface TreasuryMonthlyReport {
   complimentaryMembersCount: number;
   creatorsAcquiredThisMonth: string[];
   newNominationsCount: number;
+  /** Activity that happened inside the report period (America/Toronto month). */
+  periodActivity?: {
+    starsReceived: number;
+    settledCashCadMinor: number;
+    paidExpensesCadMinor: number;
+  };
   generatedAt: string;
   publishedMessageId?: number;
 }

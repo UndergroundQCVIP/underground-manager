@@ -13,6 +13,7 @@ import {
   createEntitlement,
   extendEntitlement,
   getActiveUserEntitlements,
+  getEntitlement,
   markReminderSent,
   revokeEntitlement,
 } from "../db/entitlements.ts";
@@ -103,6 +104,17 @@ export async function extendComplimentaryAccess(
     return { success: false, error: "Additional days must be greater than zero." };
   }
 
+  const existing = await getEntitlement(entitlementId);
+  if (!existing) {
+    return { success: false, error: "Entitlement not found." };
+  }
+  if (existing.source !== "complimentary") {
+    return { success: false, error: "Only complimentary entitlements can be extended manually; paid time comes from Telegram." };
+  }
+  if (existing.status === "revoked") {
+    return { success: false, error: "This entitlement was revoked. Grant a new complimentary membership instead." };
+  }
+
   const seconds = additionalDays * 86400;
   const updated = await extendEntitlement(entitlementId, seconds);
   if (!updated) {
@@ -129,6 +141,15 @@ export async function revokeComplimentaryAccess(
   entitlementId: string,
   reason?: string
 ): Promise<{ success: boolean; entitlement?: Entitlement; error?: string }> {
+  const existing = await getEntitlement(entitlementId);
+  if (!existing) {
+    return { success: false, error: "Entitlement not found." };
+  }
+  if (existing.source !== "complimentary") {
+    // A paid entitlement mirrors a live Telegram subscription; revoking it here would
+    // cut off a member who is still being charged. Refunds go through handleRefund.
+    return { success: false, error: "Only complimentary entitlements can be revoked here." };
+  }
   const updated = await revokeEntitlement(entitlementId, reason);
   if (!updated) {
     return { success: false, error: "Entitlement not found." };
@@ -176,14 +197,21 @@ export async function processComplimentaryReminders(
       // If expiring within 3 days and not already expired
       if (expMs > nowMs && expMs <= thresholdMs) {
         try {
+          // A member who has already converted to paid has nothing to be reminded about.
+          const active = await getActiveUserEntitlements(ent.userId);
+          if (active.some((e) => e.source === "telegram_stars")) {
+            await markReminderSent(ent.id);
+            continue;
+          }
+
           const daysLeft = Math.max(1, Math.round((expMs - nowMs) / (86400 * 1000)));
           const text =
-            `⏳ *Underground VIP — Membership Expiry Notice*\n\n` +
-            `Your complimentary access expires in approximately *${daysLeft} day${
+            `⏳ *Underground VIP — Avis d'expiration de l'abonnement*\n\n` +
+            `Votre accès gracieux expire dans environ *${daysLeft} jour${
               daysLeft === 1 ? "" : "s"
             }*.\n\n` +
-            `To maintain uninterrupted access to TOKEBEC VIP COLLECTIONS and the Underground community, you can subscribe using Telegram Stars at any time.\n\n` +
-            `Tap below to subscribe or check your membership.`;
+            `Pour conserver un accès ininterrompu à TOKEBEC VIP COLLECTIONS et à la communauté Underground, vous pouvez vous abonner en tout temps avec les Étoiles Telegram.\n\n` +
+            `Appuyez ci-dessous pour vous abonner ou consulter votre abonnement.`;
 
           await sender.sendMessage(ent.userId, text, {
             parse_mode: "Markdown",
@@ -191,13 +219,13 @@ export async function processComplimentaryReminders(
               inline_keyboard: [
                 [
                   {
-                    text: "🌟 Subscribe with Telegram Stars",
+                    text: "🌟 S'abonner avec les Étoiles Telegram",
                     callback_data: "member:subscribe",
                   },
                 ],
                 [
                   {
-                    text: "📋 My Membership",
+                    text: "📋 Mon abonnement",
                     callback_data: "member:status",
                   },
                 ],

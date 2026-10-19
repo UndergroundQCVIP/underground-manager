@@ -4,6 +4,7 @@
  */
 
 import { getKv } from "./kv.ts";
+import { JournalDraft, stageBudgetVersionBump, stageJournalEntries } from "./treasury.ts";
 import {
   ExpenseCategory,
   ExpenseRecord,
@@ -26,8 +27,18 @@ export interface ExpenseFilter {
 // 1. Expense Records
 // ==============================================================================
 
+export interface RecordExpenseOptions {
+  /** Ledger postings committed atomically with the expense (may depend on the generated id). */
+  journal?: JournalDraft[] | ((expense: ExpenseRecord) => JournalDraft[]);
+  /** When set, the commit fails if this key already exists (single-commitment guard). */
+  uniqueKey?: Deno.KvKey;
+  /** When set, the commit fails if the budget changed since this versionstamp. */
+  expectedBudgetVersion?: string | null;
+}
+
 export async function recordExpense(
-  data: Omit<ExpenseRecord, "id" | "createdAt" | "updatedAt">
+  data: Omit<ExpenseRecord, "id" | "createdAt" | "updatedAt">,
+  options: RecordExpenseOptions = {}
 ): Promise<ExpenseRecord> {
   const kv = await getKv();
   const id = crypto.randomUUID();
@@ -55,10 +66,30 @@ export async function recordExpense(
   if (record.adjustmentOfId) {
     atomic.set(["expenses_adjustments", record.adjustmentOfId, id], record);
   }
+  if (options.uniqueKey) {
+    atomic.check({ key: options.uniqueKey, versionstamp: null });
+    atomic.set(options.uniqueKey, id);
+  }
+  if (options.expectedBudgetVersion !== undefined) {
+    atomic.check({
+      key: ["treasury_budget_version"],
+      versionstamp: options.expectedBudgetVersion,
+    });
+  }
+  const drafts =
+    typeof options.journal === "function" ? options.journal(record) : options.journal ?? [];
+  if (drafts.length) {
+    stageJournalEntries(atomic, drafts);
+  }
+  stageBudgetVersionBump(atomic);
 
   const res = await atomic.commit();
   if (!res.ok) {
-    throw new Error("Failed to record expense");
+    throw new Error(
+      options.uniqueKey || options.expectedBudgetVersion !== undefined
+        ? "Expense was not recorded: a concurrent budget change or duplicate commitment was detected. Please retry."
+        : "Failed to record expense"
+    );
   }
 
   return record;
@@ -72,19 +103,21 @@ export async function getExpense(id: string): Promise<ExpenseRecord | null> {
 
 export async function listExpenses(filter?: ExpenseFilter): Promise<ExpenseRecord[]> {
   const kv = await getKv();
-  const limit = filter?.limit ?? 200;
+  // No cap at the storage layer: financial totals are derived from this list.
+  // `filter.limit` only trims the (newest-first) result for display purposes.
+  const listOptions = undefined;
 
   let iter: Deno.KvListIterator<ExpenseRecord>;
   if (filter?.status) {
-    iter = kv.list<ExpenseRecord>({ prefix: ["expenses_by_status", filter.status] }, { limit });
+    iter = kv.list<ExpenseRecord>({ prefix: ["expenses_by_status", filter.status] }, listOptions);
   } else if (filter?.category) {
-    iter = kv.list<ExpenseRecord>({ prefix: ["expenses_by_category", filter.category] }, { limit });
+    iter = kv.list<ExpenseRecord>({ prefix: ["expenses_by_category", filter.category] }, listOptions);
   } else if (filter?.creatorId) {
-    iter = kv.list<ExpenseRecord>({ prefix: ["expenses_by_creator", filter.creatorId] }, { limit });
+    iter = kv.list<ExpenseRecord>({ prefix: ["expenses_by_creator", filter.creatorId] }, listOptions);
   } else if (filter?.candidateId) {
-    iter = kv.list<ExpenseRecord>({ prefix: ["expenses_by_candidate", filter.candidateId] }, { limit });
+    iter = kv.list<ExpenseRecord>({ prefix: ["expenses_by_candidate", filter.candidateId] }, listOptions);
   } else {
-    iter = kv.list<ExpenseRecord>({ prefix: ["expenses"] }, { limit });
+    iter = kv.list<ExpenseRecord>({ prefix: ["expenses"] }, listOptions);
   }
 
   const expenses: ExpenseRecord[] = [];
@@ -97,9 +130,10 @@ export async function listExpenses(filter?: ExpenseFilter): Promise<ExpenseRecor
     }
   }
 
-  return expenses.sort(
+  expenses.sort(
     (a, b) => new Date(b.expenseDate).getTime() - new Date(a.expenseDate).getTime()
   );
+  return filter?.limit ? expenses.slice(0, filter.limit) : expenses;
 }
 
 export async function updateExpenseStatus(
@@ -121,6 +155,7 @@ export async function updateExpenseStatus(
   };
 
   const atomic = kv.atomic();
+  atomic.check(res);
   atomic.set(["expenses", id], updated);
   atomic.delete(["expenses_by_status", old.status, id]);
   atomic.set(["expenses_by_status", newStatus, id], updated);
@@ -132,6 +167,7 @@ export async function updateExpenseStatus(
   if (updated.creatorId) {
     atomic.set(["expenses_by_creator", updated.creatorId, id], updated);
   }
+  stageBudgetVersionBump(atomic);
 
   const resCommit = await atomic.commit();
   if (!resCommit.ok) {
@@ -141,7 +177,70 @@ export async function updateExpenseStatus(
   return updated;
 }
 
-export async function markExpenseReimbursed(id: string): Promise<ExpenseRecord | null> {
+/**
+ * Atomically moves an expense from `expectedStatus` to a new status while
+ * applying field changes and ledger postings in the same commit. Fails (instead
+ * of double-posting) when the expense is no longer in `expectedStatus`.
+ */
+export async function transitionExpense(
+  id: string,
+  expectedStatus: ExpenseStatus,
+  newStatus: ExpenseStatus,
+  patch: Partial<ExpenseRecord>,
+  journal: JournalDraft[] = []
+): Promise<ExpenseRecord> {
+  const kv = await getKv();
+  const res = await kv.get<ExpenseRecord>(["expenses", id]);
+  const old = res.value;
+  if (!old) throw new Error(`Expense ${id} not found`);
+  if (old.status !== expectedStatus) {
+    throw new Error(`Expense ${id} is ${old.status}, expected ${expectedStatus}`);
+  }
+
+  const updated: ExpenseRecord = {
+    ...old,
+    ...patch,
+    id: old.id,
+    status: newStatus,
+    updatedAt: new Date().toISOString(),
+  };
+
+  const atomic = kv.atomic();
+  atomic.check(res);
+  atomic.set(["expenses", id], updated);
+  atomic.delete(["expenses_by_status", old.status, id]);
+  atomic.set(["expenses_by_status", newStatus, id], updated);
+  atomic.set(["expenses_by_category", updated.category, id], updated);
+  if (updated.candidateId) atomic.set(["expenses_by_candidate", updated.candidateId, id], updated);
+  if (updated.creatorId) atomic.set(["expenses_by_creator", updated.creatorId, id], updated);
+  stageJournalEntries(atomic, journal);
+  stageBudgetVersionBump(atomic);
+
+  const commit = await atomic.commit();
+  if (!commit.ok) {
+    throw new Error(`Expense ${id} changed concurrently; transition not applied`);
+  }
+  return updated;
+}
+
+export async function listExpenseAdjustments(originalId: string): Promise<ExpenseRecord[]> {
+  const kv = await getKv();
+  const iter = kv.list<ExpenseRecord>({ prefix: ["expenses_adjustments", originalId] });
+  const out: ExpenseRecord[] = [];
+  for await (const entry of iter) {
+    if (entry.value) out.push(entry.value);
+  }
+  return out;
+}
+
+/**
+ * Marks an administrator-paid expense as reimbursed exactly once; the ledger
+ * postings are committed in the same atomic operation.
+ */
+export async function markExpenseReimbursed(
+  id: string,
+  journal: JournalDraft[] = []
+): Promise<ExpenseRecord | null> {
   const kv = await getKv();
   const res = await kv.get<ExpenseRecord>(["expenses", id]);
   if (!res.value) return null;
@@ -149,6 +248,12 @@ export async function markExpenseReimbursed(id: string): Promise<ExpenseRecord |
   const old = res.value;
   if (old.payer !== "admin_personal") {
     throw new Error(`Expense ${id} was not paid personally by an administrator`);
+  }
+  if (old.status !== "paid") {
+    throw new Error(`Expense ${id} is ${old.status}; only paid expenses can be reimbursed`);
+  }
+  if (old.reimbursementStatus !== "pending") {
+    throw new Error(`Expense ${id} reimbursement is already ${old.reimbursementStatus ?? "settled"}`);
   }
 
   const now = new Date().toISOString();
@@ -160,6 +265,7 @@ export async function markExpenseReimbursed(id: string): Promise<ExpenseRecord |
   };
 
   const atomic = kv.atomic();
+  atomic.check(res);
   atomic.set(["expenses", id], updated);
   atomic.set(["expenses_by_status", updated.status, id], updated);
   if (updated.candidateId) {
@@ -168,9 +274,11 @@ export async function markExpenseReimbursed(id: string): Promise<ExpenseRecord |
   if (updated.creatorId) {
     atomic.set(["expenses_by_creator", updated.creatorId, id], updated);
   }
+  stageJournalEntries(atomic, journal);
+  stageBudgetVersionBump(atomic);
   const resCommit = await atomic.commit();
   if (!resCommit.ok) {
-    throw new Error(`Failed to mark expense ${id} as reimbursed`);
+    throw new Error(`Failed to mark expense ${id} as reimbursed (concurrent change)`);
   }
 
   return updated;
@@ -178,17 +286,21 @@ export async function markExpenseReimbursed(id: string): Promise<ExpenseRecord |
 
 export async function recordExpenseAdjustment(
   originalExpenseId: string,
-  data: Omit<ExpenseRecord, "id" | "createdAt" | "updatedAt" | "adjustmentOfId">
+  data: Omit<ExpenseRecord, "id" | "createdAt" | "updatedAt" | "adjustmentOfId">,
+  options: RecordExpenseOptions = {}
 ): Promise<ExpenseRecord> {
   const original = await getExpense(originalExpenseId);
   if (!original) {
     throw new Error(`Original expense ${originalExpenseId} not found`);
   }
 
-  return await recordExpense({
-    ...data,
-    adjustmentOfId: originalExpenseId,
-  });
+  return await recordExpense(
+    {
+      ...data,
+      adjustmentOfId: originalExpenseId,
+    },
+    options
+  );
 }
 
 // ==============================================================================

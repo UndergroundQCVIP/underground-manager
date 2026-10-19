@@ -116,8 +116,42 @@ export async function reconcileStarHoldingStatuses(): Promise<{
 }
 
 /**
- * Reconcile Star transactions via Telegram Bot API (getStarTransactions).
- * Safely pages through Telegram transactions and deduplicates against internal records.
+ * Mark a Stars transaction (identified by Telegram charge id) as refunded so it
+ * no longer counts as received/pending/withdrawable revenue.
+ */
+export async function markStarTransactionRefunded(
+  telegramTxId: string
+): Promise<StarTransactionRecord | null> {
+  const existing = await getStarTransactionByTelegramId(telegramTxId);
+  if (!existing) return null;
+  if (existing.status === "refunded") return existing;
+  return await updateStarTransactionStatus(existing.id, "refunded");
+}
+
+// Minimal structural view of Bot API StarTransaction (payment.d.ts).
+interface ApiStarTransaction {
+  id: string;
+  amount: number;
+  date: number;
+  source?: { type: string; transaction_type?: string; user?: { id: number }; subscription_period?: number };
+  receiver?: { type: string; user?: { id: number } };
+}
+
+const API_PAGE_LIMIT = 100;
+const API_MAX_PAGES = 50;
+
+/**
+ * Reconcile Star transactions via the Telegram Bot API (getStarTransactions).
+ *
+ * Telegram returns the newest transactions first, so a numeric offset
+ * checkpoint cannot be trusted (new transactions shift every older one). Each
+ * run instead pages from offset 0 until it reaches a page of already-known
+ * transactions; dedupe is by Telegram transaction id.
+ *
+ * Direction semantics (Bot API): `amount` is always positive. Incoming
+ * transactions carry `source`; outgoing ones carry `receiver`. An outgoing
+ * transaction to a user is a refund and shares the id of the original payment;
+ * an outgoing transaction to Fragment is a withdrawal.
  */
 export async function reconcileStarTransactionsFromApi(
   api: Api,
@@ -125,65 +159,164 @@ export async function reconcileStarTransactionsFromApi(
 ): Promise<{
   newTransactionsRecorded: number;
   duplicatesSkipped: number;
+  refundsApplied: number;
+  withdrawalsObserved: number;
   currentOffset: number;
   errors: string[];
 }> {
   const checkpoint = await getStarReconciliationCheckpoint();
-  const offset = options?.forceReset ? 0 : checkpoint.offset;
-  const limit = options?.limit ?? 50;
+  const limit = Math.min(options?.limit ?? API_PAGE_LIMIT, API_PAGE_LIMIT);
 
   let newTransactionsRecorded = 0;
   let duplicatesSkipped = 0;
+  let refundsApplied = 0;
+  let withdrawalsObserved = 0;
   const errors: string[] = [];
 
-  try {
-    // Call Telegram Bot API getStarTransactions if available
-    // deno-lint-ignore no-explicit-any
-    const rawApi = (api as any).raw;
-    if (typeof rawApi?.getStarTransactions === "function") {
-      const result = await rawApi.getStarTransactions({ offset, limit });
-      // Telegram returns StarTransactions object: { transactions: StarTransaction[] }
-      const transactions = result?.transactions ?? [];
+  // deno-lint-ignore no-explicit-any
+  const rawApi = (api as any).raw;
+  if (typeof rawApi?.getStarTransactions !== "function") {
+    return {
+      newTransactionsRecorded: 0,
+      duplicatesSkipped: 0,
+      refundsApplied: 0,
+      withdrawalsObserved: 0,
+      currentOffset: 0,
+      errors: ["getStarTransactions is not supported by current API client"],
+    };
+  }
 
-      const valuation = await getValuationConfig();
+  try {
+    const valuation = await getValuationConfig();
+    let offset = 0;
+
+    for (let page = 0; page < API_MAX_PAGES; page++) {
+      const result = await rawApi.getStarTransactions({ offset, limit });
+      const transactions: ApiStarTransaction[] = result?.transactions ?? [];
+      if (transactions.length === 0) break;
+
+      let newInPage = 0;
 
       for (const tx of transactions) {
         const telegramTxId = String(tx.id);
-        const existing = await getStarTransactionByTelegramId(telegramTxId);
-        if (existing) {
-          duplicatesSkipped++;
-          continue;
-        }
-
-        const starsAmount = Number(tx.amount || 0);
+        const amount = Math.abs(Number(tx.amount || 0));
         const txDate = tx.date
           ? new Date(tx.date * 1000).toISOString()
           : new Date().toISOString();
         const holdingPeriodEndsAt = new Date(
           new Date(txDate).getTime() + TWENTY_ONE_DAYS_MS
         ).toISOString();
+        const existing = await getStarTransactionByTelegramId(telegramTxId);
+
+        // Outgoing: refund to a user (same id as the original payment)
+        if (tx.receiver?.type === "user") {
+          if (existing) {
+            if (existing.status !== "refunded") {
+              await updateStarTransactionStatus(existing.id, "refunded");
+              refundsApplied++;
+              newInPage++;
+            } else {
+              duplicatesSkipped++;
+            }
+          } else {
+            // Original payment never seen locally: store it already refunded
+            // so it contributes nothing, and the refund is auditable.
+            const rec = await recordStarTransaction({
+              telegramTxId,
+              userId: tx.receiver.user?.id,
+              starsAmount: amount,
+              txType: "refund",
+              txTimestamp: txDate,
+              holdingPeriodEndsAt,
+              status: "refunded",
+              estimatedRewardUsdCents: 0,
+              estimatedRewardCadCents: 0,
+              source: "telegram_api",
+            });
+            if (rec.success) {
+              refundsApplied++;
+              newInPage++;
+            }
+          }
+          continue;
+        }
+
+        // Outgoing: withdrawal to Fragment (informational cross-check only)
+        if (tx.receiver?.type === "fragment") {
+          const key = `withdrawal:${telegramTxId}`;
+          if (await getStarTransactionByTelegramId(key)) {
+            duplicatesSkipped++;
+            continue;
+          }
+          const rec = await recordStarTransaction({
+            telegramTxId: key,
+            starsAmount: -amount,
+            txType: "withdrawal",
+            txTimestamp: txDate,
+            holdingPeriodEndsAt: txDate,
+            status: "withdrawn",
+            estimatedRewardUsdCents: 0,
+            estimatedRewardCadCents: 0,
+            source: "telegram_api",
+          });
+          if (rec.success) {
+            withdrawalsObserved++;
+            newInPage++;
+          }
+          continue;
+        }
+
+        // Any other outgoing transaction (ads, API fees, ...) is not revenue.
+        if (tx.receiver) {
+          const key = `outgoing:${telegramTxId}`;
+          if (await getStarTransactionByTelegramId(key)) {
+            duplicatesSkipped++;
+            continue;
+          }
+          const rec = await recordStarTransaction({
+            telegramTxId: key,
+            starsAmount: -amount,
+            txType: "adjustment",
+            txTimestamp: txDate,
+            holdingPeriodEndsAt: txDate,
+            status: "withdrawn",
+            estimatedRewardUsdCents: 0,
+            estimatedRewardCadCents: 0,
+            source: "telegram_api",
+          });
+          if (rec.success) newInPage++;
+          continue;
+        }
+
+        // Incoming
+        if (existing) {
+          duplicatesSkipped++;
+          continue;
+        }
 
         const estimatedRewardUsdCents = Math.round(
-          starsAmount * valuation.starsRewardValuationUsd * 100
+          amount * valuation.starsRewardValuationUsd * 100
         );
         const { convertedAmountMinor: estimatedRewardCadCents } = await convertCurrency(
           estimatedRewardUsdCents,
           "USD",
           "CAD"
         );
-
-        // Status determination
+        const isPayment = tx.source?.type === "user";
         const isEligible = new Date(holdingPeriodEndsAt).getTime() <= Date.now();
-        const status = isEligible ? "withdrawable_estimate" : "pending";
 
         const recRes = await recordStarTransaction({
           telegramTxId,
-          userId: tx.source?.user?.id ?? undefined,
-          starsAmount,
-          txType: starsAmount < 0 ? "refund" : "subscription",
+          userId: tx.source?.user?.id,
+          starsAmount: amount,
+          txType: isPayment
+            ? tx.source?.subscription_period
+              ? "subscription"
+              : "invoice"
+            : "adjustment",
           txTimestamp: txDate,
           holdingPeriodEndsAt,
-          status,
+          status: isEligible ? "withdrawable_estimate" : "pending",
           estimatedRewardUsdCents,
           estimatedRewardCadCents,
           source: "telegram_api",
@@ -191,41 +324,32 @@ export async function reconcileStarTransactionsFromApi(
 
         if (recRes.success) {
           newTransactionsRecorded++;
+          newInPage++;
         } else {
           duplicatesSkipped++;
         }
       }
 
-      const nextOffset = offset + transactions.length;
-      await saveStarReconciliationCheckpoint({
-        offset: nextOffset,
-        lastReconciledAt: new Date().toISOString(),
-        totalSyncedCount: checkpoint.totalSyncedCount + newTransactionsRecorded,
-      });
-
-      return {
-        newTransactionsRecorded,
-        duplicatesSkipped,
-        currentOffset: nextOffset,
-        errors,
-      };
-    } else {
-      // Mock environment or unsupported API in mock
-      return {
-        newTransactionsRecorded: 0,
-        duplicatesSkipped: 0,
-        currentOffset: offset,
-        errors: ["getStarTransactions is not supported by current API client"],
-      };
+      // Everything on this page was already known: older pages are known too.
+      if (newInPage === 0 || transactions.length < limit) break;
+      offset += transactions.length;
     }
+
+    await saveStarReconciliationCheckpoint({
+      offset: 0,
+      lastReconciledAt: new Date().toISOString(),
+      totalSyncedCount: checkpoint.totalSyncedCount + newTransactionsRecorded,
+    });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    errors.push(msg);
-    return {
-      newTransactionsRecorded,
-      duplicatesSkipped,
-      currentOffset: offset,
-      errors,
-    };
+    errors.push(err instanceof Error ? err.message : String(err));
   }
+
+  return {
+    newTransactionsRecorded,
+    duplicatesSkipped,
+    refundsApplied,
+    withdrawalsObserved,
+    currentOffset: 0,
+    errors,
+  };
 }

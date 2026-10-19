@@ -39,14 +39,40 @@ export async function adminOnlyMiddleware(ctx: Context, next: NextFunction): Pro
 
     if (ctx.callbackQuery) {
       await ctx.answerCallbackQuery({
-        text: "⛔ Access Denied: Administrator privileges required.",
+        text: "⛔ Accès refusé : privilèges d'administrateur requis.",
         show_alert: true,
       });
-    } else {
+    } else if (ctx.chat?.type === "private") {
+      // Never answer in groups/channels: that would leak that the command exists
+      // and spam shared chats.
       await ctx.reply(messages.unauthorized(), { parse_mode: "Markdown" });
     }
     return;
   }
 
   await next();
+}
+
+/**
+ * Scopes the administrator check to a composer's own routes.
+ *
+ * `composer.use(adminOnlyMiddleware)` would gate EVERY update that reaches the
+ * composer — including ordinary members' /suggest, /vote and callback taps and
+ * every message in the group chats — silently disabling the member features
+ * registered after it and spamming "Access Denied". This guard only applies the
+ * admin check to the given slash-commands and `admin:*` callback buttons and
+ * lets everything else flow on to later composers.
+ */
+export function adminRouteGuard(commands: string[]) {
+  return async (ctx: Context, next: NextFunction): Promise<void> => {
+    const data = ctx.callbackQuery?.data;
+    const isAdminCallback = typeof data === "string" && data.startsWith("admin:");
+    const isAdminCommand = commands.length > 0 && ctx.hasCommand(commands);
+
+    if (isAdminCallback || isAdminCommand) {
+      await adminOnlyMiddleware(ctx, next);
+      return;
+    }
+    await next();
+  };
 }

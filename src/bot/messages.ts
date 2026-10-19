@@ -1,9 +1,10 @@
 /**
  * Underground Manager — Message Templates & Strings
- * Organized cleanly to facilitate future localization (e.g. French/English).
+ * Organized cleanly to facilitate localization (Quebec French strings).
  */
 
 import { getConfig } from "../config.ts";
+import { formatTorontoDate } from "../util/time.ts";
 import { MembershipSummary, SpaceId } from "../types.ts";
 import { getSpaceTitle } from "../access/spaces.ts";
 
@@ -12,31 +13,31 @@ export const messages = {
     const config = getConfig();
     if (isMember) {
       return (
-        `👋 *Welcome back, ${escapeMarkdown(firstName)}!*\n\n` +
-        `You have an active *Underground VIP* membership.\n` +
-        `Manage your subscription or access your private spaces below.`
+        `👋 *Bon retour, ${escapeMarkdown(firstName)} !*\n\n` +
+        `Vous avez un abonnement *Underground VIP* actif.\n` +
+        `Gérez votre abonnement ou accédez à vos espaces privés ci-dessous.`
       );
     }
     return (
-      `👋 *Welcome to Underground Manager, ${escapeMarkdown(firstName)}.*\n\n` +
-      `Underground is an exclusive private community featuring curated creator archives, private collections, and VIP discussions.\n\n` +
-      `🌟 *VIP Membership:* ${config.STARS_PRICE_AMOUNT} Telegram Stars / 30 days\n` +
-      `Recurring subscription billed via official Telegram Stars.\n\n` +
-      `Select an option below to join or manage your account:`
+      `👋 *Bienvenue sur Underground Manager, ${escapeMarkdown(firstName)}.*\n\n` +
+      `Underground est une communauté privée exclusive offrant des archives de créateurs triées sur le volet, des collections privées et des discussions VIP.\n\n` +
+      `🌟 *Abonnement VIP :* ${config.STARS_PRICE_AMOUNT} Étoiles Telegram / 30 jours\n` +
+      `Abonnement récurrent facturé par les Étoiles Telegram officielles.\n\n` +
+      `Choisissez une option ci-dessous pour vous joindre ou gérer votre compte :`
     );
   },
 
   nonMemberInfo: () => {
     const config = getConfig();
     return (
-      `💎 *UNDERGROUND VIP MEMBERSHIP*\n\n` +
-      `Your subscription grants exclusive access to:\n` +
-      `• *TOKEBEC VIP COLLECTIONS* — Curated creator library\n` +
-      `• *Underground General Chat* — Private member conversations\n` +
-      `• *Wanted List* — Creator requests and nominations\n\n` +
-      `💳 *Price:* ${config.STARS_PRICE_AMOUNT} Stars / 30 days\n` +
-      `🔄 *Type:* Recurring subscription, cancel anytime via Telegram Settings\n\n` +
-      `Tap below to subscribe instantly:`
+      `💎 *ABONNEMENT UNDERGROUND VIP*\n\n` +
+      `Votre abonnement vous donne un accès exclusif à :\n` +
+      `• *TOKEBEC VIP COLLECTIONS* — Bibliothèque de créateurs sélectionnés\n` +
+      `• *Underground General Chat* — Conversations privées entre membres\n` +
+      `• *Liste de souhaits* — Demandes et suggestions de créateurs\n\n` +
+      `💳 *Prix :* ${config.STARS_PRICE_AMOUNT} Étoiles / 30 jours\n` +
+      `🔄 *Type :* Abonnement récurrent, annulable en tout temps dans les paramètres de Telegram\n\n` +
+      `Appuyez ci-dessous pour vous abonner immédiatement :`
     );
   },
 
@@ -44,100 +45,100 @@ export const messages = {
     const config = getConfig();
     if (!summary.isMember) {
       return (
-        `📋 *MY MEMBERSHIP*\n\n` +
-        `*Status:* ⚪ Inactive / No Subscription\n` +
-        `*Price:* ${config.STARS_PRICE_AMOUNT} Stars every 30 days\n\n` +
-        `You do not currently have an active membership. Tap below to subscribe.`
+        `📋 *MON ABONNEMENT*\n\n` +
+        `*Statut :* ⚪ Inactif / Aucun abonnement\n` +
+        `*Prix :* ${config.STARS_PRICE_AMOUNT} Étoiles tous les 30 jours\n\n` +
+        `Vous n'avez actuellement aucun abonnement actif. Appuyez ci-dessous pour vous abonner.`
       );
     }
 
     const typeStr = summary.hasPaid
-      ? "🌟 Paid (Telegram Stars)"
-      : "🎁 Complimentary";
+      ? "🌟 Payant (Étoiles Telegram)"
+      : "🎁 Gracieux";
 
     const expiryStr = summary.effectiveExpiry
-      ? new Date(summary.effectiveExpiry).toLocaleDateString("en-US", {
+      ? formatTorontoDate(summary.effectiveExpiry, {
           year: "numeric",
           month: "short",
           day: "numeric",
           hour: "2-digit",
           minute: "2-digit",
         })
-      : "Indefinite";
+      : "Indéterminée";
 
     const spacesList = summary.accessibleSpaces
       .map((s) => `  ✓ ${getSpaceTitle(s)}`)
       .join("\n");
 
     const renewalStr = summary.isRecurring
-      ? "Automatic renewal every 30 days via Telegram Stars"
-      : "Non-renewing (Complimentary grant)";
+      ? "Renouvellement automatique tous les 30 jours par Étoiles Telegram"
+      : "Non renouvelable (accès gracieux)";
 
     return (
-      `📋 *MY MEMBERSHIP*\n\n` +
-      `*Type:* ${typeStr}\n` +
-      `*Status:* 🟢 Active\n` +
-      `*Valid Until:* ${expiryStr}\n` +
-      `*Renewal:* ${renewalStr}\n\n` +
-      `*Accessible Spaces:*\n${spacesList}\n\n` +
-      `_Manage recurring Telegram subscriptions anytime in Telegram Settings > Stars._`
+      `📋 *MON ABONNEMENT*\n\n` +
+      `*Type :* ${typeStr}\n` +
+      `*Statut :* 🟢 Actif\n` +
+      `*Valide jusqu'au :* ${expiryStr}\n` +
+      `*Renouvellement :* ${renewalStr}\n\n` +
+      `*Espaces accessibles :*\n${spacesList}\n\n` +
+      `_Gérez vos abonnements Telegram récurrents en tout temps dans Paramètres Telegram > Étoiles._`
     );
   },
 
   accessChannels: (accessibleSpaces: SpaceId[]) => {
     if (accessibleSpaces.length === 0) {
       return (
-        `🔒 *ACCESS PRIVATE CHANNELS*\n\n` +
-        `You do not have access to any private spaces.\n` +
-        `Please purchase a subscription to unlock Underground spaces.`
+        `🔒 *ACCÈS AUX CANAUX PRIVÉS*\n\n` +
+        `Vous n'avez accès à aucun espace privé.\n` +
+        `Veuillez acheter un abonnement pour débloquer les espaces Underground.`
       );
     }
 
     return (
-      `🔓 *ACCESS PRIVATE CHANNELS*\n\n` +
-      `Tap each button below to request to join your authorized spaces.\n` +
-      `Our system will automatically approve your request instantly.`
+      `🔓 *ACCÈS AUX CANAUX PRIVÉS*\n\n` +
+      `Appuyez sur chaque bouton ci-dessous pour demander à joindre vos espaces autorisés.\n` +
+      `Notre système approuvera automatiquement votre demande sur-le-champ.`
     );
   },
 
   paySupport: () => {
     const config = getConfig();
     return (
-      `💬 *UNDERGROUND SUPPORT & BILLING*\n\n` +
-      `Need help with your subscription or payment?\n\n` +
-      `• *Telegram Stars:* Managed directly by Telegram. You can view, manage, or cancel active subscriptions in Telegram Settings > Stars.\n` +
-      `• *Bot Support:* Contact ${config.SUPPORT_USERNAME} with your Telegram ID for billing inquiries.\n` +
-      `• *Refunds:* Eligible refunds are processed according to Telegram Stars policies.`
+      `💬 *SUPPORT ET FACTURATION UNDERGROUND*\n\n` +
+      `Besoin d'aide avec votre abonnement ou votre paiement ?\n\n` +
+      `• *Étoiles Telegram :* Gérées directement par Telegram. Vous pouvez consulter, gérer ou annuler vos abonnements actifs dans Paramètres Telegram > Étoiles.\n` +
+      `• *Soutien du bot :* Communiquez avec ${config.SUPPORT_USERNAME} en indiquant votre identifiant Telegram pour toute question de facturation.\n` +
+      `• *Remboursements :* Les remboursements admissibles sont traités selon les politiques des Étoiles Telegram.`
     );
   },
 
   paymentSuccess: (expiresAt: string) => {
-    const dateStr = new Date(expiresAt).toLocaleDateString("en-US", {
+    const dateStr = formatTorontoDate(expiresAt, {
       year: "numeric",
       month: "short",
       day: "numeric",
     });
 
     return (
-      `🎉 *PAYMENT CONFIRMED!*\n\n` +
-      `Thank you! Your Underground VIP subscription is now *active* until *${dateStr}*.\n\n` +
-      `You now have full access to:\n` +
+      `🎉 *PAIEMENT CONFIRMÉ !*\n\n` +
+      `Merci ! Votre abonnement Underground VIP est maintenant *actif* jusqu'au *${dateStr}*.\n\n` +
+      `Vous avez maintenant un accès complet à :\n` +
       `• TOKEBEC VIP COLLECTIONS\n` +
       `• Underground General Chat\n` +
-      `• Wanted List\n\n` +
-      `Tap *Access My Channels* below to enter your spaces!`
+      `• Liste de souhaits\n\n` +
+      `Appuyez sur *Accéder à mes canaux* ci-dessous pour entrer dans vos espaces !`
     );
   },
 
   adminMenu: () => {
     return (
       `🛠️ *UNDERGROUND MANAGER — ADMINISTRATION*\n\n` +
-      `Select an administrative module:`
+      `Choisissez un module d'administration :`
     );
   },
 
   unauthorized: () => {
-    return `⛔ *Access Denied:* You are not authorized to access administration.`;
+    return `⛔ *Accès refusé :* Vous n'êtes pas autorisé à accéder à l'administration.`;
   },
 };
 

@@ -69,7 +69,7 @@ Deno.test("WANTED — Complimentary members cannot nominate or support by defaul
     });
 
     assertEquals(result.success, false);
-    assertEquals(result.error?.includes("Only active paying subscribers"), true);
+    assertEquals(result.error?.includes("Seuls les abonnés payants actifs"), true);
   } finally {
     await kv.close();
   }
@@ -109,7 +109,7 @@ Deno.test("WANTED — Cannot nominate creator already available in VIP Collectio
     });
 
     assertEquals(result.success, false);
-    assertEquals(result.error?.includes("already available in TOKEBEC VIP COLLECTIONS"), true);
+    assertEquals(result.error?.includes("déjà disponible dans TOKEBEC VIP COLLECTIONS"), true);
   } finally {
     await kv.close();
   }
@@ -241,8 +241,8 @@ Deno.test("WANTED — Channel synchronization publishes read-only list with rank
 
     const text = api.sentMessages[0].text;
     assertEquals(text.includes("*Luna*"), true);
-    assertEquals(text.includes("1 supporter"), true);
-    assertEquals(text.includes("[Requested]"), true);
+    assertEquals(text.includes("1 appui"), true);
+    assertEquals(text.includes("[Demandé]"), true);
   } finally {
     await kv.close();
   }
