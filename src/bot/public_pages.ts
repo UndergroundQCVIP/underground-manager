@@ -123,6 +123,12 @@ export async function renderNavPage(
       return { text, kb: back(kb) };
     }
 
+    case "leaderboard": {
+      const { renderLeaderboard } = await import("./leaderboard_view.ts");
+      const view = await renderLeaderboard(summary.userId, "month");
+      return { text: view.text, kb: view.kb };
+    }
+
     case "directory":
       kb.text("Tous", "dir:all").text("Regular", "dir:regular").text("Retro", "dir:retro").row();
       kb.url("📣 Ouvrir le répertoire public", directoryUrl()).row();

@@ -41,6 +41,12 @@ startComposer.command("start", async (ctx) => {
 
   // 0. Public navigation deep links (welcome menu / lobby / directory buttons)
   if (match && (NAV_PAGES as readonly string[]).includes(match)) {
+    if (match === "leaderboard") {
+      const { renderLeaderboard } = await import("../leaderboard_view.ts");
+      const view = await renderLeaderboard(userId, "month");
+      await ctx.reply(view.text, { parse_mode: "Markdown", reply_markup: view.kb, link_preview_options: { is_disabled: true } });
+      return;
+    }
     if (match === "contribute") {
       const { contributeChooser } = await import("./contribute.ts");
       await contributeChooser(ctx);

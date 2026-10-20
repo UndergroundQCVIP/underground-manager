@@ -19,9 +19,9 @@ import { getDirectorySyncState } from "../db/directory.ts";
 import { isMessageGone, isMessageNotModified, sha256Hex } from "../wanted/service.ts";
 import { MembershipMode } from "../types.ts";
 
-export type NavPage = "explore" | "directory" | "regular" | "retro" | "how" | "contribute" | "join" | "rules";
+export type NavPage = "explore" | "directory" | "regular" | "retro" | "how" | "contribute" | "join" | "rules" | "leaderboard";
 export const NAV_PAGES: readonly NavPage[] = [
-  "explore", "directory", "regular", "retro", "how", "contribute", "join", "rules",
+  "explore", "directory", "regular", "retro", "how", "contribute", "join", "rules", "leaderboard",
 ];
 
 export interface UrlButton {
@@ -111,9 +111,19 @@ export interface NavApiLike {
 
 export type SyncOutcome = "not_configured" | "unchanged" | "published" | "updated" | "error";
 
+export async function syncSlotMessage(
+  api: NavApiLike,
+  slot: "welcome" | "lobby" | "leaderboard",
+  chatId: number,
+  message: { text: string; reply_markup: UrlKeyboard },
+  force: boolean
+): Promise<{ outcome: SyncOutcome; error?: string }> {
+  return await syncOne(api, slot, chatId, message, force);
+}
+
 async function syncOne(
   api: NavApiLike,
-  slot: "welcome" | "lobby",
+  slot: "welcome" | "lobby" | "leaderboard",
   chatId: number,
   message: { text: string; reply_markup: UrlKeyboard },
   force: boolean

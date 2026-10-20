@@ -14,6 +14,10 @@ import { MembershipMode } from "../../types.ts";
 import { LOBBY_SETUP_INSTRUCTIONS, syncNavigationMessages, SyncOutcome } from "../../navigation/service.ts";
 import { getNavigationState } from "../../db/navigation.ts";
 import { buildRoster } from "../../membership/roster.ts";
+import { getPrize } from "../../db/points.ts";
+import { POINTS, PRIZE_DAYS, recalculatePoints } from "../../points/service.ts";
+import { syncLeaderboardPost } from "../../points/post.ts";
+import { torontoMonthCycle } from "../../util/time.ts";
 import { formatTorontoDate } from "../../util/time.ts";
 import { escapeMd } from "../../util/markdown.ts";
 
@@ -36,6 +40,8 @@ adminSettingsComposer.callbackQuery("admin:settings", async (ctx) => {
       .text("🧭 Navigation publique", "admin:nav")
       .row()
       .text("🎁 Récompenses", "cadm:rewards")
+      .row()
+      .text("🏆 Classement", "admin:lb")
       .row()
       .text("🩺 État du système", "admin:status")
       .row()
@@ -152,6 +158,58 @@ adminSettingsComposer.callbackQuery(/^admin:nav_sync:(welcome|directory|all)$/, 
     `• Boutons du répertoire : ${OUTCOME[res.directory.outcome]}${res.directory.error ? ` — ${res.directory.error}` : ""}`,
     { parse_mode: "Markdown", reply_markup: new InlineKeyboard().text("⬅️ Navigation publique", "admin:nav") }
   );
+});
+
+// ---- Leaderboard administration (UG-07) ------------------------------------------------------------
+
+async function showLb(ctx: { answerCallbackQuery: (o?: object) => Promise<unknown>; editMessageText: (t: string, o: object) => Promise<unknown> }, extra = "") {
+  const s = await getSystemSettings();
+  const c = getConfig();
+  const prize = await getPrize(prevMonth());
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText(
+    `🏆 *CLASSEMENT*\n\n` +
+      `• Prix mensuel automatique (+${PRIZE_DAYS} jours Regular au n°1) : *${s.leaderboardPrizesEnabled ? "activé" : "désactivé"}*\n` +
+      `• Publication automatique : ${c.TELEGRAM_LEADERBOARD_CHAT_ID ? "✅ canal configuré" : "⚪ non configurée (TELEGRAM_LEADERBOARD_CHAT_ID)"}\n` +
+      `• Dernier prix (${prevMonth()}) : ${prize ? `\`${prize.winnerId}\` — ${prize.points} pts` : "—"}\n` +
+      `• Barème : 1 pt / ${POINTS.starsPerPoint} Étoiles · ${POINTS.perPublishedItem} pts / contenu publié (+${POINTS.rewardBonus} si récompensé) · ${POINTS.referralJoin} pts / personne parrainée\n` +
+      `• Les administrateurs et les accès gracieux sont exclus.` +
+      (extra ? `\n\n${extra}` : ""),
+    {
+      parse_mode: "Markdown",
+      reply_markup: new InlineKeyboard()
+        .text(s.leaderboardPrizesEnabled ? "⏸ Désactiver le prix mensuel" : "▶️ Activer le prix mensuel", "admin:lb_prize")
+        .row()
+        .text("🔄 Recalculer les points", "admin:lb_recalc")
+        .row()
+        .text("📣 Mettre à jour la publication", "admin:lb_sync")
+        .row()
+        .text("⬅️ Paramètres", "admin:settings"),
+    }
+  );
+}
+
+const prevMonth = () => {
+  const [y, m] = torontoMonthCycle().split("-").map(Number);
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+};
+
+adminSettingsComposer.callbackQuery("admin:lb", (ctx) => showLb(ctx));
+
+adminSettingsComposer.callbackQuery("admin:lb_prize", async (ctx) => {
+  const s = await getSystemSettings();
+  await updateSystemSettings({ leaderboardPrizesEnabled: !s.leaderboardPrizesEnabled });
+  await showLb(ctx);
+});
+
+adminSettingsComposer.callbackQuery("admin:lb_recalc", async (ctx) => {
+  const r = await recalculatePoints();
+  await showLb(ctx, `✅ Recalcul terminé : ${r.payments} paiement(s), ${r.contributions} contribution(s), ${r.referrals} parrainage(s) ajouté(s) (le reste était déjà compté).`);
+});
+
+adminSettingsComposer.callbackQuery("admin:lb_sync", async (ctx) => {
+  const r = await syncLeaderboardPost(ctx.api, true);
+  await showLb(ctx, `📣 Publication : ${OUTCOME[r.outcome]}${"error" in r && r.error ? ` — ${r.error}` : ""}`);
 });
 
 // ---- Active member roster: who has access and for how many more days --------------------------------

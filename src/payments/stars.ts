@@ -25,6 +25,7 @@ import {
 } from "../types.ts";
 import { PaymentProcessResult, PaymentProvider } from "./provider.ts";
 import { awardPaymentBonus } from "../referrals/service.ts";
+import { awardPaymentPoints, reversePaymentPoints } from "../points/service.ts";
 import {
   markStarTransactionRefunded,
   trackSuccessfulPaymentStarsTx,
@@ -313,6 +314,13 @@ export class TelegramStarsProvider implements PaymentProvider {
       console.error("[Referrals] payment bonus failed (will be retried by the hourly recovery):", err);
     }
 
+    // Leaderboard: 1 point per 10 Stars. Never blocks the credit.
+    try {
+      await awardPaymentPoints(payment);
+    } catch (err) {
+      console.error("[Points] payment points failed (rebuilt by the daily recalculation):", err);
+    }
+
     return {
       success: entitlement !== undefined,
       isDuplicate: false,
@@ -423,6 +431,7 @@ export class TelegramStarsProvider implements PaymentProvider {
 
     const payment = await updatePaymentStatusByChargeId(chargeId, "refunded");
     if (!payment) return false;
+    await reversePaymentPoints(chargeId).catch((err) => console.error("[Points] refund reversal failed:", err));
 
     const active = await getActiveUserEntitlements(userId);
     const related = active.find(

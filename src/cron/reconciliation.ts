@@ -13,6 +13,8 @@ import { processComplimentaryReminders } from "../complimentary/service.ts";
 import { processContributionReminders } from "../contributions/rewards.ts";
 import { syncNavigationMessages } from "../navigation/service.ts";
 import { recoverPendingBonuses } from "../referrals/service.ts";
+import { awardMonthlyPrize, recalculatePoints } from "../points/service.ts";
+import { syncLeaderboardPost } from "../points/post.ts";
 import { getChatId } from "../access/spaces.ts";
 import { syncPublicDirectory } from "../directory/sync.ts";
 import { syncWantedListChannel } from "../wanted/service.ts";
@@ -81,6 +83,14 @@ export async function runHourlyReconciliation(bot: Bot): Promise<{
   console.log(
     `[Cron] Complimentary reminders sent: ${reminders.remindedCount}, errors ${reminders.errors.length}`
   );
+
+  // 3-pre. UG-07: monthly leaderboard prize (once the month is over; idempotent)
+  try {
+    const prize = await awardMonthlyPrize(bot.api);
+    if (prize) console.log(`[Cron] Monthly leaderboard prize ${prize.month} → ${prize.winnerId}`);
+  } catch (err) {
+    console.error("[Cron Error] Monthly prize failed:", err);
+  }
 
   // 3a. UG-06: finish any referral bonus that was reserved but not applied
   try {
@@ -188,6 +198,15 @@ export async function runDailySynchronization(bot: Bot): Promise<{
     console.log(`[Cron] Navigation sync: welcome=${nav.welcome.outcome}, lobby=${nav.lobby.outcome}, directory=${nav.directory.outcome}`);
   } catch (err) {
     console.error("[Cron Error] Navigation sync failed:", err);
+  }
+
+  // 2c. UG-07: rebuild points from the source records (safety net, idempotent) and refresh the public post
+  try {
+    await recalculatePoints();
+    const lb = await syncLeaderboardPost(bot.api);
+    console.log(`[Cron] Leaderboard post: ${lb.outcome}`);
+  } catch (err) {
+    console.error("[Cron Error] Leaderboard sync failed:", err);
   }
 
   // 3. Pull Telegram's own Stars ledger (refunds, withdrawals, missed payments)

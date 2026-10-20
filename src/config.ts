@@ -15,6 +15,8 @@ export interface AppConfig {
   PUBLIC_DIRECTORY_CHAT_ID: number;
   /** UG-05: optional public t.me link of the directory channel (used by navigation buttons). */
   PUBLIC_DIRECTORY_URL: string;
+  /** UG-07: optional channel/group for the bot-managed leaderboard post (0 = none). */
+  TELEGRAM_LEADERBOARD_CHAT_ID: number;
   /** UG-05: public info group "LA CONFRÉRIE | ACCUEIL" (0 = not configured). Never access-controlled. */
   TELEGRAM_PUBLIC_LOBBY_CHAT_ID: number;
   /** UG-05: public invite/t.me link to the lobby ("" = not configured). */
@@ -82,6 +84,7 @@ export function loadConfig(envOverride?: Record<string, string>): AppConfig {
     TELEGRAM_RETRO_FORUM_CHAT_ID: Number(getEnv("TELEGRAM_RETRO_FORUM_CHAT_ID", "0")),
     PUBLIC_DIRECTORY_CHAT_ID: Number(getEnv("PUBLIC_DIRECTORY_CHAT_ID", "0")),
     PUBLIC_DIRECTORY_URL: getEnv("PUBLIC_DIRECTORY_URL", "").trim(),
+    TELEGRAM_LEADERBOARD_CHAT_ID: Number(getEnv("TELEGRAM_LEADERBOARD_CHAT_ID", "0")) || 0,
     TELEGRAM_PUBLIC_LOBBY_CHAT_ID: Number(getEnv("TELEGRAM_PUBLIC_LOBBY_CHAT_ID", "0")) || 0,
     TELEGRAM_PUBLIC_LOBBY_URL: getEnv("TELEGRAM_PUBLIC_LOBBY_URL", "").trim(),
     TELEGRAM_PUBLIC_WELCOME_CHAT_ID: Number(getEnv("TELEGRAM_PUBLIC_WELCOME_CHAT_ID", "0")) || 0,

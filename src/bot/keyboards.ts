@@ -35,6 +35,7 @@ export function mainMenuKeyboard(
     .row();
 
   kb.text("➕ Contribuer", "contrib:start").text("🤝 Parrainage", "ref:menu").row();
+  kb.text("🏆 Classement", "lb:month").row();
 
   kb.text("💬 Clavardage général", "member:general_chat")
     .text("🗳️ Vote mensuel", "vote:open")

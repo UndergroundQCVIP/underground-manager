@@ -271,7 +271,9 @@ export type AuditEventType =
   | "import_started"
   | "import_finished"
   | "import_cancelled"
-  | "import_undone";
+  | "import_undone"
+  | "points_awarded"
+  | "points_prize_granted";
 
 export interface AuditEvent {
   id: string;
@@ -475,6 +477,8 @@ export interface SystemSettings {
   contributionDefaultDays: number;
   /** UG-05: in stars_only mode, allow contribution rewards only if explicitly enabled. */
   contributionRewardsInStarsMode: boolean;
+  /** UG-07: automatically give the monthly top contributor bonus access days. */
+  leaderboardPrizesEnabled: boolean;
 }
 
 export type MembershipMode = "contribution_only" | "contributions_and_stars" | "stars_only";
@@ -914,6 +918,7 @@ export interface NavigationState {
   welcome?: { chatId: number; messageId: number; hash: string };
   lobby?: { chatId: number; messageId: number; hash: string };
   directoryKeyboardHash?: string;
+  leaderboard?: { chatId: number; messageId: number; hash: string };
 }
 
 // ==============================================================================

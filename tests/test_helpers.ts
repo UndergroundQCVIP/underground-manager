@@ -34,6 +34,7 @@ export const MOCK_CONFIG: AppConfig = {
   TREASURY_REPORT_CHANNEL_ID: -1001002,
   EXCHANGE_RATE_API_URL: "", // disabled in tests: no network, deterministic built-in rates
   PUBLIC_DIRECTORY_URL: "https://t.me/test_directory",
+  TELEGRAM_LEADERBOARD_CHAT_ID: 0,
   TELEGRAM_PUBLIC_LOBBY_CHAT_ID: 0,
   TELEGRAM_PUBLIC_LOBBY_URL: "",
   TELEGRAM_PUBLIC_WELCOME_CHAT_ID: 0,

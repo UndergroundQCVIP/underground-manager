@@ -18,6 +18,7 @@ export const DEFAULT_SETTINGS: SystemSettings = {
   membershipMode: "contribution_only",
   contributionDefaultDays: 30,
   contributionRewardsInStarsMode: false,
+  leaderboardPrizesEnabled: true,
 };
 
 export async function getSystemSettings(): Promise<SystemSettings> {

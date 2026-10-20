@@ -46,6 +46,7 @@ import {
 } from "../types.ts";
 import { fmtDay, grantContributionReward, scopesLabel, validateRewardParams } from "./rewards.ts";
 import { awardContributionBonus } from "../referrals/service.ts";
+import { awardContributionPoints } from "../points/service.ts";
 
 export interface ContributionApiLike {
   sendMessage(chatId: number | string, text: string, other?: Record<string, unknown>): Promise<unknown>;
@@ -701,6 +702,18 @@ export async function retryContributionReward(
 async function finalizeApproved(api: ContributionApiLike, id: string, adminId: number): Promise<string | undefined> {
   const c = await getContribution(id);
   if (!c || c.status !== "approved") return undefined;
+  const result = await finalizeApprovedInner(api, id, adminId, c);
+  // Leaderboard points for the published items (+ bonus when a reward was granted). Idempotent.
+  try {
+    const fresh = (await getContribution(id)) ?? c;
+    await awardContributionPoints(fresh, fresh.rewardStatus === "granted");
+  } catch (err) {
+    console.error("[Points] contribution points failed (rebuilt by the daily recalculation):", err);
+  }
+  return result;
+}
+
+async function finalizeApprovedInner(api: ContributionApiLike, id: string, adminId: number, c: Contribution): Promise<string | undefined> {
   const decision = c.decision ?? { type: "no_reward" as const };
 
   if (decision.type === "no_reward") {

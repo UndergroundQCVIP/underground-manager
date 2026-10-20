@@ -13,3 +13,6 @@ Thumbs.db
 .deno/
 *.sqlite
 *.sqlite-journal
+
+# Local Telegram downloader installation
+/telegram-restricted-downloader/

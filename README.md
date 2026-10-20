@@ -672,3 +672,14 @@ The Bot API cannot read a chat's history, so the bot copies a **block of message
 
 Limits: albums can split where two 100-message batches meet; comments of different posts that interleave in the group are copied together if they fall inside the block (use the preview, undo if wrong); Telegram allows roughly 20–30 messages per minute per group, so large blocks take time (progress continues automatically via the 5-minute worker).
 
+### 15.7 Points, ranking & monthly prize (UG-07)
+Main menu → **🏆 Classement** (also `t.me/<bot>?start=leaderboard`). Points are recorded once per real event (idempotent ledger; refunds reverse their points; `Paramètres → Classement → Recalculer` rebuilds everything from payments, contributions and referrals):
+
+| Event | Points |
+|---|---|
+| Stars paid (renewals included) | 1 per 10 Stars |
+| Content published from an approved contribution | 5 per item, +20 if the admin granted a reward |
+| New person who first opens the bot with your referral link | 25 |
+
+Tabs: **Ce mois** · **Total** · **Parrains** (people brought in). Members are **anonymous by default** (stable alias like `Anonyme-7K2Q`) and can opt in to show their name. Administrators and complimentary/admin-granted access never appear or earn points. The month's **#1 automatically receives +7 days of Regular access** once the month is over (once per month; admin switch in the same screen). Optional: set `TELEGRAM_LEADERBOARD_CHAT_ID` for a bot-managed, self-updating leaderboard post (bot must be admin there).
+

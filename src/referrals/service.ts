@@ -31,6 +31,7 @@ import {
 } from "../db/referrals.ts";
 import { CollectionCategory, CONTRIBUTION_SPACES, Payment } from "../types.ts";
 import { formatTorontoDate } from "../util/time.ts";
+import { awardReferralJoinPoints } from "../points/service.ts";
 
 export interface ReferralApiLike {
   sendMessage(chatId: number | string, text: string, other?: Record<string, unknown>): Promise<unknown>;
@@ -56,7 +57,12 @@ export async function attributeReferral(params: {
     code,
     at: new Date().toISOString(),
   });
-  if (saved) await logAuditEvent("referral_attributed", { referrerId, code }, 0, params.refereeId);
+  if (saved) {
+    await logAuditEvent("referral_attributed", { referrerId, code }, 0, params.refereeId);
+    await awardReferralJoinPoints({ referrerId, refereeId: params.refereeId, at: new Date().toISOString() }).catch((err) =>
+      console.error("[Points] referral points failed (rebuilt by the daily recalculation):", err)
+    );
+  }
   return saved;
 }
 
