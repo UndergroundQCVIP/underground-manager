@@ -575,3 +575,78 @@ Deno.test("UG06 ROBUST — A rate-limit wait is shown with a countdown and can b
     await kv.close();
   }
 });
+
+function privateCmd(userId: number, body: string, id: number) {
+  return {
+    update_id: id,
+    message: {
+      message_id: id, date: 0,
+      chat: { id: userId, type: "private" as const, first_name: "A" },
+      from: { id: userId, is_bot: false, first_name: "A" },
+      text: body,
+      ...(body.startsWith("/") ? { entities: [{ type: "bot_command" as const, offset: 0, length: body.split(" ")[0].length }] } : {}),
+    },
+  };
+}
+
+Deno.test("UG06 PRIVATE — /import in a private chat is never silent: guided flow with creator picker and links", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    const c = await seedCreator({ name: "Aria", topicId: 101 });
+    const r = await seedCreator({ name: "Maya", topicId: 5, collection: "retro" });
+    const { bot, calls } = makeBot();
+
+    await bot.handleUpdate(privateCmd(ADMIN, "/import", 9_300_001) as never);
+    const picker = JSON.stringify(calls.filter((x) => x.method === "sendMessage").at(-1));
+    assertStringIncludes(picker, "Aria (Regular)");
+    assertStringIncludes(picker, "Maya (Retro)");
+    assertStringIncludes(picker, "Dans le sujet du créateur"); // help for the in-topic way too
+    assertStringIncludes(picker, `imp:pick:${c.id}`);
+
+    // pick → the next message with two links starts the dry run (preview to this chat)
+    await bot.handleUpdate(cb(ADMIN, `imp:pick:${r.id}`) as never);
+    assertStringIncludes(JSON.stringify(calls.filter((x) => x.method === "editMessageText").at(-1)), "deux liens");
+    calls.length = 0;
+    await bot.handleUpdate(privateCmd(ADMIN, `${link(1)}\n${link(90)}`, 9_300_002) as never);
+    const dm = calls.find((x) => x.method === "sendMessage" && x.payload.chat_id === ADMIN)!;
+    assertStringIncludes(String(dm.payload.text), "forum Retro");
+    assertStringIncludes(String(dm.payload.text), "mise à jour d'un créateur existant");
+    assertStringIncludes(JSON.stringify(dm.payload.reply_markup), "imp:go:");
+    assertEquals(calls.filter((x) => x.method === "copyMessages" && x.payload.chat_id === RETRO_CHAT).length, 0); // nothing yet
+
+    // only one link → asked again, nothing prepared
+    await bot.handleUpdate(cb(ADMIN, `imp:pick:${c.id}`) as never);
+    calls.length = 0;
+    await bot.handleUpdate(privateCmd(ADMIN, link(5), 9_300_003) as never);
+    assertStringIncludes(JSON.stringify(calls.filter((x) => x.method === "sendMessage")), "deux* liens");
+
+    // strangers get nothing and cannot pick
+    calls.length = 0;
+    await bot.handleUpdate(privateCmd(5555, "/import", 9_300_004) as never);
+    await bot.handleUpdate(cb(5555, `imp:pick:${c.id}`) as never);
+    assertEquals(calls.filter((x) => x.method === "sendMessage" || x.method === "editMessageText").length, 0);
+  } finally {
+    await kv.close();
+  }
+});
+
+Deno.test("UG06 PRIVATE — An admin typing /import in an unmanaged group is told why instead of silence", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    const { bot, calls } = makeBot();
+    await bot.handleUpdate({
+      update_id: 9_300_010,
+      message: {
+        message_id: 1, date: 0,
+        chat: { id: -100999, type: "supergroup", title: "Autre", is_forum: true },
+        from: { id: ADMIN, is_bot: false, first_name: "A" },
+        message_thread_id: 3, is_topic_message: true,
+        text: `/import ${link(1)} ${link(2)}`,
+        entities: [{ type: "bot_command", offset: 0, length: 7 }],
+      },
+    } as never);
+    assertStringIncludes(JSON.stringify(calls.filter((x) => x.method === "sendMessage")), "n'est pas un forum de créateurs");
+  } finally {
+    await kv.close();
+  }
+});

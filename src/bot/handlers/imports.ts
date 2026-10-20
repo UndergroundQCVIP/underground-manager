@@ -6,11 +6,13 @@
  *   a topic not yet registered becomes a NEW creator, a registered one is UPDATED.
  */
 
-import { Composer, InlineKeyboard } from "grammy";
+import { Api, Composer, Context, InlineKeyboard } from "grammy";
 import { isAdministrator } from "../../config.ts";
 import { adminRouteGuard } from "../middleware/auth.ts";
 import { collectionForChat, handleForumTopicCreated } from "../../creators/service.ts";
-import { getCreatorByTopic } from "../../db/creators.ts";
+import { creatorCollection, getCreator, getCreatorByTopic, listCreators } from "../../db/creators.ts";
+import { requestAdminInput } from "../../db/admin_input.ts";
+import type { Creator } from "../../types.ts";
 import { getImportJob, listImportJobs } from "../../db/imports.ts";
 import {
   cancelImport,
@@ -27,11 +29,99 @@ export const importsComposer = new Composer();
 
 const mdEsc = (t: string) => t.replace(/([_*`\[])/g, "\\$1");
 
+/**
+ * Prepare an import (dry run), send the private preview + confirmation to the administrator.
+ * Shared by the in-topic command and the private-chat flow.
+ */
+export async function presentImport(
+  api: Api,
+  params: { adminId: number; creator: Creator; isNewCreator: boolean; link1: string; link2: string; forum: "Retro" | "Regular" }
+): Promise<{ ok: false; error: string } | { ok: true; blocked: boolean; dmSent: boolean; jobId: string }> {
+  const { adminId, creator, isNewCreator, forum } = params;
+  const res = await prepareImport(api, { adminId, creatorId: creator.id, link1: params.link1, link2: params.link2, isNewCreator });
+  if (!res.ok || !res.job) return { ok: false, error: res.error ?? "Import impossible." };
+  const job = res.job;
+  const total = job.toId - job.fromId + 1;
+
+  const summary =
+    `📥 *IMPORT — ${mdEsc(creator.name)}*\n` +
+    `*Destination :* forum ${forum}, sujet \`${creator.topicId}\` — ${isNewCreator ? "✨ nouveau créateur" : "🔄 mise à jour d'un créateur existant"}\n` +
+    `*Source :* ${mdEsc(job.sourceTitle ?? String(job.sourceChat))}\n` +
+    `*Bloc :* messages ${job.fromId} → ${job.toId} (${total} identifiant${total > 1 ? "s" : ""})\n\n`;
+
+  const kb = new InlineKeyboard();
+  let dm: string;
+  if (job.status === "blocked") {
+    dm = summary + `🚫 *Bloqué :* ${job.note}`;
+    kb.text("↩️ Fermer", `imp:no:${job.id}`);
+  } else {
+    dm =
+      summary +
+      `👁 *Aperçu :* ${res.samplesSent ?? 0} message(s) répartis dans le bloc viennent de vous être envoyés ci-dessus. ` +
+      `Vérifiez qu'ils appartiennent bien à *${mdEsc(creator.name)}* (le premier et le dernier doivent être les bornes de son contenu).\n\n` +
+      `⚠️ Le robot ne peut pas distinguer les commentaires de différents créateurs : tout ce qui se trouve entre les deux liens sera copié. ` +
+      `Vous pourrez annuler l'import ensuite.\n\n` +
+      `Confirmez-vous que le club détient les droits de publication et de distribution de ce contenu ?`;
+    kb.text("✅ Je confirme — lancer l'import", `imp:go:${job.id}`).row().text("❌ Annuler", `imp:no:${job.id}`);
+  }
+
+  try {
+    await api.sendMessage(adminId, dm, { parse_mode: "Markdown", reply_markup: kb, link_preview_options: { is_disabled: true } });
+    return { ok: true, blocked: job.status === "blocked", dmSent: true, jobId: job.id };
+  } catch {
+    await cancelImport(job.id, adminId);
+    return { ok: true, blocked: false, dmSent: false, jobId: job.id };
+  }
+}
+
+const IMPORT_HELP =
+  "📥 *IMPORT D'UN BLOC DE MESSAGES*\n\n" +
+  "*Dans le sujet du créateur* (forum Regular ou Retro) :\n`/import <lien du 1er message> <lien du dernier message>`\n" +
+  "Le forum et le sujet sont reconnus automatiquement; un sujet non inscrit devient un nouveau créateur.\n\n" +
+  "*Ou ici, en privé :* choisissez le créateur existant dans la liste, puis collez les deux liens.\n\n" +
+  "Pour obtenir un lien : dans le groupe source, clic droit sur un message → « Copier le lien du message ».";
+
+const PICK_PAGE = 8;
+
+async function showCreatorPicker(ctx: Context, page: number) {
+  const creators = (await listCreators({ status: "active" })).filter((c) => !c.retiredAt);
+  const slice = creators.slice(page * PICK_PAGE, page * PICK_PAGE + PICK_PAGE);
+  const kb = new InlineKeyboard();
+  for (const c of slice) kb.text(`${c.name} (${creatorCollection(c) === "retro" ? "Retro" : "Regular"})`.slice(0, 60), `imp:pick:${c.id}`).row();
+  if (page > 0) kb.text("◀️ Préc.", `imp:pg:${page - 1}`);
+  if ((page + 1) * PICK_PAGE < creators.length) kb.text("Suiv. ▶️", `imp:pg:${page + 1}`);
+  const text = `${IMPORT_HELP}\n\n*Pour quel créateur importer ?*` + (creators.length === 0 ? "\n_Aucun créateur inscrit._" : "");
+  if (ctx.callbackQuery) {
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: kb });
+  } else {
+    await ctx.reply(text, { parse_mode: "Markdown", reply_markup: kb });
+  }
+}
+
 importsComposer.command("import", async (ctx, next) => {
-  // Only meaningful inside a managed forum topic; anywhere else let other handlers run.
-  if (ctx.chat.type !== "supergroup" || !collectionForChat(ctx.chat.id)) return next();
-  const topicId = ctx.msg.message_thread_id;
   const adminId = ctx.from?.id;
+
+  // Private chat: never silent. Admins get the guided flow, others nothing.
+  if (ctx.chat.type === "private") {
+    if (!adminId || !isAdministrator(adminId)) return next();
+    await showCreatorPicker(ctx, 0);
+    return;
+  }
+
+  if (ctx.chat.type !== "supergroup") return next();
+  if (!collectionForChat(ctx.chat.id)) {
+    // An administrator typing it in some other group gets a clear answer instead of silence.
+    if (adminId && isAdministrator(adminId)) {
+      await ctx.reply(
+        "ℹ️ Ce groupe n'est pas un forum de créateurs géré par le robot. Tapez /import dans le sujet d'un créateur du forum Regular ou Retro, ou en privé avec le robot.",
+        { message_thread_id: ctx.msg.message_thread_id }
+      );
+      return;
+    }
+    return next();
+  }
+  const topicId = ctx.msg.message_thread_id;
 
   if (!adminId || !isAdministrator(adminId)) {
     // Anonymous admins cannot be identified (and so cannot receive the private preview).
@@ -76,49 +166,62 @@ importsComposer.command("import", async (ctx, next) => {
     }
   }
 
-  const res = await prepareImport(ctx.api, { adminId, creatorId: creator.id, link1, link2, isNewCreator });
-  if (!res.ok || !res.job) {
-    await ctx.reply(`⚠️ ${res.error}`, { message_thread_id: topicId });
-    return;
-  }
-  const job = res.job;
   const forum = collectionForChat(ctx.chat.id) === "retro" ? "Retro" : "Regular";
-  const total = job.toId - job.fromId + 1;
-
-  const summary =
-    `📥 *IMPORT — ${mdEsc(creator.name)}*\n` +
-    `*Destination :* forum ${forum}, sujet \`${topicId}\` — ${isNewCreator ? "✨ nouveau créateur" : "🔄 mise à jour d'un créateur existant"}\n` +
-    `*Source :* ${mdEsc(job.sourceTitle ?? String(job.sourceChat))}\n` +
-    `*Bloc :* messages ${job.fromId} → ${job.toId} (${total} identifiant${total > 1 ? "s" : ""})\n\n`;
-
-  const kb = new InlineKeyboard();
-  let dm: string;
-  if (job.status === "blocked") {
-    dm = summary + `🚫 *Bloqué :* ${job.note}`;
-    kb.text("↩️ Fermer", `imp:no:${job.id}`);
+  const out = await presentImport(ctx.api, { adminId, creator, isNewCreator, link1, link2, forum });
+  if (!out.ok) {
+    await ctx.reply(`⚠️ ${out.error}`, { message_thread_id: topicId });
+  } else if (!out.dmSent) {
+    await ctx.reply("⚠️ Je ne peux pas vous écrire en privé : ouvrez d'abord le robot (/start) puis relancez /import.", { message_thread_id: topicId });
   } else {
-    dm =
-      summary +
-      `👁 *Aperçu :* ${res.samplesSent ?? 0} message(s) répartis dans le bloc viennent de vous être envoyés ci-dessus. ` +
-      `Vérifiez qu'ils appartiennent bien à *${mdEsc(creator.name)}* (le premier et le dernier doivent être les bornes de son contenu).\n\n` +
-      `⚠️ Le robot ne peut pas distinguer les commentaires de différents créateurs : tout ce qui se trouve entre les deux liens sera copié. ` +
-      `Vous pourrez annuler l'import ensuite.\n\n` +
-      `Confirmez-vous que le club détient les droits de publication et de distribution de ce contenu ?`;
-    kb.text("✅ Je confirme — lancer l'import", `imp:go:${job.id}`).row().text("❌ Annuler", `imp:no:${job.id}`);
-  }
-
-  try {
-    await ctx.api.sendMessage(adminId, dm, { parse_mode: "Markdown", reply_markup: kb, link_preview_options: { is_disabled: true } });
     await ctx.reply(
-      job.status === "blocked"
+      out.blocked
         ? "🚫 Import bloqué — voyez le message privé du robot."
         : `📥 Import préparé pour *${mdEsc(creator.name)}*. Poursuivez dans votre conversation privée avec le robot (aperçu + confirmation).`,
       { parse_mode: "Markdown", message_thread_id: topicId }
     );
-  } catch {
-    await cancelImport(job.id, adminId);
-    await ctx.reply("⚠️ Je ne peux pas vous écrire en privé : ouvrez d'abord le robot (/start) puis relancez /import.", { message_thread_id: topicId });
   }
+});
+
+/** Private-chat flow: creator picked → the next message with two links starts the import. */
+export async function handleImportLinks(
+  ctx: Context,
+  adminId: number,
+  creatorId: string,
+  rawText: string
+): Promise<void> {
+  const links = rawText.match(/https?:\/\/\S+|t\.me\/\S+/gi) ?? [];
+  const creator = await getCreator(creatorId);
+  if (!creator) {
+    await ctx.reply("⚠️ Créateur introuvable. Relancez /import.");
+    return;
+  }
+  if (links.length < 2) {
+    await requestAdminInput(adminId, { type: "import_links", creatorId });
+    await ctx.reply("⚠️ Il me faut *deux* liens (premier et dernier message du bloc), séparés par un espace ou un retour de ligne. Réessayez.", { parse_mode: "Markdown" });
+    return;
+  }
+  const forum = creatorCollection(creator) === "retro" ? "Retro" : "Regular";
+  const out = await presentImport(ctx.api, { adminId, creator, isNewCreator: false, link1: links[0]!, link2: links[1]!, forum });
+  if (!out.ok) await ctx.reply(`⚠️ ${out.error}`);
+}
+
+importsComposer.callbackQuery(/^imp:pg:(\d+)$/, async (ctx, next) => {
+  if (!isAdministrator(ctx.from.id)) return next();
+  await showCreatorPicker(ctx, Number(ctx.match[1]));
+});
+
+importsComposer.callbackQuery(/^imp:pick:([\w-]+)$/, async (ctx, next) => {
+  if (!isAdministrator(ctx.from.id)) return next();
+  const creator = await getCreator(ctx.match[1]);
+  await ctx.answerCallbackQuery();
+  if (!creator) return;
+  await requestAdminInput(ctx.from.id, { type: "import_links", creatorId: creator.id });
+  await ctx.editMessageText(
+    `📥 *Import pour ${mdEsc(creator.name)}* (${creatorCollection(creator) === "retro" ? "Retro" : "Regular"})\n\n` +
+      `Envoyez maintenant, dans un seul message, les *deux liens* : celui du *premier* message du bloc et celui du *dernier*.\n` +
+      `_Clic droit sur un message du groupe source → « Copier le lien du message »._`,
+    { parse_mode: "Markdown", reply_markup: new InlineKeyboard().text("❌ Annuler", "imp:pg:0") }
+  );
 });
 
 /** /imports — recent imports with a way to open, stop or undo each one (if the original message is lost). */

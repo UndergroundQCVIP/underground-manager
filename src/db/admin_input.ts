@@ -8,7 +8,8 @@ import { getKv } from "./kv.ts";
 export type AdminInputRequest =
   | { type: "custom_days"; contributionId: string }
   | { type: "rename_proposal"; contributionId: string }
-  | { type: "reject_reason"; contributionId: string };
+  | { type: "reject_reason"; contributionId: string }
+  | { type: "import_links"; creatorId: string };
 
 const TTL_MS = 10 * 60 * 1000;
 

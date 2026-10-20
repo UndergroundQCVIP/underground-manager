@@ -148,6 +148,9 @@ contributeComposer.on("message:text", async (ctx, next) => {
       const res = await adminUpdateProposal(req.contributionId, { name: text });
       await ctx.reply(res.ok ? "✏️ Nom corrigé." : `⚠️ ${res.error}`);
       await showReview(ctx, req.contributionId, true);
+    } else if (req.type === "import_links") {
+      const { handleImportLinks } = await import("./imports.ts");
+      await handleImportLinks(ctx, userId, req.creatorId, text);
     } else if (req.type === "reject_reason") {
       const res = await rejectContribution(ctx.api, req.contributionId, userId, text);
       await ctx.reply(res.ok ? "❌ Refusé. Le contributeur a été avisé." : `⚠️ ${res.error}`);
