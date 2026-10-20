@@ -500,7 +500,8 @@ export async function approveContribution(
 // ---------------------------------------------------------------------------
 
 const PUBLISH_BATCH = 50; // Telegram allows up to 100 per copyMessages call
-const PUBLISH_BUDGET_MS = 20_000;
+const REQUEST_PUBLISH_BUDGET_MS = 8_000; // inside a webhook request
+const WORKER_PUBLISH_BUDGET_MS = 25_000; // inside the cron worker
 const LEASE_MS = 90_000;
 
 /** Pack messages into batches of at most `size`, never splitting an album. */
@@ -543,7 +544,7 @@ export interface PublishOutcome {
   inProgress?: boolean;
 }
 
-async function runPublishing(api: ContributionApiLike, id: string, adminId: number): Promise<PublishOutcome> {
+async function runPublishing(api: ContributionApiLike, id: string, adminId: number, budgetMs = REQUEST_PUBLISH_BUDGET_MS): Promise<PublishOutcome> {
   const leased = await acquirePublishLease(id);
   if (!leased) return { ok: true, inProgress: true, error: "Publication déjà en cours." };
 
@@ -576,7 +577,7 @@ async function runPublishing(api: ContributionApiLike, id: string, adminId: numb
     const batches = chunkContributionItems(fresh.items);
     const total = fresh.items.length;
     let consumed = 0;
-    const deadline = Date.now() + PUBLISH_BUDGET_MS;
+    const deadline = Date.now() + budgetMs;
 
     for (const batch of batches) {
       const state = (await getContribution(id)) ?? fresh;
@@ -585,7 +586,7 @@ async function runPublishing(api: ContributionApiLike, id: string, adminId: numb
         continue;
       }
       if (state.retryAfter && state.retryAfter > Date.now()) return { ok: true, inProgress: true, published: consumed };
-      if (Date.now() > deadline) return { ok: true, inProgress: true, published: consumed };
+      if (Date.now() >= deadline) return { ok: true, inProgress: true, published: consumed };
 
       let copies: { message_id: number }[];
       try {
@@ -648,10 +649,10 @@ async function runPublishing(api: ContributionApiLike, id: string, adminId: numb
 }
 
 /** Resume a publication that stopped (time budget, rate limit). Never re-copies finished batches. */
-export async function continuePublishing(api: ContributionApiLike, id: string, adminId = 0): Promise<PublishOutcome> {
+export async function continuePublishing(api: ContributionApiLike, id: string, adminId = 0, budgetMs = WORKER_PUBLISH_BUDGET_MS): Promise<PublishOutcome> {
   const c = await getContribution(id);
   if (!c || c.status !== "publishing") return { ok: false, error: "Cette contribution n'est pas en cours de publication." };
-  return await runPublishing(api, id, adminId || c.reviewedBy || 0);
+  return await runPublishing(api, id, adminId || c.reviewedBy || 0, budgetMs);
 }
 
 /** Cron entry: continue every submission whose publication is waiting (and whose rate-limit wait is over). */

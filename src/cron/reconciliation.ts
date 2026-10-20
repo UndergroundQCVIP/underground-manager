@@ -273,13 +273,27 @@ export function registerCronJobs(bot: Bot): void {
         try {
           const { runAllCopyingMigrations } = await import("../migration/service.ts");
           await runAllCopyingMigrations(bot.api);
-          // UG-06: continue large submissions and legacy imports that stopped on a time budget or rate limit
-          const { continueAllPublishing } = await import("../contributions/service.ts");
-          await continueAllPublishing(bot.api);
+        } catch (err) {
+          console.error("[Cron Fatal] Error running migration worker:", err);
+        }
+      });
+
+      // UG-06: large submissions and legacy imports advance in the background, every minute, independently
+      // of each other (so one failing job can never starve the other). Webhook requests only do short slices.
+      Deno.cron("LaConfrerie Import Worker", "* * * * *", async () => {
+        try {
           const { continueAllImports } = await import("../imports/service.ts");
           await continueAllImports(bot.api);
         } catch (err) {
-          console.error("[Cron Fatal] Error running migration worker:", err);
+          console.error("[Cron Fatal] Error running import worker:", err);
+        }
+      });
+      Deno.cron("LaConfrerie Publishing Worker", "* * * * *", async () => {
+        try {
+          const { continueAllPublishing } = await import("../contributions/service.ts");
+          await continueAllPublishing(bot.api);
+        } catch (err) {
+          console.error("[Cron Fatal] Error running publishing worker:", err);
         }
       });
       console.log("[Cron] Migration worker registered (every 5 minutes; only runs jobs an administrator started).");

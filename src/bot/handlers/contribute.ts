@@ -539,7 +539,11 @@ contributeComposer.callbackQuery(/^cadm:nor:([\w-]+)$/, async (ctx) => {
 
 async function runApproval(ctx: Context, id: string, decision: Parameters<typeof approveContribution>[3]) {
   const res = await approveContribution(ctx.api, id, ctx.from!.id, decision);
-  if (res.ok) {
+  if (res.ok && res.inProgress) {
+    await ctx.reply(
+      `⏳ Publication en cours (${res.published ?? 0} élément(s) déjà publiés). Elle se poursuit automatiquement en arrière-plan, sans doublon ; la récompense n'est accordée qu'à la fin.`
+    );
+  } else if (res.ok) {
     await ctx.reply(
       `✅ ${res.published} élément(s) publié(s).` +
       (decision?.type === "reward" ? (res.rewardError ? `\n⚠️ ${res.rewardError}` : `\n🎁 Récompense accordée.`) : `\nAucune récompense accordée.`)

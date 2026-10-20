@@ -15,6 +15,8 @@ import { getImportJob, listImportJobs } from "../../db/imports.ts";
 import {
   cancelImport,
   importProgress,
+  kickImport,
+  waitText,
   prepareImport,
   resumeImport,
   startImport,
@@ -143,6 +145,9 @@ function importKeyboard(j: NonNullable<Awaited<ReturnType<typeof getImportJob>>>
   const kb = new InlineKeyboard().text("🔄 Actualiser", `imp:st:${j.id}`);
   if (j.status === "failed" || j.status === "needs_review") kb.row().text("▶️ Reprendre", `imp:resume:${j.id}`);
   if (j.status === "prepared" || j.status === "blocked") kb.row().text("❌ Annuler cet import", `imp:no:${j.id}`);
+  if (j.status === "running" && j.retryAfter && j.retryAfter > Date.now()) {
+    kb.row().text("▶️ Réessayer maintenant", `imp:kick:${j.id}`);
+  }
   if (["running", "failed", "needs_review"].includes(j.status)) {
     kb.row().text("⏹ Arrêter (garder ce qui est copié)", `imp:stop:${j.id}`);
   }
@@ -157,7 +162,8 @@ function statusText(j: NonNullable<Awaited<ReturnType<typeof getImportJob>>>): s
     prepared: "en attente de confirmation", blocked: "bloqué", running: "en cours", needs_review: "à vérifier",
     failed: "arrêté (reprenable)", done: "terminé", cancelled: "annulé", undone: "annulé et copies supprimées",
   };
-  return `📥 *Import — ${mdEsc(j.creatorName)}* : ${label[j.status] ?? j.status}\n${importProgress(j)}${j.note ? `\n_${mdEsc(j.note)}_` : ""}`;
+  const wait = waitText(j);
+  return `📥 *Import — ${mdEsc(j.creatorName)}* : ${label[j.status] ?? j.status}\n${importProgress(j)}${wait ? `\n${wait}` : ""}${j.note ? `\n_${mdEsc(j.note)}_` : ""}`;
 }
 
 importsComposer.callbackQuery(/^imp:go:([\w-]+)$/, async (ctx) => {
@@ -190,6 +196,13 @@ importsComposer.callbackQuery(/^imp:st:([\w-]+)$/, async (ctx) => {
 importsComposer.callbackQuery(/^imp:resume:([\w-]+)$/, async (ctx) => {
   await ctx.answerCallbackQuery({ text: "Reprise…" });
   await resumeImport(ctx.api, ctx.match[1]);
+  const j = await getImportJob(ctx.match[1]);
+  if (j) await ctx.editMessageText(statusText(j), { parse_mode: "Markdown", reply_markup: importKeyboard(j) });
+});
+
+importsComposer.callbackQuery(/^imp:kick:([\w-]+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery({ text: "Nouvelle tentative…" });
+  await kickImport(ctx.api, ctx.match[1]);
   const j = await getImportJob(ctx.match[1]);
   if (j) await ctx.editMessageText(statusText(j), { parse_mode: "Markdown", reply_markup: importKeyboard(j) });
 });

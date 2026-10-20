@@ -507,3 +507,71 @@ Deno.test("UG06 CANCEL — Undo from the bot UI deletes the copies; /imports lis
     await kv.close();
   }
 });
+
+Deno.test("UG06 ROBUST — A stale unconfirmed preview never blocks a new attempt; a live overlap tells you where to look", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    const api = srcApi();
+    const c = await seedCreator({ name: "Aria", topicId: 101 });
+    const first = await prepareImport(api, { adminId: ADMIN, creatorId: c.id, link1: link(1), link2: link(50), isNewCreator: false });
+
+    // fresh preview → overlap refused with guidance
+    const blocked = await prepareImport(api, { adminId: ADMIN, creatorId: c.id, link1: link(1), link2: link(50), isNewCreator: false });
+    assertEquals(blocked.ok, false);
+    assertStringIncludes(blocked.error!, "/imports");
+
+    // the preview was never confirmed and is now old → it is retired automatically
+    await updateImportJob(first.job!.id, null, (x) => { x.createdAt = new Date(Date.now() - 31 * 60_000).toISOString(); });
+    const again = await prepareImport(api, { adminId: ADMIN, creatorId: c.id, link1: link(1), link2: link(50), isNewCreator: false });
+    assertEquals(again.ok, true);
+    assertEquals((await getImportJob(first.job!.id))!.status, "cancelled");
+  } finally {
+    await kv.close();
+  }
+});
+
+Deno.test("UG06 ROBUST — A webhook request only does a short slice; the minute worker finishes the import", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    const api = srcApi();
+    const c = await seedCreator({ name: "Aria", topicId: 101 });
+    const { job } = await prepareImport(api, { adminId: ADMIN, creatorId: c.id, link1: link(1), link2: link(350), isNewCreator: false });
+    api.copyCalls.length = 0;
+    await updateImportJob(job!.id, null, (x) => { x.status = "running"; });
+    await runImportStep(api, job!.id, 0); // no time budget at all: nothing copied, nothing broken
+    assertEquals(api.copyCalls.length, 0);
+    assertEquals((await getImportJob(job!.id))!.status, "running");
+    assertEquals((await getImportJob(job!.id))!.lockedUntil, undefined);
+
+    assertEquals(await continueAllImports(api), 1); // the worker picks it up
+    assertEquals((await getImportJob(job!.id))!.status, "done");
+    assertEquals(api.copyCalls.flatMap((x) => x.ids), Array.from({ length: 350 }, (_, i) => i + 1));
+  } finally {
+    await kv.close();
+  }
+});
+
+Deno.test("UG06 ROBUST — A rate-limit wait is shown with a countdown and can be retried immediately", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    const api = srcApi();
+    const c = await seedCreator({ name: "Aria", topicId: 101 });
+    const { job } = await prepareImport(api, { adminId: ADMIN, creatorId: c.id, link1: link(1), link2: link(150), isNewCreator: false });
+    api.failNextCopies = { count: 1, error: { error_code: 429, description: "Too Many Requests", parameters: { retry_after: 600 } } };
+    await startImport(api, job!.id, ADMIN, true);
+
+    const { bot, calls } = makeBot();
+    await bot.handleUpdate(cb(ADMIN, `imp:st:${job!.id}`) as never);
+    const shown = JSON.stringify(calls.filter((x) => x.method === "editMessageText").at(-1));
+    assertStringIncludes(shown, "attendre environ 10 min");
+    assertStringIncludes(shown, "Réessayer maintenant");
+
+    await bot.handleUpdate(cb(5555, `imp:kick:${job!.id}`) as never); // strangers cannot
+    assert(((await getImportJob(job!.id))!.retryAfter ?? 0) > Date.now());
+
+    await bot.handleUpdate(cb(ADMIN, `imp:kick:${job!.id}`) as never);
+    assertEquals((await getImportJob(job!.id))!.status, "done");
+  } finally {
+    await kv.close();
+  }
+});

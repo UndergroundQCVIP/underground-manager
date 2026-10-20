@@ -32,7 +32,10 @@ import { ImportJob } from "../types.ts";
 export const MAX_IMPORT_SPAN = 20_000; // message ids in one block
 const BATCH = 100; // Telegram's copyMessages maximum
 const LEASE_MS = 90_000;
-const BUDGET_MS = 20_000;
+/** Work done inside a webhook request stays short (Telegram expects a prompt answer); the cron does the long runs. */
+export const REQUEST_BUDGET_MS = 8_000;
+export const WORKER_BUDGET_MS = 25_000;
+const STALE_PREPARED_MS = 30 * 60 * 1000;
 const SAMPLES = 6;
 
 export interface ImportApiLike {
@@ -113,6 +116,11 @@ export async function prepareImport(
 
   // Never import the same block into the same creator twice (it would duplicate content).
   for (const j of await listImportJobs()) {
+    // A preview nobody confirmed within 30 minutes is abandoned: it must not block a retry.
+    if (j.status === "prepared" && Date.now() - new Date(j.createdAt).getTime() > STALE_PREPARED_MS) {
+      await updateImportJob(j.id, ["prepared"], (x) => { x.status = "cancelled"; });
+      continue;
+    }
     if (
       j.creatorId === creator.id &&
       j.sourceChat === a.chat &&
@@ -122,7 +130,7 @@ export async function prepareImport(
     ) {
       return {
         ok: false,
-        error: `Ce bloc chevauche un import déjà ${j.status === "done" ? "terminé" : "en cours"} pour ${creator.name} (${j.fromId}–${j.toId}). Annulez-le d'abord si vous voulez le refaire.`,
+        error: `Ce bloc chevauche un import déjà ${j.status === "done" ? "terminé" : "en cours ou en attente"} pour ${creator.name} (${j.fromId}–${j.toId}, état : ${j.status}). Tapez /imports en privé avec le robot pour l'ouvrir, l'arrêter ou l'annuler, puis recommencez.`,
       };
     }
   }
@@ -210,7 +218,7 @@ export async function startImport(
   });
   await logAuditEvent("creator_rights_verified", { creatorId: job.creatorId, via: "import", jobId }, adminId);
   await logAuditEvent("import_started", { jobId, creatorId: job.creatorId, from: job.fromId, to: job.toId }, adminId);
-  await runImportStep(api, jobId);
+  await runImportStep(api, jobId, REQUEST_BUDGET_MS);
   return { ok: true, job: (await getImportJob(jobId)) ?? job };
 }
 
@@ -223,7 +231,7 @@ async function acquire(jobId: string): Promise<ImportJob | null> {
   });
 }
 
-export async function runImportStep(api: ImportApiLike, jobId: string): Promise<ImportJob | null> {
+export async function runImportStep(api: ImportApiLike, jobId: string, budgetMs = WORKER_BUDGET_MS): Promise<ImportJob | null> {
   const job = await acquire(jobId);
   if (!job) return await getImportJob(jobId);
 
@@ -236,14 +244,14 @@ export async function runImportStep(api: ImportApiLike, jobId: string): Promise<
     });
   }
 
-  const deadline = Date.now() + BUDGET_MS;
+  const deadline = Date.now() + budgetMs;
   try {
     while (true) {
       const cur = (await getImportJob(jobId))!;
       if (cur.status !== "running") break;
       if (cur.retryAfter && cur.retryAfter > Date.now()) break;
       if (cur.cursor > cur.toId) break;
-      if (Date.now() > deadline) break;
+      if (Date.now() >= deadline) break;
 
       const first = cur.cursor;
       const last = Math.min(cur.cursor + BATCH - 1, cur.toId);
@@ -342,7 +350,16 @@ export async function resumeImport(api: ImportApiLike, jobId: string): Promise<I
     x.retryAfter = undefined;
   });
   if (!j) return null;
-  return await runImportStep(api, jobId);
+  return await runImportStep(api, jobId, REQUEST_BUDGET_MS);
+}
+
+/** "Retry now": skip a Telegram rate-limit wait and continue (Telegram may simply ask us to wait again). */
+export async function kickImport(api: ImportApiLike, jobId: string): Promise<ImportJob | null> {
+  const j = await updateImportJob(jobId, ["running"], (x) => {
+    x.retryAfter = undefined;
+  });
+  if (!j) return await getImportJob(jobId);
+  return await runImportStep(api, jobId, REQUEST_BUDGET_MS);
 }
 
 export async function cancelImport(jobId: string, adminId: number): Promise<boolean> {
@@ -389,6 +406,12 @@ export async function continueAllImports(api: ImportApiLike): Promise<number> {
     n++;
   }
   return n;
+}
+
+export function waitText(j: ImportJob, now = Date.now()): string {
+  if (j.status !== "running" || !j.retryAfter || j.retryAfter <= now) return "";
+  const min = Math.max(1, Math.ceil((j.retryAfter - now) / 60_000));
+  return `⏳ Telegram demande d'attendre environ ${min} min (limite de débit). La copie reprend automatiquement.`;
 }
 
 export function importProgress(j: ImportJob): string {
