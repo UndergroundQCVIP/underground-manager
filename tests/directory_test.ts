@@ -6,6 +6,7 @@ import { assertEquals } from "@std/assert";
 import { setupTestEnvironment, MockTelegramApi } from "./test_helpers.ts";
 import {
   buildDirectorySections,
+  buildDirectoryMessages,
   computeContentHash,
   syncPublicDirectory,
 } from "../src/directory/sync.ts";
@@ -26,15 +27,15 @@ Deno.test("DIRECTORY — Creators are compact, linked and alphabetically sorted 
   assertEquals(sections.length, 2);
 
   const text = sections[0];
-  assertEquals(text.startsWith("Voici la liste des créateurs *toujours en activité*"), true);
+  assertEquals(text.startsWith("Voici la liste des créateurs toujours en activité"), true);
   assertEquals(text.includes("https://t.me/UndergroundManagerBot?start=join"), true);
-  assertEquals(text.indexOf("[Aria]") < text.indexOf("[Ashley]"), true);
-  assertEquals(text.indexOf("[Ashley]") < text.indexOf("[Maya]"), true);
-  assertEquals(text.indexOf("[Maya]") < text.indexOf("[Sophie]"), true);
+  assertEquals(text.indexOf("Aria") < text.indexOf("Ashley"), true);
+  assertEquals(text.indexOf("Ashley") < text.indexOf("Maya"), true);
+  assertEquals(text.indexOf("Maya") < text.indexOf("Sophie"), true);
   assertEquals(text.includes(" — Regular — "), false);
 
   // Each creator must have a deep link
-  assertEquals(text.includes("https://t.me/UndergroundManagerBot?start=creator_1"), true);
+  assertEquals(buildDirectoryMessages(mockCreators, "UndergroundManagerBot")[0].entities.some((e) => e.type === "text_link" && e.url === "https://t.me/UndergroundManagerBot?start=creator_1"), true);
 });
 
 Deno.test("DIRECTORY — Only creators with confirmed media content are published", async () => {
@@ -76,7 +77,7 @@ Deno.test("DIRECTORY — Only creators with confirmed media content are publishe
     assertEquals(api.sentMessages.length, 2);
 
     const messageText = api.sentMessages[0].text;
-    assertEquals(messageText.includes("[Lena]"), true);
+    assertEquals(messageText.includes("Lena"), true);
     assertEquals(messageText.includes("EmptyCreator"), false); // Empty creator excluded!
   } finally {
     await kv.close();

@@ -5,7 +5,7 @@ import { callback, createFakeTelegram, forumMessage } from "./bot_harness.ts";
 import { getCreator, saveCreator, updateCreatorName } from "../src/db/creators.ts";
 import { getDirectorySyncState, markDirectoryDirty, saveDirectorySyncState } from "../src/db/directory.ts";
 import { recordMediaIndex } from "../src/db/media_index.ts";
-import { buildDirectorySections, directoryContentCounts, syncPublicDirectory } from "../src/directory/sync.ts";
+import { buildDirectoryMessages, buildDirectorySections, directoryContentCounts, syncPublicDirectory } from "../src/directory/sync.ts";
 import { syncDirectoryButtons } from "../src/navigation/service.ts";
 
 Deno.test("DIRECTORY SPLIT — counts use current-topic items, deduplicate deliveries, and qualify incomplete inventories", async () => {
@@ -22,9 +22,9 @@ Deno.test("DIRECTORY SPLIT — counts use current-topic items, deduplicate deliv
     const counts = await directoryContentCounts(creators);
     assertEquals(counts.get(exact.id), 3); // an album counts each photo/video
     const [text] = buildDirectorySections(creators, "TestBot", { collection: "regular", contentCounts: counts });
-    assertStringIncludes(text, `[Anna\\_Lee \\[QC\\]](https://t.me/TestBot?start=creator_${exact.id}) (3)`);
-    assertStringIncludes(text, `[Bella](https://t.me/TestBot?start=creator_${partial.id}) (2+)`);
-    assertStringIncludes(text, `[Cora](https://t.me/TestBot?start=creator_${unknown.id}) (?)`);
+    assertStringIncludes(text, `Anna_Lee [QC] (3)`);
+    assertStringIncludes(text, `Bella (2+)`);
+    assertStringIncludes(text, `Cora (?)`);
     assert(!text.includes("t.me/c/"));
   } finally { await kv.close(); }
 });
@@ -69,10 +69,10 @@ Deno.test("DIRECTORY SPLIT — legacy combined messages are upgraded in place on
     const api = new MockTelegramApi();
     await syncPublicDirectory(api, true, "retro");
     assertEquals(api.editedMessages[0].messageId, 55);
-    assertStringIncludes(api.editedMessages[0].text, "[Aria]");
+    assertStringIncludes(api.editedMessages[0].text, "Aria");
     assert(!api.editedMessages[0].text.includes("Maya"));
     assertEquals(api.sentMessages.length, 1);
-    assertStringIncludes(api.sentMessages[0].text, "[Maya]");
+    assertStringIncludes(api.sentMessages[0].text, "Maya");
     assertEquals((await getDirectorySyncState()).collections!.regular!.publishedMessageIds, [55]);
     assertEquals((await syncPublicDirectory(api)).updated, false);
   } finally { await kv.close(); }
@@ -88,10 +88,10 @@ Deno.test("DIRECTORY SPLIT — large same-letter lists split between complete cr
     for (const text of sections) {
       assert(text.length <= 3500);
       assertStringIncludes(text, "https://t.me/TestBot?start=join");
-      assert(!text.includes("*qui ne sont plus en activité*"));
+      assert(!text.includes("qui ne sont plus en activité"));
     }
     for (const creator of creators) {
-      assertEquals(sections.join("\n").split(`?start=creator_${creator.id})`).length - 1, 1);
+      assertEquals(buildDirectoryMessages(creators, "TestBot", { collection: "regular" }).flatMap((m) => m.entities).filter((e) => e.type === "text_link" && e.url.endsWith(`creator_${creator.id}`)).length, 1);
     }
   } finally { await kv.close(); }
 });
@@ -100,7 +100,7 @@ Deno.test("DIRECTORY SPLIT — interrupted publication checkpoints IDs and concu
   const kv = await setupTestEnvironment();
   try {
     const c = await seedCreator();
-    for (let i = 0; i < 75; i++) {
+    for (let i = 0; i < 100; i++) {
       await saveCreator({ ...c, id: `c${i}`, name: `Anna ${i} with a long name`, normalizedName: `anna ${i}`, topicId: i + 100 });
     }
     const api = new MockTelegramApi();

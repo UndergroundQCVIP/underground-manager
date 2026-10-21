@@ -24,7 +24,7 @@ import { getMigrationJob, listMigrationItems, updateMigrationJob } from "../src/
 import { getCreator, listCreators, getCreatorByTopic } from "../src/db/creators.ts";
 import { hasAccessToSpace } from "../src/db/entitlements.ts";
 import { attestInventoryComplete, relinkCreatorToRetroTopic } from "../src/creators/admin.ts";
-import { buildDirectorySections } from "../src/directory/sync.ts";
+import { buildDirectoryMessages, buildDirectorySections } from "../src/directory/sync.ts";
 import { getDirectorySyncState } from "../src/db/directory.ts";
 import { Creator } from "../src/types.ts";
 
@@ -252,9 +252,9 @@ Deno.test("UG04 MIGRATION — Full flow: copy, verify, approve, finalize; same c
 
     // Directory now says Retro, with the same deep link
     const listing = buildDirectorySections(await listCreators(), "TestBot", { collection: "retro" })[0];
-    assertStringIncludes(listing, "*qui ne sont plus en activité*");
-    assertStringIncludes(listing, "[Aria]");
-    assertStringIncludes(listing, `creator_${c.id}`);
+    assertStringIncludes(listing, "qui ne sont plus en activité");
+    assertStringIncludes(listing, "Aria");
+    assert(buildDirectoryMessages(await listCreators(), "TestBot", { collection: "retro" })[0].entities.some((e) => e.type === "text_link" && e.url.endsWith(`creator_${c.id}`)));
     assertEquals((await getDirectorySyncState()).isDirty, true);
 
     // Source topic was never deleted by finalization
@@ -615,8 +615,8 @@ Deno.test("UG04 MIGRATION — Directory stays consistent after a failed migratio
     assertEquals((await getMigrationJob(job.id))!.status, "needs_review");
 
     const listing = buildDirectorySections(await listCreators({ status: "active", hasContentOnly: true }), "TestBot")[0];
-    assertStringIncludes(listing, "*toujours en activité*");
-    assertStringIncludes(listing, "[Aria]");
+    assertStringIncludes(listing, "toujours en activité");
+    assertStringIncludes(listing, "Aria");
     assertEquals((await listCreators()).length, 1);
     assertEquals((await getCreator(c.id))?.chatId, REGULAR_CHAT);
   } finally {

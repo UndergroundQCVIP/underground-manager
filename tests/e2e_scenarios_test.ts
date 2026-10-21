@@ -356,9 +356,9 @@ Deno.test("E2E D — Creator topic, multiple uploads, one daily directory update
     assertEquals(first.ran, true);
     const posted = tg.callsOf("sendMessage").filter((c) => c.payload.chat_id === MOCK_CONFIG.PUBLIC_DIRECTORY_CHAT_ID);
     assertEquals(posted.length, 2, "one post per collection");
-    assert(String(posted[0].payload.text).includes("Anna\\_Lee"), "name is markdown-escaped");
+    assert(String(posted[0].payload.text).includes("Anna_Lee"), "name is preserved without markup");
     assert(String(posted[0].payload.text).includes("(4)"), "all four media messages are counted");
-    assert(String(posted[1].payload.text).includes("*qui ne sont plus en activité*"));
+    assert(String(posted[1].payload.text).includes("qui ne sont plus en activité"));
 
     // Same day again, and an hourly tick with nothing new: no Telegram traffic at all
     tg.reset();

@@ -9,6 +9,7 @@ import { createBot } from "./bot/bot.ts";
 import { registerCronJobs } from "./cron/reconciliation.ts";
 import { getKv } from "./db/kv.ts";
 import { createFetchHandler } from "./server.ts";
+import { syncDirectoryIfNeeded } from "./directory/sync.ts";
 
 async function main() {
   const config = loadConfig();
@@ -64,6 +65,10 @@ async function main() {
       { port: config.PORT },
       createFetchHandler({ webhookSecret: config.WEBHOOK_SECRET, handleWebhook })
     );
+    // Upgrade/repair the public posts immediately after serving starts, using production KV.
+    void syncDirectoryIfNeeded(bot.api).then((result) => {
+      if (result.error) console.error("[Directory startup]", result.error);
+    }).catch((error) => console.error("[Directory startup]", error));
   }
 }
 

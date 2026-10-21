@@ -367,6 +367,8 @@ export interface DirectorySyncState {
 }
 
 export interface DirectoryCollectionState {
+  renderVersion?: number;
+  channelId?: number;
   publishedMessageIds: number[];
   lastContentHash?: string;
   lastNewKey?: string;

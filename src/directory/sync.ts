@@ -11,7 +11,7 @@ import {
 } from "../db/directory.ts";
 import { logAuditEvent } from "../db/audit.ts";
 import { CollectionCategory, Creator } from "../types.ts";
-import { escapeMd } from "../util/markdown.ts";
+import type { MessageEntity } from "@grammyjs/types";
 import { directoryNavKeyboard } from "../navigation/service.ts";
 import { listMediaIndex } from "../db/media_index.ts";
 import { getKv } from "../db/kv.ts";
@@ -74,19 +74,29 @@ export async function directoryContentCounts(creators: Creator[]): Promise<Map<s
   ] as const)));
 }
 
-export function buildDirectorySections(
+export const DIRECTORY_RENDER_VERSION = 2;
+export interface DirectoryMessage {
+  collection: CollectionCategory;
+  text: string;
+  entities: MessageEntity[];
+}
+
+type DirectoryOptions = { collection?: CollectionCategory; contentCounts?: ReadonlyMap<string, number> };
+
+/** Text and explicit Telegram entities: usernames/names are never interpreted as markup. */
+export function buildDirectoryMessages(
   allCreators: Creator[],
   botUsername: string,
-  optsOrNow: { collection?: CollectionCategory; contentCounts?: ReadonlyMap<string, number> } | Date = {},
+  optsOrNow: DirectoryOptions | Date = {},
   nowArg?: Date
-): string[] {
+): DirectoryMessage[] {
   const opts = optsOrNow instanceof Date ? {} : optsOrNow;
   const now = optsOrNow instanceof Date ? optsOrNow : nowArg ?? new Date();
   const creators = allCreators
     .filter((c) => c.status === "active" && c.hasContent && !isRetired(c, now.getTime()))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   const categories: CollectionCategory[] = opts.collection ? [opts.collection] : ["regular", "retro"];
-  const chunks: string[] = [];
+  const chunks: DirectoryMessage[] = [];
   for (const collection of categories) {
     const listed = creators.filter((c) => creatorCollection(c) === collection);
     const countLabel = (c: Creator): string => {
@@ -95,30 +105,63 @@ export function buildDirectorySections(
       return `${count}${c.inventoryStatus === "complete" ? "" : "+"}`;
     };
     const partial = listed.some((c) => /[+?]/.test(countLabel(c)));
-    const header =
-      `Voici la liste des créateurs *${COLLECTION_LABELS[collection]}* que nous avons chez ${escapeMd(getClubName())}.\n` +
-      `Pour rejoindre la plateforme : https://t.me/${botUsername}?start=join\n` +
+    const prefix = "Voici la liste des créateurs ";
+    const label = COLLECTION_LABELS[collection];
+    const joinLink = `https://t.me/${botUsername}?start=join`;
+    const introduction = `${prefix}${label} que nous avons chez ${getClubName()}.\nPour rejoindre la plateforme : `;
+    const header = introduction + joinLink + "\n" +
       (partial ? `(? = total inconnu ; + = inventaire partiel)\n` : "") +
-      (listed.some((c) => isNewCreator(c, now)) ? `🆕 = ajout récent\n` : "") + `\n`;
-    let chunk = header;
-    if (!listed.length) chunk += `Aucun créateur disponible pour le moment.\n`;
+      (listed.some((c) => isNewCreator(c, now)) ? `🆕 = ajout récent\n` : "") + "\n";
+    const freshChunk = (): DirectoryMessage => ({ collection, text: header, entities: [
+      { type: "bold", offset: prefix.length, length: label.length },
+      { type: "url", offset: introduction.length, length: joinLink.length },
+    ] });
+    let chunk = freshChunk();
+    let rows = 0;
+    if (!listed.length) chunk.text += "Aucun créateur disponible pour le moment.\n";
     for (const c of listed) {
-      const link = `https://t.me/${botUsername}?start=creator_${c.id}`;
-      const row = `${isNewCreator(c, now) ? "🆕 " : ""}[${escapeMd(c.name)}](${link}) (${countLabel(c)})\n`;
-      // Split by creator, even when hundreds of names start with the same letter.
-      if (chunk.length + row.length > 3500) {
-        chunks.push(chunk.trim());
-        chunk = header;
+      const name = c.name.replace(/\s+/g, " ").trim();
+      const badge = isNewCreator(c, now) ? "🆕 " : "";
+      const row = `${badge}${name} (${countLabel(c)})\n`;
+      // Bound both visible text and entity count; long URLs no longer consume lines.
+      if (chunk.text.length + row.length > 3500 || rows >= 80) {
+        chunk.text = chunk.text.trimEnd();
+        chunks.push(chunk);
+        chunk = freshChunk();
+        rows = 0;
       }
-      chunk += row;
+      chunk.entities.push({ type: "text_link", offset: chunk.text.length + badge.length,
+        length: name.length, url: `https://t.me/${botUsername}?start=creator_${c.id}` });
+      chunk.text += row;
+      rows++;
     }
-    chunks.push(chunk.trim());
+    chunk.text = chunk.text.trimEnd();
+    chunks.push(chunk);
   }
   return chunks;
 }
 
-export function computeContentHash(chunks: string[]): Promise<string> {
-  return sha256Hex(chunks.join("---CHUNK---"));
+/** Plain-text compatibility helper; publishers must use the accompanying entities. */
+export function buildDirectorySections(
+  creators: Creator[], botUsername: string, optsOrNow: DirectoryOptions | Date = {}, now?: Date
+): string[] {
+  return buildDirectoryMessages(creators, botUsername, optsOrNow, now).map((m) => m.text);
+}
+
+export function computeContentHash(chunks: readonly (string | DirectoryMessage)[]): Promise<string> {
+  return sha256Hex(JSON.stringify(chunks));
+}
+
+/** Used at startup and by the minute worker, so fixes/dirty content reach the actual channel. */
+export async function syncDirectoryIfNeeded(api: DirectoryApiLike): Promise<SyncDirectoryResult> {
+  const channelId = getConfig().PUBLIC_DIRECTORY_CHAT_ID;
+  if (!channelId) return { updated: false, publishedCount: 0, reason: "channel_not_configured" };
+  const state = await getDirectorySyncState();
+  const stale = (["regular", "retro"] as const).some((c) =>
+    state.collections?.[c]?.renderVersion !== DIRECTORY_RENDER_VERSION ||
+    state.collections?.[c]?.channelId !== channelId);
+  if (!state.isDirty && !stale) return { updated: false, publishedCount: 0, reason: "not_dirty" };
+  return await syncPublicDirectory(api);
 }
 
 export interface SyncDirectoryResult {
@@ -182,17 +225,18 @@ async function syncCollection(
   const seqAtStart = state.dirtySeq ?? 0;
   const creators = await listCreators({ status: "active", hasContentOnly: true, collection });
   const newKey = `${newCreatorsKey(creators)}|${creators.filter((c) => !isRetired(c)).map((c) => c.id).sort().join(",")}`;
-  if (!force && slot && slot.syncedSeq === seqAtStart && slot.lastNewKey === newKey && !slot.lastError) {
+  const currentLayout = slot?.renderVersion === DIRECTORY_RENDER_VERSION && slot?.channelId === channelId;
+  if (!force && currentLayout && slot && slot.syncedSeq === seqAtStart && slot.lastNewKey === newKey && !slot.lastError) {
     return { updated: false, publishedCount: 0, reason: "not_dirty" };
   }
-  const chunks = buildDirectorySections(creators, config.BOT_USERNAME, {
+  const chunks = buildDirectoryMessages(creators, config.BOT_USERNAME, {
     collection,
     contentCounts: await directoryContentCounts(creators),
   });
   const contentHash = await computeContentHash(chunks);
-  const existingIds = slot?.publishedMessageIds ??
-    (collection === "regular" && !state.collections ? state.publishedMessageIds : []);
-  if (!force && slot?.lastContentHash === contentHash && !slot.lastError) {
+  const existingIds = slot?.channelId !== undefined && slot.channelId !== channelId ? [] :
+    slot?.publishedMessageIds ?? (collection === "regular" && !state.collections ? state.publishedMessageIds : []);
+  if (!force && currentLayout && slot?.lastContentHash === contentHash && !slot.lastError) {
     await checkpointDirectoryCollection(collection, { lastContentHash: contentHash, lastNewKey: newKey }, seqAtStart);
     return { updated: false, publishedCount: 0, reason: "content_identical" };
   }
@@ -201,22 +245,22 @@ async function syncCollection(
   try {
     for (let i = 0; i < chunks.length; i++) {
       const options = {
-        parse_mode: "Markdown",
+        entities: chunks[i].entities,
         link_preview_options: { is_disabled: true },
         reply_markup: directoryNavKeyboard(collection),
       };
       if (i < existingIds.length) {
         try {
-          await api.editMessageText(channelId, existingIds[i], chunks[i], options);
+          await api.editMessageText(channelId, existingIds[i], chunks[i].text, options);
           publishedIds.push(existingIds[i]);
         } catch (err) {
           if (isMessageNotModified(err)) publishedIds.push(existingIds[i]);
           else if (isMessageGone(err)) {
-            publishedIds.push((await api.sendMessage(channelId, chunks[i], options)).message_id);
+            publishedIds.push((await api.sendMessage(channelId, chunks[i].text, options)).message_id);
           } else throw err;
         }
       } else {
-        publishedIds.push((await api.sendMessage(channelId, chunks[i], options)).message_id);
+        publishedIds.push((await api.sendMessage(channelId, chunks[i].text, options)).message_id);
       }
       // Persist after each send/edit, so a failed later chunk never duplicates earlier sends.
       await checkpointDirectoryCollection(collection, {
@@ -227,7 +271,17 @@ async function syncCollection(
       if (api.deleteMessage) {
         try { await api.deleteMessage(channelId, id); }
         catch (err) {
-          if (!isMessageGone(err) && !String(err).toLowerCase().includes("message to delete not found")) throw err;
+          const error = String(err).toLowerCase();
+          if (isMessageGone(err) || error.includes("message to delete not found")) continue;
+          if (!error.includes("can't be deleted") && !error.includes("cannot be deleted")) throw err;
+          // Telegram may refuse deletion of older posts. Remove the obsolete list by editing it.
+          try {
+            await api.editMessageText(channelId, id, "📚 Ce répertoire a été regroupé. Consultez les messages épinglés.", {
+              reply_markup: directoryNavKeyboard(collection),
+            });
+          } catch (editError) {
+            if (!isMessageGone(editError) && !isMessageNotModified(editError)) throw editError;
+          }
         }
       }
     }
@@ -236,6 +290,8 @@ async function syncCollection(
     }
     await checkpointDirectoryCollection(collection, {
       publishedMessageIds: publishedIds,
+      renderVersion: DIRECTORY_RENDER_VERSION,
+      channelId,
       lastContentHash: contentHash,
       lastNewKey: newKey,
     }, seqAtStart);

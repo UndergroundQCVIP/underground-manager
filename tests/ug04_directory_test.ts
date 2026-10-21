@@ -5,7 +5,7 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { MockTelegramApi, setupTestEnvironment } from "./test_helpers.ts";
 import { RETRO_CHAT, REGULAR_CHAT, seedCreator } from "./ug04_helpers.ts";
-import { buildDirectorySections, syncPublicDirectory } from "../src/directory/sync.ts";
+import { buildDirectoryMessages, buildDirectorySections, syncPublicDirectory } from "../src/directory/sync.ts";
 import { listCreators, getCreator, getCreatorByTopic } from "../src/db/creators.ts";
 import { handleForumTopicCreated, handleMediaUpload } from "../src/creators/service.ts";
 import { listMediaIndex, parseTopicMessageLink } from "../src/db/media_index.ts";
@@ -24,13 +24,13 @@ Deno.test("UG04 DIRECTORY — Regular and Retro creators have separate compact a
     const sections = buildDirectorySections(creators, "TestBot");
     assertEquals(sections.length, 2);
     const [regular, retro] = sections;
-    assertStringIncludes(regular, "Voici la liste des créateurs *toujours en activité*");
-    assertStringIncludes(retro, "Voici la liste des créateurs *qui ne sont plus en activité*");
+    assertStringIncludes(regular, "Voici la liste des créateurs toujours en activité");
+    assertStringIncludes(retro, "Voici la liste des créateurs qui ne sont plus en activité");
     assertStringIncludes(regular, "https://t.me/TestBot?start=join");
     assert(!/underground/i.test(regular));
-    assert(regular.indexOf("[Aria]") < regular.indexOf("[Sophie]"));
+    assert(regular.indexOf("Aria") < regular.indexOf("Sophie"));
     assert(!regular.includes("Maya"));
-    assertStringIncludes(retro, "[Maya]");
+    assertStringIncludes(retro, "Maya");
     assert(!retro.includes("Aria") && !retro.includes("Sophie"));
     assert(!regular.includes("oct. 2026"));
 
@@ -51,7 +51,7 @@ Deno.test("UG04 DIRECTORY — Public directory exposes deep links only, never pr
   try {
     const c = await seedCreator({ name: "Maya", topicId: 77, collection: "retro" });
     const text = buildDirectorySections([c], "TestBot", { collection: "retro" })[0];
-    assertStringIncludes(text, `https://t.me/TestBot?start=creator_${c.id}`);
+    assert(buildDirectoryMessages([c], "TestBot", { collection: "retro" })[0].entities.some((e) => e.type === "text_link" && e.url === `https://t.me/TestBot?start=creator_${c.id}`));
     assert(!text.includes("t.me/c/"));
     assert(!text.includes("1001005")); // Retro forum chat id never appears
     assert(!text.includes("/77"));
