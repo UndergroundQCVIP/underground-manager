@@ -131,12 +131,12 @@ export async function castVote(
 ): Promise<{ success: boolean; error?: string }> {
   const { userId, ballotId, candidateId } = params;
 
-  // 1. Eligibility Check: active paid OR contribution-earned member (complimentary excluded).
+  // 1. Active paid or content-earned access, including older content reward grants.
   const summary = await getMembershipSummary(userId);
   if (!summary.canParticipate) {
     return {
       success: false,
-      error: "Seuls les abonnés payants actifs ou les membres ayant gagné leur accès par contribution peuvent voter. Les membres ayant un accès gracieux sont exclus du vote.",
+      error: "Seuls les abonnés payants actifs ou les membres ayant gagné leur accès par contribution peuvent voter. Les autres accès gracieux sont exclus du vote.",
     };
   }
 

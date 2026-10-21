@@ -251,8 +251,9 @@ Deno.test("UG04 MIGRATION — Full flow: copy, verify, approve, finalize; same c
     assertEquals((await getCreatorByTopic(RETRO_CHAT, topicId))?.id, c.id);
 
     // Directory now says Retro, with the same deep link
-    const listing = buildDirectorySections(await listCreators(), "TestBot")[0];
-    assertStringIncludes(listing, "*Aria* — Retro");
+    const listing = buildDirectorySections(await listCreators(), "TestBot", { collection: "retro" })[0];
+    assertStringIncludes(listing, "*qui ne sont plus en activité*");
+    assertStringIncludes(listing, "[Aria]");
     assertStringIncludes(listing, `creator_${c.id}`);
     assertEquals((await getDirectorySyncState()).isDirty, true);
 
@@ -614,7 +615,8 @@ Deno.test("UG04 MIGRATION — Directory stays consistent after a failed migratio
     assertEquals((await getMigrationJob(job.id))!.status, "needs_review");
 
     const listing = buildDirectorySections(await listCreators({ status: "active", hasContentOnly: true }), "TestBot")[0];
-    assertStringIncludes(listing, "*Aria* — Regular");
+    assertStringIncludes(listing, "*toujours en activité*");
+    assertStringIncludes(listing, "[Aria]");
     assertEquals((await listCreators()).length, 1);
     assertEquals((await getCreator(c.id))?.chatId, REGULAR_CHAT);
   } finally {

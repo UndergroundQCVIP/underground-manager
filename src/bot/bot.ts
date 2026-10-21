@@ -13,6 +13,7 @@ import { joinReqComposer } from "./handlers/join_req.ts";
 import { adminComposer } from "./handlers/admin.ts";
 import { forumComposer } from "./handlers/forum.ts";
 import { wantedComposer } from "./handlers/wanted.ts";
+import { wantedRequestsComposer } from "./handlers/wanted_requests.ts";
 import { votingComposer } from "./handlers/voting.ts";
 import { treasuryComposer } from "./handlers/treasury.ts";
 import { migrationComposer } from "./handlers/migration.ts";
@@ -55,6 +56,7 @@ export function createBot(token?: string): Bot {
   bot.use(referralsComposer);
   bot.use(importsComposer);
   bot.use(leaderboardComposer);
+  bot.use(wantedRequestsComposer);
   bot.use(contributeComposer);
   bot.use(forumComposer);
   bot.use(wantedComposer);

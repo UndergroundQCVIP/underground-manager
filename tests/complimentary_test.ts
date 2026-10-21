@@ -46,7 +46,8 @@ Deno.test("COMPLIMENTARY — Admin grants 30 days access with reason and audit t
     assertEquals(summary.isMember, true);
     assertEquals(summary.hasComplimentary, true);
     assertEquals(summary.hasPaid, false);
-    assertEquals(summary.primaryType, "Complimentary");
+    assertEquals(summary.primaryType, "Contribution");
+    assertEquals(summary.canParticipate, true); // legacy access explicitly earned through content
   } finally {
     await kv.close();
   }

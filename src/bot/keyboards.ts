@@ -31,8 +31,10 @@ export function mainMenuKeyboard(
   }
 
   kb.text("📚 Répertoire des créateurs", "dir:all")
-    .text("🎯 Liste de souhaits", "wanted:menu")
+    .text("🎯 Suggestions et votes", "wanted:menu")
     .row();
+
+  kb.text("🔎 Liste recherchée", "wreq:menu").row();
 
   kb.text("➕ Contribuer", "contrib:start").text("🤝 Parrainage", "ref:menu").row();
   kb.text("🏆 Classement", "lb:month").row();
@@ -117,8 +119,10 @@ export function adminMenuKeyboard(): InlineKeyboard {
     .text("📚 Répertoire", "admin:sync_dir_menu")
     .text("💰 Trésorerie", "admin:treasury_menu")
     .row()
-    .text("🎯 Liste de souhaits", "admin:wanted_menu")
+    .text("🎯 Suggestions et votes", "admin:wanted_menu")
     .text("🗳️ Vote mensuel", "admin:voting_menu")
+    .row()
+    .text("🔎 Gérer la liste recherchée", "wreq:admin:list:0")
     .row()
     .text("📥 Contributions", "cadm:hub")
     .text("⚙️ Paramètres", "admin:settings")

@@ -197,6 +197,8 @@ export interface AccessSyncState {
 }
 
 export type AuditEventType =
+  | "wanted_request_created"
+  | "wanted_request_updated"
   | "member_registered"
   | "payment_received"
   | "payment_refunded"
@@ -294,7 +296,7 @@ export interface MembershipSummary {
   hasContribution: boolean;
   /**
    * Eligible to nominate/support creators and vote: paid OR contribution-earned
-   * (complimentary stays excluded, as before).
+   * (other complimentary access stays excluded; legacy content rewards qualify).
    */
   canParticipate: boolean;
   activeEntitlements: Entitlement[];
@@ -360,6 +362,17 @@ export interface DirectorySyncState {
   dirtySeq?: number; // Bumped on every change so an in-flight sync cannot clear a newer one
   lastAttemptAt?: string; // Last time a sync tried to reach Telegram
   lastError?: string; // Why the last attempt failed (cleared by the next success)
+  /** Independent posts/checkpoints for the compact Regular and Retro directories. */
+  collections?: Partial<Record<CollectionCategory, DirectoryCollectionState>>;
+}
+
+export interface DirectoryCollectionState {
+  publishedMessageIds: number[];
+  lastContentHash?: string;
+  lastNewKey?: string;
+  lastSyncAt?: string;
+  syncedSeq?: number;
+  lastError?: string;
 }
 
 export type WantedCandidateStatus =
@@ -384,6 +397,26 @@ export const WANTED_STATUS_LABELS: Record<WantedCandidateStatus, string> = {
   available: "Disponible dans les collections",
   rejected_unavailable: "Refusé / Indisponible",
 };
+
+/** Admin-managed content requests, independent of community voting candidates. */
+export type WantedRequestClass = "creatrices" | "amateurs";
+export const WANTED_REQUEST_CLASSES: Record<WantedRequestClass, string> = {
+  creatrices: "Créatrices",
+  amateurs: "Amateurs",
+};
+
+export interface WantedRequest {
+  id: string;
+  name: string;
+  normalizedName: string;
+  profileUrl: string;
+  category: WantedRequestClass;
+  status: "active" | "archived";
+  createdBy: number;
+  updatedBy: number;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface WantedCandidate {
   id: string; // UUID
@@ -869,6 +902,8 @@ export interface Contribution {
   userId: number; // Contributor (private chat id == user id)
   creatorId: string; // "" while a new-creator proposal is not yet approved
   creatorName: string;
+  /** Snapshot of the admin-managed request that led to this submission. */
+  wantedRequest?: Pick<WantedRequest, "id" | "name" | "profileUrl" | "category">;
   items: ContributionItem[];
   status: ContributionStatus;
   publishedMessageIds?: number[];

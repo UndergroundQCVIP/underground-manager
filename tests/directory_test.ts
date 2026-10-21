@@ -14,7 +14,7 @@ import { getDirectorySyncState, markDirectoryDirty } from "../src/db/directory.t
 import { createEntitlement } from "../src/db/entitlements.ts";
 import { getMembershipSummary } from "../src/db/entitlements.ts";
 
-Deno.test("DIRECTORY — Creators are grouped alphabetically and sorted correctly", () => {
+Deno.test("DIRECTORY — Creators are compact, linked and alphabetically sorted in separate messages", () => {
   const mockCreators = [
     { id: "1", name: "Sophie", normalizedName: "sophie", chatId: -1001, topicId: 10, topicCreatedAt: "", hasContent: true, status: "active" as const, createdAt: "", updatedAt: "" },
     { id: "2", name: "Aria", normalizedName: "aria", chatId: -1001, topicId: 11, topicCreatedAt: "", hasContent: true, status: "active" as const, createdAt: "", updatedAt: "" },
@@ -23,21 +23,15 @@ Deno.test("DIRECTORY — Creators are grouped alphabetically and sorted correctl
   ];
 
   const sections = buildDirectorySections(mockCreators, "UndergroundManagerBot");
-  assertEquals(sections.length, 1);
+  assertEquals(sections.length, 2);
 
   const text = sections[0];
-  // 'A' section must appear before 'M', and 'M' before 'S'
-  const indexA = text.indexOf("*A*");
-  const indexM = text.indexOf("*M*");
-  const indexS = text.indexOf("*S*");
-
-  assertEquals(indexA < indexM, true);
-  assertEquals(indexM < indexS, true);
-
-  // Aria must appear before Ashley
-  const indexAria = text.indexOf("*Aria*");
-  const indexAshley = text.indexOf("*Ashley*");
-  assertEquals(indexAria < indexAshley, true);
+  assertEquals(text.startsWith("Voici la liste des créateurs *toujours en activité*"), true);
+  assertEquals(text.includes("https://t.me/UndergroundManagerBot?start=join"), true);
+  assertEquals(text.indexOf("[Aria]") < text.indexOf("[Ashley]"), true);
+  assertEquals(text.indexOf("[Ashley]") < text.indexOf("[Maya]"), true);
+  assertEquals(text.indexOf("[Maya]") < text.indexOf("[Sophie]"), true);
+  assertEquals(text.includes(" — Regular — "), false);
 
   // Each creator must have a deep link
   assertEquals(text.includes("https://t.me/UndergroundManagerBot?start=creator_1"), true);
@@ -79,10 +73,10 @@ Deno.test("DIRECTORY — Only creators with confirmed media content are publishe
 
     const result = await syncPublicDirectory(api, true);
     assertEquals(result.updated, true);
-    assertEquals(api.sentMessages.length, 1);
+    assertEquals(api.sentMessages.length, 2);
 
     const messageText = api.sentMessages[0].text;
-    assertEquals(messageText.includes("*Lena*"), true);
+    assertEquals(messageText.includes("[Lena]"), true);
     assertEquals(messageText.includes("EmptyCreator"), false); // Empty creator excluded!
   } finally {
     await kv.close();
@@ -111,13 +105,13 @@ Deno.test("DIRECTORY — Dirty flag and content hash prevent redundant edits", a
     // First sync publishes
     const firstSync = await syncPublicDirectory(api, false);
     assertEquals(firstSync.updated, true);
-    assertEquals(api.sentMessages.length, 1);
+    assertEquals(api.sentMessages.length, 2);
 
     // Second sync immediately after with no changes -> should skip!
     const secondSync = await syncPublicDirectory(api, false);
     assertEquals(secondSync.updated, false);
     assertEquals(secondSync.reason, "not_dirty");
-    assertEquals(api.sentMessages.length, 1); // No new messages
+    assertEquals(api.sentMessages.length, 2); // No new messages
     assertEquals(api.editedMessages.length, 0); // No edits
   } finally {
     await kv.close();

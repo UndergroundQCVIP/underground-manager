@@ -29,7 +29,7 @@ In strict compliance with the UG-01, UG-02, and UG-03 Implementation Contracts:
 | **Administrator Private Menu & Lookup** | ✅ **Completed & Tested** | Whitelisted numeric user IDs; member lookup, complimentary wizard, creator registry, voting & treasury controls. |
 | **Update Idempotency & Webhook Secret Token** | ✅ **Completed & Tested** | Prevents webhook spoofing and duplicate message processing. |
 | **Creator Forum Topic Detection & Indexing (UG-02)** | ✅ **Completed & Tested** | Real-time topic creation/edit & photo/video detection; empty topics suppressed. |
-| **Public Creator Directory Sync (UG-02)** | ✅ **Completed & Tested** | Daily 3:00 AM sync with A–Z grouping, content hash diffs, <4000 char chunking. |
+| **Public Creator Directory Sync (UG-02)** | ✅ **Completed & Tested** | Daily 3:00 AM sync; separate Regular/Retro posts, linked names/counts, independent refreshes, <3500 char chunking. |
 | **Deep Link Membership Protection (UG-02)** | ✅ **Completed & Tested** | `t.me/<bot>?start=creator_<id>`: direct private topic link for paid members, Stars CTA for non-members. |
 | **Wanted List & Community Nominations (UG-02)** | ✅ **Completed & Tested** | `/suggest` and interactive voting; 1 support per paid member per monthly cycle. |
 | **Monthly Acquisition Voting & Quorum (UG-02)** | ✅ **Completed & Tested** | Top 5 shortlisted candidates; irrevocable vote; 20% turnout check; auto 5-day tie runoffs. |
@@ -49,7 +49,7 @@ LA CONFRÉRIE's bot manages access and synchronization across five Telegram spac
 | Name | Type | Access | Purpose |
 |---|---|---|---|
 | **Underground QC VIP** | Channel | Public | Welcome, announcements, subscription entry point |
-| **Public Creator Directory** (`PUBLIC_DIRECTORY_CHAT_ID`) | Channel | Public | Alphabetical directory of available creators and update dates |
+| **Public Creator Directory** (`PUBLIC_DIRECTORY_CHAT_ID`) | Channel | Public | Separate alphabetical Regular/Retro directories with indexed content counts |
 | **TOKEBEC VIP COLLECTIONS** (`VIP_COLLECTIONS_CHAT_ID`) | Forum Supergroup | Paid / Private | Primary creator media library (one topic per creator) |
 | **Wanted List** (`WANTED_LIST_CHAT_ID`) | Channel | Paid / Private | Creator nominations, community rankings, and ballot announcements |
 | **LA CONFRÉRIE General Chat** (`GENERAL_CHAT_ID`) | Supergroup | Paid / Private | Member conversations and optional weekly update digests |
@@ -60,7 +60,7 @@ LA CONFRÉRIE's bot manages access and synchronization across five Telegram spac
 - **Complimentary Access Levels:**
   - `vip_only`: Access to TOKEBEC VIP COLLECTIONS only (default).
   - `vip_and_chat`: Access to TOKEBEC VIP COLLECTIONS + LA CONFRÉRIE General Chat.
-  - `full`: Full access to all 3 spaces (read-only in Wanted List; nominations and voting are strictly reserved for paying Stars subscribers).
+  - `full`: Full access to all 3 spaces (nominations and voting require paid or content-earned access; older grants explicitly marked content_contribution also qualify).
 
 
 ---
@@ -110,7 +110,7 @@ underground-manager/
 │   ├── creators/
 │   │   └── service.ts     # [UG-02] Topic detection, media upload tracking, link matching
 │   ├── directory/
-│   │   └── sync.ts        # [UG-02] Public channel sync, A-Z categorization, deep linking
+│   │   └── sync.ts        # [UG-02] Public channel sync, separate collections, counts, deep linking
 │   ├── wanted/
 │   │   └── service.ts     # [UG-02] Nomination validation, duplicate checks, channel sync
 │   ├── voting/
@@ -175,6 +175,7 @@ underground-manager/
      start - Open LA CONFRÉRIE bot main menu
      help - How to use the bot and access channels
      wanted - Browse Wanted List & support creators
+     recherches - Voir la liste recherchée des administrateurs
      suggest - Propose a new creator for the Wanted List
      vote - Cast your vote in the active monthly acquisition ballot
      treasury - View treasury balances, budget & reports (admins only)
@@ -382,8 +383,8 @@ LA CONFRÉRIE bot automatically detects new forum topics and topic renames in `T
 
 ### Public Directory Channel (`PUBLIC_DIRECTORY_CHAT_ID`)
 - **Daily Synchronization:** One hourly `Deno.cron` (UTC) drives all jobs; the daily directory/Wanted/Stars-ledger sync runs at the first hourly tick at or after 03:00 America/Toronto (DST-safe, caught up if missed, at most once per local day). `DIRECTORY_UPDATE_CRON` is only read for its hour field (default `0 3 * * *` = 03:00 Toronto).
-- **Alphabetical A–Z Index:** Creators are grouped alphabetically under letter headers.
-- **Message Chunking:** Telegram messages are limited to 4,096 characters. The sync engine automatically chunks entries into clean posts under 4,000 characters and updates existing channel messages by ID.
+- **Compact Alphabetical Lists:** Regular and Retro are separate messages with their own refresh buttons. Each row is a linked creator name and indexed content count. The introduction includes a copyable join link.
+- **Message Chunking:** Telegram messages are limited to 4,096 characters. The sync engine automatically chunks entries into clean posts under 3,500 characters and updates existing channel messages by ID.
 - **Content Hashing:** The directory computes an SHA-256 hash of the generated content. If no creator updates have occurred, Telegram API calls are skipped.
 - **Privacy Protection:** The public directory never leaks private Telegram join links or media files. Instead, each creator links to a deep link:
   ```text
@@ -400,21 +401,21 @@ When a user clicks a creator deep link in the public directory:
 ## 10. Wanted List & Community Acquisition Voting (UG-02)
 
 ### Community Nominations
-- Active paying members can propose creators using `/suggest <Creator Name> [optional URL/notes]`.
+- Members with active paid or content-earned access can propose creators using `/suggest <Creator Name> [optional URL/notes]`.
 - Suggestions are validated (minimum 2 characters, alphanumeric filtering, duplicate detection).
 - Successfully submitted suggestions appear in the private **Wanted List** channel (`WANTED_LIST_CHAT_ID`) sorted by member support.
 - Complimentary members can view the Wanted List channel, but are blocked from nominating or voting to maintain subscriber economic governance.
 
 ### Monthly Support Cycles
 - Each calendar month forms a distinct support cycle (e.g. `2026-10`).
-- Each paying member may support **one** candidate per monthly cycle.
+- Each member with active paid or content-earned access may support **one** candidate per monthly cycle.
 - Support casting is atomic and updates the candidate's monthly score.
 
 ### Monthly Acquisition Voting
 1. **Shortlist Selection:** At the end of each cycle, the bot selects the top candidates (default 5) by support count.
 2. **Ballot Creation:** A formal acquisition ballot is opened for voting (default duration: 5 days).
 3. **Voting Interface (`/vote`):**
-   - Active paying subscribers cast one irrevocable vote.
+   - Members with active paid or content-earned access cast one irrevocable vote.
    - Candidate options are randomized per session to prevent positional voting bias.
    - Votes are recorded atomically (`votes_by_ballot_user` KV key).
 4. **Quorum & Closure:**
@@ -493,7 +494,7 @@ LA CONFRÉRIE's bot features a comprehensive automated test suite consisting of 
 | [`tests/complimentary_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/complimentary_test.ts) | 8 | Complimentary access levels, duration calculation, manual revocation, 3-day reminder delivery. |
 | [`tests/security_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/security_test.ts) | 6 | Webhook secret token validation, update deduplication, admin RBAC, concurrent transaction isolation. |
 | [`tests/creators_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/creators_test.ts) | 6 | Forum topic creation/renaming, media upload detection, non-admin filtering, empty topic suppression. |
-| [`tests/directory_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/directory_test.ts) | 4 | Public directory synchronization, A-Z categorization, SHA-256 diffing, 4000-char message chunking. |
+| [`tests/directory_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/directory_test.ts) | 4 | Separate alphabetical lists, synchronization, SHA-256 diffing and member access. |
 | [`tests/wanted_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/wanted_test.ts) | 7 | Member nominations, alphanumeric validation, 1-per-cycle support limits, community ranking sort. |
 | [`tests/voting_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/voting_test.ts) | 5 | Monthly acquisition ballots, irrevocable voting, 20% quorum enforcement, tie runoff ballots. |
 | [`tests/acquisitions_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/acquisitions_test.ts) | 3 | Post-acquisition topic linking, candidate status progression, directory integration. |
@@ -504,7 +505,8 @@ LA CONFRÉRIE's bot features a comprehensive automated test suite consisting of 
 | [`tests/treasury_acquisitions_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/treasury_acquisitions_test.ts) | 2 | Candidate pricing in foreign currencies, affordability checks against available budget, commitment to paid lifecycle. |
 | [`tests/treasury_reports_test.ts`](file:///Users/goon/Desktop/ANTIGRAVITY%20PROJECTS/underground-manager/tests/treasury_reports_test.ts) | 4 | Monthly report generation, member transparency formatting, admin audit breakdown, channel publication. |
 | `tests/ug04_membership_test.ts` | 15 | Rebrand, two tiers, plan-aware billing, invite-link gating, upgrade/downgrade, legacy subscriptions, tier revenue. |
-| `tests/ug04_directory_test.ts` | 9 | Unified directory, labels/filters, retro topic registration, no duplicates, media-ID inventory, repair. |
+| `tests/ug04_directory_test.ts` | 9 | Separate directories/filters, retro topic registration, no duplicates, media-ID inventory, repair. |
+| `tests/directory_split_test.ts` | 6 | Current-topic counts, independent refreshes, legacy upgrade, row chunking, retry/concurrency checkpoints and bot routing. |
 | `tests/ug04_migration_test.ts` | 21 | Dry-run, protected content, albums, partial failure, resume, rate limits, leases, finalization, deletion safeguards. |
 | `tests/ug04_bot_routing_test.ts` | 6 | Real bot wiring: menus, admin-only routes, tier-gated deep links, disabled Retro checkout. |
 | `tests/ug04_contributions_test.ts` | 8 | Admin-reviewed member contributions: review gate, single publish, partial failure, migration hold, bot wiring. |
@@ -592,9 +594,17 @@ Telegram Stars cannot prorate, so plan changes are a transparent cancel-and-resu
 * **Retro Plus → Regular:** on confirmation the Retro renewal is cancelled; Retro stays until the paid-through date, then expires. A Regular purchase is blocked while Retro Plus is active (prevents overlapping charges).
 * Nothing is ever cancelled without the member's explicit confirmation.
 
-### 14.3 Unified directory
+### 14.3 Creator directories
 
-One `creators` collection. Each creator has a stable internal ID, `collection` (`regular`/`retro`), forum chat + topic ID, last content update, optional `retiredAt`, `rightsStatus`, and an inventory state. Public listing is alphabetical across both tiers, e.g. `Aria — Regular — Oct 18, 2026`. Members can filter **All / Regular / Retro** in the bot. The public directory contains only bot deep links; the protected topic link is given by `/start creator_<id>` **after** checking the tier (Retro needs Retro Plus).
+One `creators` collection. Each creator has a stable internal ID, `collection` (`regular`/`retro`), forum chat + topic ID, last content update, optional `retiredAt`, `rightsStatus`, and an inventory state.
+
+The public channel has **separate Regular and Retro messages**, each with its own **Actualiser — en activité / Actualiser — inactifs** button. Admin → Répertoire also has separate refresh actions; the daily synchronization covers both. The first synchronization after upgrading converts existing combined posts into Regular posts and creates the separate Retro posts. Each collection keeps its own message IDs, content hash, and retry checkpoints. Concurrent refreshes are serialized; refreshing one collection leaves the other collection's pending changes intact.
+
+Each message starts with “Voici la liste des créateurs toujours en activité que nous avons chez LA CONFRÉRIE” (Retro: “Voici la liste des créateurs qui ne sont plus en activité que nous avons chez LA CONFRÉRIE”) and a visible `https://t.me/<bot>?start=join` invitation link, so it can be copied or forwarded to invite people. Names are alphabetical, one linked name per line with a content count, e.g. `Aria (125)`. Dates, repeated tier labels and separate “Voir” links are omitted. Large lists split between complete creator rows, below 3,500 characters per message, with the invitation repeated on each chunk.
+
+Counts come from indexed content messages in the creator's **current forum/topic**, counting each album item once. A complete inventory displays `(125)`; an incomplete inventory displays `(125+)`; an unknown total displays `(?)`. Telegram's Bot API cannot fetch a topic's full history or report arbitrary manual message deletions, so these are inventory counts, not a live recount of Telegram history. Authorized uploads, approved contributions, completed imports, manual `/index_media`, and bot-managed import undo update the inventory. Use `/index_media` and `/attest_inventory` to account for older content. Empty, archived and retired creators are excluded.
+
+Members can filter **All / Regular / Retro** in the bot; All sends the two collections as distinct messages. The public directory contains only bot deep links; the protected topic link is given by `/start creator_<id>` **after** checking the tier (Retro needs Retro Plus).
 
 ### 14.4 Regular → Retro migration
 
@@ -643,7 +653,7 @@ Main menu → **➕ Contribute** → pick a creator → send photos/videos (albu
   * **Reject** → optional reason; nothing is published or granted; message references are purged (only a count is kept).
 * The reward is applied **only after the publication fully succeeded**. Partial publication → `needs review`, no reward until an admin verifies the topic and resolves it (the stored decision is then applied once). A failed publication can be retried safely.
 * Rewards live in the existing entitlement engine: one `contribution` entitlement **per scope** (Regular / Retro), `new_expiration = max(now, existing) + days`, never shortening anything, never touching Stars/complimentary entitlements or cancelling a subscription. One finalized reward per submission (ledger keyed by submission id; double clicks and concurrent approvals cannot duplicate it).
-* A contribution entitlement for a forum also includes **Wanted List + General Chat** and **voting/nomination eligibility** (complimentary stays excluded). Expiry uses the existing hourly reconciliation (removes only what is no longer authorized) and a ~3-day reminder is sent.
+* A contribution entitlement for a forum also includes **Wanted List + General Chat** and **voting/nomination eligibility** (other complimentary access stays excluded; older grants explicitly marked `content_contribution` also qualify). Expiry uses the existing hourly reconciliation (removes only what is no longer authorized) and a ~3-day reminder is sent.
 
 ### 15.2 New creator proposals
 Contribute → *Nouveau créateur*: name → optional profile URL → Regular/Retro → media → Finish. Similar names are flagged (contributor may switch to the existing creator). **Nothing is created until approval.** The admin can correct the name, switch classification, select an existing creator for a duplicate, and must explicitly **attest the creator identity and publication rights**. On approval the bot creates the forum topic in the chosen forum (the bot must be admin with *Manage topics*), registers the creator through the normal UG-02 path, publishes, and the daily directory sync picks it up. A retry reuses the created creator/topic.
@@ -653,7 +663,7 @@ Contribute → *Nouveau créateur*: name → optional profile URL → Regular/Re
 
 ### 15.4 Public discovery
 * Welcome menu (bot-managed post in `TELEGRAM_PUBLIC_WELCOME_CHAT_ID`) and a pinned info post in the **public lobby** `TELEGRAM_PUBLIC_LOBBY_CHAT_ID` (`LA CONFRÉRIE | ACCUEIL`). Buttons are plain URL buttons to official deep links `t.me/<bot>?start=explore|directory|regular|retro|how|contribute|join|rules`; Regular/Retro pages hand out a normal approval-gated join link **only** to members entitled to it. The lobby is informational and never access-controlled; it must differ from every private space (validated).
-* Public directory posts now carry navigation buttons (Explore · How to join · Contribute · Membership options), re-sent on every edit so daily updates keep them. Admin → Settings → Navigation publique: update welcome menu / directory buttons / synchronize all (hash-compared; unchanged content is not re-sent).
+* Public directory posts carry compact Join / Contribute buttons plus a collection-specific refresh button, re-sent on every edit so daily updates keep them. Admin → Settings → Navigation publique: update welcome menu / directory buttons / synchronize all (hash-compared; unchanged content is not re-sent).
 * **Telegram bots cannot create groups.** Create the lobby by hand, add the bot as admin (post, edit, pin), set the env vars, then synchronize (exact steps are shown in Navigation publique → Paramètres du groupe public).
 
 ### 15.5 Referrals (UG-06)
@@ -683,3 +693,13 @@ Main menu → **🏆 Classement** (also `t.me/<bot>?start=leaderboard`). Points 
 
 Tabs: **Ce mois** · **Total** · **Parrains** (people brought in). Members are **anonymous by default** (stable alias like `Anonyme-7K2Q`) and can opt in to show their name. Administrators and complimentary/admin-granted access never appear or earn points. The month's **#1 automatically receives +7 days of Regular access** once the month is over (once per month; admin switch in the same screen). Optional: set `TELEGRAM_LEADERBOARD_CHAT_ID` for a bot-managed, self-updating leaderboard post (bot must be admin there).
 
+
+### 15.8 Admin-managed wanted list (Liste recherchée)
+
+The member menu has two separate destinations: **Suggestions et votes** (existing community nominations and monthly voting) and **Liste recherchée** (content requests selected by administrators). No voting candidates or monthly supports are created when an admin adds a request.
+
+* **Administration → Gérer la liste recherchée → Ajouter:** enter the person's name, social profile link, then choose exactly **Créatrices** or **Amateurs**. These classes are independent of the Regular/Retro publication forums. Admins can edit all three fields, remove a person from the active list, and restore removed entries. Names are unique, and every write is validated, administrator-only, and audited.
+* Anyone can open **Liste recherchée**, `/recherches`, or `https://t.me/<bot>?start=recherches`, filter by class, browse pages, and tap **Voir la liste à jour**. The list is fetched from persistent storage on every opening/refresh. Names link to social profiles; each entry includes **Envoyer**, a shareable `https://t.me/<bot>?start=request_<id>` link.
+* **Envoyer** opens a private photo/video submission with the requested person's name, profile and class already filled in. Existing creators reuse their current topic; otherwise the submission is a new-creator proposal and creates nothing before approval. Admins see the wanted-list source/class/profile alongside the existing review actions. They confirm identity/rights and the destination forum for new creators, then approve with a chosen access reward, approve without reward, or reject. Rewards remain idempotent and are granted only after successful publication. Removing a request disables its link for new submissions while preserving pending submissions and their source snapshots.
+* Members whose active access was earned through approved content may suggest, support and vote without paying. Older complimentary grants explicitly marked **Contribution de contenu** (`metadata.reason = content_contribution`) also qualify; expired/revoked access and unrelated complimentary grants do not. Turnout counts distinct eligible users. Existing channel permissions are retained.
+* Vote buttons use the stable candidate position in the stored ballot so their callback data stays within Telegram's 64-byte limit. Legacy callback values remain accepted.

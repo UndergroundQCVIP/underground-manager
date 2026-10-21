@@ -8,3 +8,8 @@
 export function escapeMd(text: string): string {
   return text.replace(/([_*`\[\]])/g, "\\$1");
 }
+
+/** Encode link-destination delimiters without changing the URL's meaning. */
+export function escapeMdUrl(url: string): string {
+  return url.replace(/[()\\\[\]]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+}

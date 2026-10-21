@@ -25,7 +25,7 @@ import {
   saveImportJob,
   updateImportJob,
 } from "../db/imports.ts";
-import { recordMediaIndex } from "../db/media_index.ts";
+import { recordMediaIndex, removeMediaIndex } from "../db/media_index.ts";
 import { classifyTelegramError } from "../migration/service.ts";
 import { ImportJob } from "../types.ts";
 
@@ -385,6 +385,7 @@ export async function undoImport(api: ImportApiLike, jobId: string, adminId: num
     for (let i = 0; i < ids.length; i += BATCH) {
       const chunk = ids.slice(i, i + BATCH);
       await api.deleteMessages(j.destChatId, chunk);
+      await removeMediaIndex(j.creatorId, { chatId: j.destChatId, topicId: j.destTopicId }, chunk);
       deleted += chunk.length;
     }
   } catch (err) {

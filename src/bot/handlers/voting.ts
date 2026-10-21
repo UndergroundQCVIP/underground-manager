@@ -121,7 +121,8 @@ export async function handleOpenVote(ctx: any) {
   const kb = new InlineKeyboard();
 
   for (const c of shuffled) {
-    kb.text(`🗳️ Voter pour ${c.creatorName}`, `vote:sel:${ballot.id}:${c.candidateId}`).row();
+    // Two UUIDs exceed Telegram's 64-byte callback limit. Candidate order is stored on the ballot.
+    kb.text(`🗳️ Voter pour ${c.creatorName}`, `vote:sel:${ballot.id}:${ballot.candidates.indexOf(c)}`).row();
   }
   kb.text("⬅️ Menu principal", "member:home");
 
@@ -159,7 +160,7 @@ votingComposer.callbackQuery("vote:open", handleOpenVote);
 // Candidate Selection -> Confirmation Screen
 votingComposer.callbackQuery(/^vote:sel:([a-f0-9-]+):([a-f0-9-]+)$/, async (ctx) => {
   const ballotId = ctx.match[1];
-  const candidateId = ctx.match[2];
+  const choice = ctx.match[2];
 
   const ballot = await getBallot(ballotId);
   if (!ballot) {
@@ -167,14 +168,16 @@ votingComposer.callbackQuery(/^vote:sel:([a-f0-9-]+):([a-f0-9-]+)$/, async (ctx)
     return;
   }
 
-  const candidate = ballot.candidates.find((c) => c.candidateId === candidateId);
+  const candidate = /^\d+$/.test(choice)
+    ? ballot.candidates[Number(choice)]
+    : ballot.candidates.find((c) => c.candidateId === choice);
   if (!candidate) {
     await ctx.answerCallbackQuery({ text: "Candidat introuvable." });
     return;
   }
 
   const kb = new InlineKeyboard()
-    .text(`✅ Confirmer le vote : ${candidate.creatorName}`, `vote:exec:${ballotId}:${candidateId}`)
+    .text(`✅ Confirmer le vote : ${candidate.creatorName}`, `vote:exec:${ballotId}:${ballot.candidates.indexOf(candidate)}`)
     .row()
     .text("❌ Annuler / en choisir un autre", "vote:open");
 
@@ -194,9 +197,16 @@ votingComposer.callbackQuery(/^vote:sel:([a-f0-9-]+):([a-f0-9-]+)$/, async (ctx)
 votingComposer.callbackQuery(/^vote:exec:([a-f0-9-]+):([a-f0-9-]+)$/, async (ctx) => {
   const userId = ctx.from?.id;
   const ballotId = ctx.match[1];
-  const candidateId = ctx.match[2];
+  const choice = ctx.match[2];
 
   if (!userId) return;
+
+  const ballot = await getBallot(ballotId);
+  const candidateId = /^\d+$/.test(choice) ? ballot?.candidates[Number(choice)]?.candidateId : choice;
+  if (!candidateId) {
+    await ctx.answerCallbackQuery({ text: "Candidat introuvable.", show_alert: true });
+    return;
+  }
 
   const result = await castVote({ userId, ballotId, candidateId });
   if (!result.success) {

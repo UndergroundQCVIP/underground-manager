@@ -51,14 +51,13 @@ export async function submitCreatorNomination(
     return { success: false, isExistingCandidate: false, error: "Le nom du créateur est trop court." };
   }
 
-  // 1. Eligibility Check: Active PAYING subscriber required!
-  // Complimentary members cannot nominate or support by default.
+  // Active paid or content-earned access (including older content reward grants).
   const summary = await getMembershipSummary(userId);
   if (!summary.canParticipate) {
     return {
       success: false,
       isExistingCandidate: false,
-      error: "Seuls les abonnés payants actifs ou les membres ayant gagné leur accès par contribution peuvent suggérer des créateurs. Les membres ayant un accès gracieux ne sont pas admissibles aux suggestions.",
+      error: "Seuls les abonnés payants actifs ou les membres ayant gagné leur accès par contribution peuvent suggérer des créateurs. Les autres accès gracieux ne sont pas admissibles aux suggestions.",
     };
   }
 
@@ -267,12 +266,16 @@ export async function syncWantedListChannel(
     text += "\n";
   }
 
-  text += `💡 _Les membres payants peuvent suggérer et appuyer des créateurs en privé dans le robot._`;
+  text += `💡 _Les membres abonnés ou ayant gagné leur accès par contribution peuvent suggérer et appuyer des créateurs dans le robot._`;
 
   const options = {
     parse_mode: "Markdown",
     reply_markup: {
       inline_keyboard: [
+        [{
+          text: "🔎 Voir la liste recherchée des administrateurs",
+          url: `https://t.me/${config.BOT_USERNAME}?start=recherches`,
+        }],
         [
           {
             text: "🗳️ Ouvrir la Liste de souhaits dans le robot",

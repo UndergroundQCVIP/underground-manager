@@ -3,7 +3,7 @@
  */
 
 import { getKv } from "./kv.ts";
-import { DirectorySyncState } from "../types.ts";
+import { CollectionCategory, DirectoryCollectionState, DirectorySyncState } from "../types.ts";
 
 const DIRECTORY_STATE_KEY = ["directory_sync_state"];
 
@@ -24,6 +24,44 @@ export async function saveDirectorySyncState(
 ): Promise<void> {
   const kv = await getKv();
   await kv.set(DIRECTORY_STATE_KEY, state);
+}
+
+/** Checkpoint one collection without overwriting concurrent uploads or the other collection. */
+export async function checkpointDirectoryCollection(
+  collection: CollectionCategory,
+  patch: Partial<DirectoryCollectionState>,
+  completedSeq?: number
+): Promise<void> {
+  const kv = await getKv();
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const res = await kv.get<DirectorySyncState>(DIRECTORY_STATE_KEY);
+    const current = res.value ?? { publishedMessageIds: [], isDirty: true, dirtySeq: 0 };
+    const collections = { ...current.collections };
+    collections[collection] = {
+      publishedMessageIds: collection === "regular" && !current.collections
+        ? current.publishedMessageIds : [],
+      ...collections[collection],
+      ...patch,
+      ...(completedSeq !== undefined ? {
+        syncedSeq: completedSeq,
+        lastSyncAt: new Date().toISOString(),
+        lastError: undefined,
+      } : {}),
+    };
+    const slots = [collections.regular, collections.retro];
+    const next: DirectorySyncState = {
+      ...current,
+      collections,
+      publishedMessageIds: slots.flatMap((s) => s?.publishedMessageIds ?? []),
+      isDirty: slots.some((s) => !s || s.lastError || s.syncedSeq !== (current.dirtySeq ?? 0)),
+      lastSyncAt: completedSeq !== undefined ? new Date().toISOString() : current.lastSyncAt,
+      lastAttemptAt: new Date().toISOString(),
+      lastError: slots.find((s) => s?.lastError)?.lastError,
+    };
+    const commit = await kv.atomic().check(res).set(DIRECTORY_STATE_KEY, next).commit();
+    if (commit.ok) return;
+  }
+  throw new Error("Could not checkpoint directory collection (write conflict)");
 }
 
 /**
@@ -51,34 +89,4 @@ export async function markDirectoryDirty(): Promise<void> {
     if (commit.ok) return;
   }
   throw new Error("Could not mark the creator directory dirty (write conflict)");
-}
-
-/**
- * Records a completed sync. The dirty flag is only cleared if no change was
- * recorded since the sync started (`seqAtStart`).
- */
-export async function clearDirectoryDirty(
-  newContentHash: string,
-  publishedMessageIds: number[],
-  seqAtStart?: number,
-  newKey?: string
-): Promise<void> {
-  const kv = await getKv();
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const res = await kv.get<DirectorySyncState>(DIRECTORY_STATE_KEY);
-    const current = res.value;
-    const seqNow = current?.dirtySeq ?? 0;
-    const changedDuringSync = seqAtStart !== undefined && seqNow !== seqAtStart;
-    const state: DirectorySyncState = {
-      lastSyncAt: new Date().toISOString(),
-      lastContentHash: newContentHash,
-      publishedMessageIds,
-      isDirty: changedDuringSync,
-      dirtySeq: seqNow,
-      lastNewKey: newKey ?? current?.lastNewKey,
-    };
-    const commit = await kv.atomic().check(res).set(DIRECTORY_STATE_KEY, state).commit();
-    if (commit.ok) return;
-  }
-  throw new Error("Could not record directory sync state (write conflict)");
 }

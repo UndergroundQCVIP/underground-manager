@@ -4,8 +4,10 @@
  */
 
 import { getKv } from "./kv.ts";
+import { WantedRequestClass } from "../types.ts";
 
 export type AdminInputRequest =
+  | { type: "wanted_request"; nonce: string; field: "name" | "url" | "category"; entryId?: string; name?: string; profileUrl?: string; category?: WantedRequestClass }
   | { type: "custom_days"; contributionId: string }
   | { type: "rename_proposal"; contributionId: string }
   | { type: "reject_reason"; contributionId: string }
