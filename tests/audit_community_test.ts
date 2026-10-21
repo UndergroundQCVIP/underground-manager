@@ -230,7 +230,7 @@ Deno.test("AUDIT DIRECTORY — unchanged chunks are not re-posted; transient fai
   try {
     const api = new FlakyApi();
     // Enough creators to need more than one 3,500-char chunk
-    await makeCreators(Array.from({ length: 70 }, (_, i) => `Creator Number ${String(i).padStart(3, "0")} With A Long Name`));
+    await makeCreators(Array.from({ length: 100 }, (_, i) => `Creator Number ${String(i).padStart(3, "0")} With A Long Name`));
     const first = await syncPublicDirectory(api, true);
     assertEquals(first.updated, true);
     const chunkCount = api.sentMessages.length;
@@ -325,8 +325,8 @@ Deno.test("AUDIT DIRECTORY — recently added creators are flagged 🆕 in the f
 
     // the whole list is re-published (edited in place), with both names present
     const text = String(api.editedMessages.at(-1)?.text ?? api.sentMessages.at(-1)?.text);
-    assert(text.includes("[Alpha]") && text.includes("[Beta]"));
-    assert(text.includes("🆕 [Beta]"), "new creator is flagged");
+    assert(text.includes("Alpha") && text.includes("Beta"));
+    assert(text.includes("🆕 Beta"), "new creator is flagged");
 
     // once the 7-day window has passed the flag disappears on the next sync
     const k = await getKv();

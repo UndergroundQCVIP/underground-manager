@@ -54,7 +54,7 @@ Deno.test("RETRO — /register_creator retro registers an existing Retro topic a
     await syncPublicDirectory(api, true);
     const published = api.sentMessages.map((m) => m.text).join("\n");
     assertEquals(api.sentMessages.length, 2);
-    assertStringIncludes(published, "Voici la liste des créateurs *qui ne sont plus en activité*");
+    assertStringIncludes(published, "Voici la liste des créateurs qui ne sont plus en activité");
     assertStringIncludes(published, "Maya");
     assertStringIncludes(published, "Aria");
   } finally {

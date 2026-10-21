@@ -16,7 +16,7 @@ import { recoverPendingBonuses } from "../referrals/service.ts";
 import { awardMonthlyPrize, recalculatePoints } from "../points/service.ts";
 import { syncLeaderboardPost } from "../points/post.ts";
 import { getChatId } from "../access/spaces.ts";
-import { syncPublicDirectory } from "../directory/sync.ts";
+import { syncDirectoryIfNeeded, syncPublicDirectory } from "../directory/sync.ts";
 import { syncWantedListChannel } from "../wanted/service.ts";
 import { getActiveBallot } from "../db/voting.ts";
 import { closeAndFinalizeBallot, retryUnannouncedBallots } from "../voting/service.ts";
@@ -267,6 +267,11 @@ export function registerCronJobs(bot: Bot): void {
       console.log(
         `[Cron] Hourly job registered; daily sync runs at ${getDailySyncHour(getConfig())}:00 America/Toronto.`
       );
+
+      Deno.cron("LaConfrerie Directory Worker", "* * * * *", async () => {
+        const result = await syncDirectoryIfNeeded(bot.api);
+        if (result.error) console.error("[Directory worker]", result.error);
+      });
 
       // UG-04: continue approved, running Regular → Retro migrations in small, rate-limited steps.
       Deno.cron("LaConfrerie Migration Worker", "*/5 * * * *", async () => {
