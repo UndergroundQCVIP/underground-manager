@@ -13,7 +13,7 @@ import { indexMediaFromLinks, repairDirectory } from "../src/creators/admin.ts";
 import { getKv } from "../src/db/kv.ts";
 import { getDirectorySyncState } from "../src/db/directory.ts";
 
-Deno.test("UG04 DIRECTORY — Regular and Retro creators share ONE alphabetical directory with labels", async () => {
+Deno.test("UG04 DIRECTORY — Regular and Retro creators have separate compact alphabetical messages", async () => {
   const kv = await setupTestEnvironment();
   try {
     await seedCreator({ name: "Sophie", topicId: 1, collection: "regular", lastContentUpdatedAt: "2026-10-17T10:00:00Z" });
@@ -21,19 +21,18 @@ Deno.test("UG04 DIRECTORY — Regular and Retro creators share ONE alphabetical 
     await seedCreator({ name: "Aria", topicId: 3, collection: "regular", lastContentUpdatedAt: "2026-10-18T10:00:00Z" });
 
     const creators = await listCreators({ status: "active", hasContentOnly: true });
-    const text = buildDirectorySections(creators, "TestBot")[0];
-
-    assertStringIncludes(text, "LA CONFRÉRIE | RÉPERTOIRE DES CRÉATEURS");
-    assert(!/underground/i.test(text));
-    assertStringIncludes(text, "*Aria* — Regular — 18 oct. 2026");
-    assertStringIncludes(text, "*Maya* — Retro — 12 oct. 2026");
-    assertStringIncludes(text, "*Sophie* — Regular — 17 oct. 2026");
-    // Separate sections per forum, each alphabetical
-    assertStringIncludes(text, "RETRO — RETRO | LA CONFRÉRIE");
-    assertStringIncludes(text, "REGULAR — TOKEBEC VIP COLLECTIONS");
-    assert(text.indexOf("*Aria*") < text.indexOf("*Sophie*"));
-    assert(text.indexOf("*Sophie*") < text.indexOf("RETRO — RETRO"));
-    assert(text.indexOf("RETRO — RETRO") < text.indexOf("*Maya*"));
+    const sections = buildDirectorySections(creators, "TestBot");
+    assertEquals(sections.length, 2);
+    const [regular, retro] = sections;
+    assertStringIncludes(regular, "Voici la liste des créateurs *toujours en activité*");
+    assertStringIncludes(retro, "Voici la liste des créateurs *qui ne sont plus en activité*");
+    assertStringIncludes(regular, "https://t.me/TestBot?start=join");
+    assert(!/underground/i.test(regular));
+    assert(regular.indexOf("[Aria]") < regular.indexOf("[Sophie]"));
+    assert(!regular.includes("Maya"));
+    assertStringIncludes(retro, "[Maya]");
+    assert(!retro.includes("Aria") && !retro.includes("Sophie"));
+    assert(!regular.includes("oct. 2026"));
 
     // Filters
     const retroOnly = buildDirectorySections(creators, "TestBot", { collection: "retro" })[0];
@@ -51,7 +50,7 @@ Deno.test("UG04 DIRECTORY — Public directory exposes deep links only, never pr
   const kv = await setupTestEnvironment();
   try {
     const c = await seedCreator({ name: "Maya", topicId: 77, collection: "retro" });
-    const text = buildDirectorySections([c], "TestBot")[0];
+    const text = buildDirectorySections([c], "TestBot", { collection: "retro" })[0];
     assertStringIncludes(text, `https://t.me/TestBot?start=creator_${c.id}`);
     assert(!text.includes("t.me/c/"));
     assert(!text.includes("1001005")); // Retro forum chat id never appears
@@ -78,7 +77,7 @@ Deno.test("UG04 DIRECTORY — Daily synchronization covers both forums and detec
     assertEquals(second.updated, true);
     const published = [...api.editedMessages.map((m) => m.text), ...api.sentMessages.map((m) => m.text)].join("\n");
     assertStringIncludes(published, "Maya");
-    assertStringIncludes(published, "Retro");
+    assertStringIncludes(published, "qui ne sont plus en activité");
     assertEquals((await getDirectorySyncState()).isDirty, false);
   } finally {
     await kv.close();

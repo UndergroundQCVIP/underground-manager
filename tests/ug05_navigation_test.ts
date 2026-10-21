@@ -256,8 +256,8 @@ Deno.test("UG05 NAV — Directory posts carry navigation buttons on publish AND 
     const api = new MockTelegramApi();
     const c = await seedCreator({ name: "Aria", topicId: 1 });
     await syncPublicDirectory(api, true);
-    assertStringIncludes(JSON.stringify(api.sentMessages[0].options), "Comment adhérer");
-    for (const label of ["Explorer LA CONFRÉRIE", "Comment adhérer", "Contribuer du contenu", "Options d'adhésion"]) {
+    assertStringIncludes(JSON.stringify(api.sentMessages[0].options), "dir:refresh:regular");
+    for (const label of ["Rejoindre", "Contribuer", "Actualiser — en activité"]) {
       assertStringIncludes(JSON.stringify(api.sentMessages[0].options), label);
     }
 
@@ -265,7 +265,7 @@ Deno.test("UG05 NAV — Directory posts carry navigation buttons on publish AND 
     await seedCreator({ name: "Maya", topicId: 2, collection: "retro" });
     await syncPublicDirectory(api);
     assertEquals(api.editedMessages.length >= 1, true);
-    assertStringIncludes(JSON.stringify(api.editedMessages.at(-1)!.options), "Options d'adhésion");
+    assertStringIncludes(JSON.stringify(api.editedMessages.at(-1)!.options), "dir:refresh:retro");
     assertStringIncludes(api.editedMessages.at(-1)!.text, "Maya");
 
     // "Update Directory Buttons" re-applies the keyboard without republishing the directory

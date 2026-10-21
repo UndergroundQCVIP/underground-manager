@@ -1,19 +1,20 @@
 /**
  * LA CONFRÉRIE — Public Creator Directory Synchronization
- * Maintains ONE pinned, alphabetically sorted listing of Regular and Retro creators.
+ * Maintains separate, compact Regular and Retro listings with independent refreshes.
  */
 
 import { getClubName, getConfig } from "../config.ts";
 import { creatorCollection, listCreators } from "../db/creators.ts";
 import {
-  clearDirectoryDirty,
+  checkpointDirectoryCollection,
   getDirectorySyncState,
-  saveDirectorySyncState,
 } from "../db/directory.ts";
 import { logAuditEvent } from "../db/audit.ts";
 import { CollectionCategory, Creator } from "../types.ts";
 import { escapeMd } from "../util/markdown.ts";
 import { directoryNavKeyboard } from "../navigation/service.ts";
+import { listMediaIndex } from "../db/media_index.ts";
+import { getKv } from "../db/kv.ts";
 import { formatTorontoDate } from "../util/time.ts";
 import { isMessageGone, isMessageNotModified, sha256Hex } from "../wanted/service.ts";
 
@@ -56,8 +57,8 @@ export function newCreatorsKey(creators: Creator[], now: Date = new Date()): str
 }
 
 export const COLLECTION_LABELS: Record<CollectionCategory, string> = {
-  regular: "Regular",
-  retro: "Retro",
+  regular: "toujours en activité",
+  retro: "qui ne sont plus en activité",
 };
 
 /** Creators past an optional retirement date are no longer listed publicly. */
@@ -65,88 +66,54 @@ export function isRetired(c: Creator, nowMs = Date.now()): boolean {
   return !!c.retiredAt && new Date(c.retiredAt).getTime() <= nowMs;
 }
 
+/** Count unique indexed messages in the creator's CURRENT topic (never the old migration source). */
+export async function directoryContentCounts(creators: Creator[]): Promise<Map<string, number>> {
+  return new Map(await Promise.all(creators.map(async (c) => [
+    c.id,
+    (await listMediaIndex(c.id, { chatId: c.chatId, topicId: c.topicId })).length,
+  ] as const)));
+}
+
 export function buildDirectorySections(
   allCreators: Creator[],
   botUsername: string,
-  optsOrNow: { collection?: CollectionCategory } | Date = {},
+  optsOrNow: { collection?: CollectionCategory; contentCounts?: ReadonlyMap<string, number> } | Date = {},
   nowArg?: Date
 ): string[] {
   const opts = optsOrNow instanceof Date ? {} : optsOrNow;
   const now = optsOrNow instanceof Date ? optsOrNow : nowArg ?? new Date();
-  const club = getClubName();
   const creators = allCreators
-    .filter((c) => !isRetired(c, now.getTime()))
-    .filter((c) => !opts.collection || creatorCollection(c) === opts.collection)
+    .filter((c) => c.status === "active" && c.hasContent && !isRetired(c, now.getTime()))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
-
-  if (creators.length === 0) {
-    return [
-      `💎 *${club} | RÉPERTOIRE DES CRÉATEURS*\n\n` +
-      `_Aucune collection publique n'est disponible actuellement._\n` +
-      `_De nouvelles collections sont ajoutées régulièrement par nos conservateurs._`,
-    ];
-  }
-
-  const anyNew = creators.some((c) => isNewCreator(c, now));
-  const nowFormatted = formatTorontoDate(now, {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
-
-  const filterNote = opts.collection ? ` — ${COLLECTION_LABELS[opts.collection]} seulement` : "";
-  let currentChunk =
-    `💎 *${club} | RÉPERTOIRE DES CRÉATEURS*${filterNote}\n` +
-    `📅 *Répertoire mis à jour :* ${nowFormatted}\n` +
-    `🔒 _Ouvrez le robot ${club} pour vérifier votre accès_\n` +
-    (anyNew ? `🆕 _= ajout récent (${NEW_CREATOR_DAYS} derniers jours)_\n` : "") +
-    `\n`;
-
+  const categories: CollectionCategory[] = opts.collection ? [opts.collection] : ["regular", "retro"];
   const chunks: string[] = [];
-  const push = (block: string) => {
-    // Keep each Telegram message under the safe chunk size
-    if (currentChunk.length + block.length > 3500) {
-      chunks.push(currentChunk.trim());
-      currentChunk = `💎 *${club} | RÉPERTOIRE DES CRÉATEURS (suite)*\n\n${block}`;
-    } else {
-      currentChunk += block;
-    }
-  };
-
-  // One section per forum, each alphabetical (A–Z) and labelled
-  const sections: { collection: CollectionCategory; heading: string }[] = [
-    { collection: "regular", heading: `📚 *REGULAR — TOKEBEC VIP COLLECTIONS*` },
-    { collection: "retro", heading: `🎞️ *RETRO — RETRO | ${club}*` },
-  ];
-  for (const section of sections) {
-    const inSection = creators.filter((c) => creatorCollection(c) === section.collection);
-    if (inSection.length === 0) continue;
-
-    push(`${section.heading} (${inSection.length})\n\n`);
-
-    const grouped: Record<string, Creator[]> = {};
-    for (const c of inSection) {
-      const first = (c.name.normalize("NFD")[0] || "#").toUpperCase();
-      const letter = /[A-Z]/.test(first) ? first : "#";
-      (grouped[letter] ??= []).push(c);
-    }
-    for (const letter of Object.keys(grouped).sort()) {
-      let sectionText = `*${letter}*\n`;
-      for (const c of grouped[letter]) {
-        const updateStr = formatCreatorDate(c.lastContentUpdatedAt);
-        const deepLink = `https://t.me/${botUsername}?start=creator_${c.id}`;
-        const label = COLLECTION_LABELS[creatorCollection(c)];
-        const badge = isNewCreator(c, now) ? "🆕 " : "• ";
-        sectionText += `${badge}*${escapeMd(c.name)}* — ${label} — ${updateStr} [🔍 Voir](${deepLink})\n`;
+  for (const collection of categories) {
+    const listed = creators.filter((c) => creatorCollection(c) === collection);
+    const countLabel = (c: Creator): string => {
+      const count = opts.contentCounts?.get(c.id);
+      if (count === undefined || (count === 0 && c.inventoryStatus !== "complete")) return "?";
+      return `${count}${c.inventoryStatus === "complete" ? "" : "+"}`;
+    };
+    const partial = listed.some((c) => /[+?]/.test(countLabel(c)));
+    const header =
+      `Voici la liste des créateurs *${COLLECTION_LABELS[collection]}* que nous avons chez ${escapeMd(getClubName())}.\n` +
+      `Pour rejoindre la plateforme : https://t.me/${botUsername}?start=join\n` +
+      (partial ? `(? = total inconnu ; + = inventaire partiel)\n` : "") +
+      (listed.some((c) => isNewCreator(c, now)) ? `🆕 = ajout récent\n` : "") + `\n`;
+    let chunk = header;
+    if (!listed.length) chunk += `Aucun créateur disponible pour le moment.\n`;
+    for (const c of listed) {
+      const link = `https://t.me/${botUsername}?start=creator_${c.id}`;
+      const row = `${isNewCreator(c, now) ? "🆕 " : ""}[${escapeMd(c.name)}](${link}) (${countLabel(c)})\n`;
+      // Split by creator, even when hundreds of names start with the same letter.
+      if (chunk.length + row.length > 3500) {
+        chunks.push(chunk.trim());
+        chunk = header;
       }
-      push(sectionText + "\n");
+      chunk += row;
     }
+    chunks.push(chunk.trim());
   }
-
-  if (currentChunk.trim().length > 0) {
-    chunks.push(currentChunk.trim());
-  }
-
   return chunks;
 }
 
@@ -161,140 +128,128 @@ export interface SyncDirectoryResult {
   error?: string;
 }
 
+/** Refresh just one collection, or both for the scheduled synchronization. */
 export async function syncPublicDirectory(
   api: DirectoryApiLike,
-  force = false
+  force = false,
+  collection?: CollectionCategory
+): Promise<SyncDirectoryResult> {
+  if (!getConfig().PUBLIC_DIRECTORY_CHAT_ID) {
+    return { updated: false, publishedCount: 0, reason: "channel_not_configured" };
+  }
+  // Serialize public refresh buttons and cron so simultaneous clicks cannot create duplicate posts.
+  const kv = await getKv();
+  const key = ["directory_sync_lease"];
+  const lease = await kv.get<string>(key);
+  if (lease.value) return { updated: false, publishedCount: 0, reason: "sync_in_progress" };
+  const token = crypto.randomUUID();
+  if (!(await kv.atomic().check(lease).set(key, token, { expireIn: 300_000 }).commit()).ok) {
+    return { updated: false, publishedCount: 0, reason: "sync_in_progress" };
+  }
+  try {
+    const state = await getDirectorySyncState();
+    // Upgrade the legacy combined posts once, reusing their IDs for Regular.
+    const migrating = !state.collections && state.publishedMessageIds.length > 0;
+    const categories: CollectionCategory[] = collection && !migrating ? [collection] : ["regular", "retro"];
+    let publishedCount = 0;
+    let updated = false;
+    let reason = "not_dirty";
+    const errors: string[] = [];
+    for (const category of categories) {
+      const result = await syncCollection(api, force, category);
+      if (result.error) errors.push(`${COLLECTION_LABELS[category]}: ${result.error}`);
+      publishedCount += result.publishedCount;
+      updated ||= result.updated;
+      reason = result.reason ?? reason;
+    }
+    if (errors.length) return { updated: false, publishedCount, error: errors.join("; ") };
+    return { updated, publishedCount, ...(updated ? {} : { reason }) };
+  } finally {
+    const current = await kv.get<string>(key);
+    if (current.value === token) await kv.atomic().check(current).delete(key).commit();
+  }
+}
+
+async function syncCollection(
+  api: DirectoryApiLike,
+  force: boolean,
+  collection: CollectionCategory
 ): Promise<SyncDirectoryResult> {
   const config = getConfig();
   const channelId = config.PUBLIC_DIRECTORY_CHAT_ID;
-
-  if (!channelId) {
-    return { updated: false, publishedCount: 0, reason: "channel_not_configured" };
-  }
-
-  const syncState = await getDirectorySyncState();
-
-  const seqAtStart = syncState.dirtySeq ?? 0;
-
-  // Fetch only active creators with confirmed media content
-  const creators = await listCreators({
-    status: "active",
-    hasContentOnly: true,
-  });
-  const newKey = newCreatorsKey(creators);
-
-  // Skip (no Telegram calls) unless forced, changed, or a 🆕 flag has just expired.
-  if (!force && !syncState.isDirty && (syncState.lastNewKey ?? "") === newKey) {
+  const state = await getDirectorySyncState();
+  const slot = state.collections?.[collection];
+  const seqAtStart = state.dirtySeq ?? 0;
+  const creators = await listCreators({ status: "active", hasContentOnly: true, collection });
+  const newKey = `${newCreatorsKey(creators)}|${creators.filter((c) => !isRetired(c)).map((c) => c.id).sort().join(",")}`;
+  if (!force && slot && slot.syncedSeq === seqAtStart && slot.lastNewKey === newKey && !slot.lastError) {
     return { updated: false, publishedCount: 0, reason: "not_dirty" };
   }
-
-  const chunks = buildDirectorySections(creators, config.BOT_USERNAME);
-  // Hash the creator-driven content, not the "Updated: <today>" header, so a
-  // day passing never by itself triggers an edit.
-  const contentHash = await computeContentHash(
-    chunks.map((c) => c.replace(/📅 \*Répertoire mis à jour :\*[^\n]*\n/, ""))
-  );
-
-  if (!force && syncState.lastContentHash === contentHash) {
-    // Content is identical, clear dirty flag and skip editing
-    await clearDirectoryDirty(contentHash, syncState.publishedMessageIds, seqAtStart, newKey);
+  const chunks = buildDirectorySections(creators, config.BOT_USERNAME, {
+    collection,
+    contentCounts: await directoryContentCounts(creators),
+  });
+  const contentHash = await computeContentHash(chunks);
+  const existingIds = slot?.publishedMessageIds ??
+    (collection === "regular" && !state.collections ? state.publishedMessageIds : []);
+  if (!force && slot?.lastContentHash === contentHash && !slot.lastError) {
+    await checkpointDirectoryCollection(collection, { lastContentHash: contentHash, lastNewKey: newKey }, seqAtStart);
     return { updated: false, publishedCount: 0, reason: "content_identical" };
   }
 
   const publishedIds: number[] = [];
-  const existingIds = syncState.publishedMessageIds || [];
-
   try {
     for (let i = 0; i < chunks.length; i++) {
-      const chunkText = chunks[i];
-      // The navigation keyboard is re-sent with every edit: editing a message without
-      // a reply_markup would otherwise strip its buttons on the daily update.
       const options = {
         parse_mode: "Markdown",
-        disable_web_page_preview: true,
-        reply_markup: directoryNavKeyboard(),
+        link_preview_options: { is_disabled: true },
+        reply_markup: directoryNavKeyboard(collection),
       };
-
       if (i < existingIds.length) {
-        const msgId = existingIds[i];
         try {
-          await api.editMessageText(channelId, msgId, chunkText, options);
-          publishedIds.push(msgId);
+          await api.editMessageText(channelId, existingIds[i], chunks[i], options);
+          publishedIds.push(existingIds[i]);
         } catch (err) {
-          if (isMessageNotModified(err)) {
-            publishedIds.push(msgId); // already shows exactly this text
-          } else if (isMessageGone(err)) {
-            // Only a message that no longer exists is replaced. Any other failure
-            // (rate limit, network) aborts so a retry cannot post duplicates.
-            const newMsg = await api.sendMessage(channelId, chunkText, options);
-            publishedIds.push(newMsg.message_id);
-          } else {
-            throw err;
-          }
+          if (isMessageNotModified(err)) publishedIds.push(existingIds[i]);
+          else if (isMessageGone(err)) {
+            publishedIds.push((await api.sendMessage(channelId, chunks[i], options)).message_id);
+          } else throw err;
         }
       } else {
-        const newMsg = await api.sendMessage(channelId, chunkText, options);
-        publishedIds.push(newMsg.message_id);
+        publishedIds.push((await api.sendMessage(channelId, chunks[i], options)).message_id);
+      }
+      // Persist after each send/edit, so a failed later chunk never duplicates earlier sends.
+      await checkpointDirectoryCollection(collection, {
+        publishedMessageIds: [...publishedIds, ...existingIds.slice(publishedIds.length)],
+      });
+    }
+    for (const id of existingIds.slice(chunks.length)) {
+      if (api.deleteMessage) {
+        try { await api.deleteMessage(channelId, id); }
+        catch (err) {
+          if (!isMessageGone(err) && !String(err).toLowerCase().includes("message to delete not found")) throw err;
+        }
       }
     }
-
-    // Remove stale trailing messages left over when the directory shrank.
-    if (api.deleteMessage) {
-      for (const staleId of existingIds.slice(chunks.length)) {
-        try {
-          await api.deleteMessage(channelId, staleId);
-        } catch { /* already gone */ }
-      }
+    if (publishedIds[0] !== existingIds[0]) {
+      await api.pinChatMessage(channelId, publishedIds[0]).catch(() => {});
     }
-
-    // Pin only when the first message changed: every pin posts a service message.
-    if (publishedIds.length > 0 && publishedIds[0] !== existingIds[0]) {
-      try {
-        await api.pinChatMessage(channelId, publishedIds[0]);
-      } catch {
-        // Non-critical if bot lacks pin permission
-      }
-    }
-
-    await clearDirectoryDirty(contentHash, publishedIds, seqAtStart, newKey);
-
-    await logAuditEvent(
-      "directory_synced",
-      {
-        creatorsCount: creators.length,
-        messageChunks: publishedIds.length,
-        channelId,
-      },
-      0
-    );
-
+    await checkpointDirectoryCollection(collection, {
+      publishedMessageIds: publishedIds,
+      lastContentHash: contentHash,
+      lastNewKey: newKey,
+    }, seqAtStart);
+    await logAuditEvent("directory_synced", {
+      collection, creatorsCount: creators.length, messageChunks: publishedIds.length, channelId,
+    }, 0);
     return { updated: true, publishedCount: publishedIds.length };
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error("Directory synchronization failed:", errorMsg);
-    // Surface the failure to administrators (Répertoire menu) instead of failing silently.
-    await saveDirectorySyncState({
-      ...(await getDirectorySyncState()),
-      lastAttemptAt: new Date().toISOString(),
-      lastError: errorMsg.slice(0, 300),
-    }).catch(() => {});
-    // Keep any messages created before the failure so the retry edits them
-    // instead of posting a second copy.
-    if (publishedIds.length > 0) {
-      const merged = [...publishedIds, ...existingIds.slice(publishedIds.length)];
-      await clearDirectoryDirtyKeepDirty(syncState, merged).catch(() => {});
-    }
-    return {
-      updated: false,
-      publishedCount: 0,
-      error: errorMsg,
-    };
+    const error = err instanceof Error ? err.message : String(err);
+    console.error(`Directory synchronization failed (${collection}):`, error);
+    await checkpointDirectoryCollection(collection, {
+      publishedMessageIds: [...publishedIds, ...existingIds.slice(publishedIds.length)],
+      lastError: error.slice(0, 300),
+    });
+    return { updated: false, publishedCount: 0, error };
   }
-}
-
-async function clearDirectoryDirtyKeepDirty(
-  state: Awaited<ReturnType<typeof getDirectorySyncState>>,
-  messageIds: number[]
-): Promise<void> {
-  await saveDirectorySyncState({ ...state, publishedMessageIds: messageIds, isDirty: true });
 }

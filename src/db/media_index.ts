@@ -11,11 +11,13 @@
 
 import { getKv } from "./kv.ts";
 import { MediaIndexEntry } from "../types.ts";
+import { markDirectoryDirty } from "./directory.ts";
 
 export async function recordMediaIndex(entry: MediaIndexEntry): Promise<void> {
   const kv = await getKv();
   // Numeric key part => KV iterates in ascending message-ID order.
   await kv.set(["media_index", entry.creatorId, entry.messageId], entry);
+  await markDirectoryDirty();
 }
 
 export async function listMediaIndex(
@@ -31,6 +33,24 @@ export async function listMediaIndex(
     out.push(v);
   }
   return out.sort((a, b) => a.messageId - b.messageId);
+}
+
+/** Keep directory counts in sync when the bot itself removes published copies. */
+export async function removeMediaIndex(
+  creatorId: string,
+  location: { chatId: number; topicId: number },
+  messageIds: number[]
+): Promise<void> {
+  const kv = await getKv();
+  for (const id of messageIds) {
+    const entry = await kv.get<MediaIndexEntry>(["media_index", creatorId, id]);
+    if (entry.value?.chatId === location.chatId && entry.value.topicId === location.topicId) {
+      if (!(await kv.atomic().check(entry).delete(entry.key).commit()).ok) {
+        throw new Error("Media inventory changed during removal; retry the operation");
+      }
+    }
+  }
+  await markDirectoryDirty();
 }
 
 export async function countMediaIndex(creatorId: string): Promise<number> {

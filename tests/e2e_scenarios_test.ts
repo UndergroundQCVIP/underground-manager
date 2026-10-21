@@ -355,8 +355,10 @@ Deno.test("E2E D — Creator topic, multiple uploads, one daily directory update
     const first = await runDailyIfDue(tg.bot, noonUtc);
     assertEquals(first.ran, true);
     const posted = tg.callsOf("sendMessage").filter((c) => c.payload.chat_id === MOCK_CONFIG.PUBLIC_DIRECTORY_CHAT_ID);
-    assertEquals(posted.length, 1, "exactly one directory post");
+    assertEquals(posted.length, 2, "one post per collection");
     assert(String(posted[0].payload.text).includes("Anna\\_Lee"), "name is markdown-escaped");
+    assert(String(posted[0].payload.text).includes("(4)"), "all four media messages are counted");
+    assert(String(posted[1].payload.text).includes("*qui ne sont plus en activité*"));
 
     // Same day again, and an hourly tick with nothing new: no Telegram traffic at all
     tg.reset();
@@ -364,8 +366,7 @@ Deno.test("E2E D — Creator topic, multiple uploads, one daily directory update
     assertEquals(tg.calls.filter((c) => c.payload.chat_id === MOCK_CONFIG.PUBLIC_DIRECTORY_CHAT_ID).length, 0);
     assertEquals((await getDirectorySyncState()).isDirty, false);
 
-    // A new upload that changes the displayed date -> one EDIT of the existing post,
-    // never a second post (an upload that leaves the public text unchanged is skipped).
+    // Another upload changes the count: edit only the existing Regular post.
     await tg.send(forumMessage(VIP, ADMIN, 501, "photo", { date: Math.floor((Date.now() + 2 * DAY) / 1000) }));
     const nextDay = new Date(noonUtc.getTime() + DAY);
     tg.reset();

@@ -60,7 +60,7 @@ Deno.test("UG04 BRAND — Member and admin menus match the contract", async () =
   const kv = await setupTestEnvironment();
   try {
     const member = menuLabels(mainMenuKeyboard(true, false, "regular")).join("|");
-    for (const label of ["Mon abonnement", "Forfaits d'adhésion", "Répertoire des créateurs", "Liste de souhaits", "Clavardage général", "Aide et soutien", "Contribuer"]) {
+    for (const label of ["Mon abonnement", "Forfaits d'adhésion", "Répertoire des créateurs", "Suggestions et votes", "Liste recherchée", "Clavardage général", "Aide et soutien", "Contribuer"]) {
       assertStringIncludes(member, label);
     }
     // Regular members see the upgrade option; Retro Plus members do not.

@@ -193,14 +193,14 @@ Deno.test("UG04 ROUTING — Regular checkout builds a Regular invoice; Regular s
   }
 });
 
-Deno.test("UG04 ROUTING — Unified directory filters respond for members", async () => {
+Deno.test("UG04 ROUTING — Separate directory messages and filters respond for members", async () => {
   const kv = await setupTestEnvironment();
   try {
     await seedCreator({ name: "Aria", topicId: 1, collection: "regular" });
     await seedCreator({ name: "Maya", topicId: 2, collection: "retro" });
     const { bot, calls } = makeBot();
     await bot.handleUpdate(cb(5400, "dir:all") as never);
-    let t = texts(calls, "editMessageText").join("\n");
+    let t = [...texts(calls, "editMessageText"), ...texts(calls, "sendMessage")].join("\n");
     assertStringIncludes(t, "Aria");
     assertStringIncludes(t, "Maya");
 

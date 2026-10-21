@@ -33,7 +33,8 @@ import { listContributionRewards, scopesLabel, fmtDay, validateRewardParams } fr
 import { contributionRewardsEnabled } from "../../membership/mode.ts";
 import { getReferralOf } from "../../db/referrals.ts";
 import { referralBonusDays } from "../../referrals/service.ts";
-import { Contribution, ContributionStatus, CollectionCategory } from "../../types.ts";
+import { Contribution, ContributionStatus, CollectionCategory, WANTED_REQUEST_CLASSES } from "../../types.ts";
+import { escapeMdUrl } from "../../util/markdown.ts";
 
 export const contributeComposer = new Composer();
 
@@ -47,6 +48,8 @@ const mdEsc = (t: string) => t.replace(/([_*`\[])/g, "\\$1");
 /** "➕ Contribuer": choose between an existing creator and a new one (menu or deep link). */
 export async function contributeChooser(ctx: Context): Promise<void> {
   const kb = new InlineKeyboard()
+    .text("🔎 Personnes recherchées", "wreq:menu")
+    .row()
     .text("👩‍🎤 Créateur existant", "contrib:existing")
     .row()
     .text("✨ Nouveau créateur", "contrib:new")
@@ -411,6 +414,11 @@ async function renderReview(c: Contribution): Promise<{ text: string; kb: Inline
     `📥 *Contribution* ${STATUS_ICON[c.status]} ${c.status.replace(/_/g, " ")}\n` +
     `*Contributeur :* \`${c.userId}\`\n*Éléments :* ${c.itemCount ?? c.items.length}\n` +
     ((await getReferralOf(c.userId)) ? `*Parrainé par :* \`${(await getReferralOf(c.userId))!.referrerId}\`\n` : "");
+
+  if (c.wantedRequest) {
+    text += `*Source :* Liste recherchée — ${WANTED_REQUEST_CLASSES[c.wantedRequest.category]}\n` +
+      `[Profil recherché](${escapeMdUrl(c.wantedRequest.profileUrl)})\n`;
+  }
 
   if (isNew && c.proposal) {
     const p = c.proposal;

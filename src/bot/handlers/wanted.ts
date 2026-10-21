@@ -36,6 +36,8 @@ export function wantedMenuKeyboard(hasActiveVote: boolean): InlineKeyboard {
 
   kb.text("📊 Résultats précédents", "wanted:results")
     .row()
+    .text("🔎 Liste recherchée des administrateurs", "wreq:menu")
+    .row()
     .text("⬅️ Menu principal", "member:home");
 
   return kb;

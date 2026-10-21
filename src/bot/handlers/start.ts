@@ -39,6 +39,14 @@ startComposer.command("start", async (ctx) => {
   const summary = await getMembershipSummary(userId);
   const mode = await getMembershipMode();
 
+  // Admin-managed requests have their own links; legacy wanted links still open voting suggestions.
+  if (match === "recherches" || match?.startsWith("request_")) {
+    const { showWantedRequestList, showWantedRequestSubmission } = await import("./wanted_requests.ts");
+    if (match === "recherches") await showWantedRequestList(ctx);
+    else await showWantedRequestSubmission(ctx, match.slice("request_".length));
+    return;
+  }
+
   // 0. Public navigation deep links (welcome menu / lobby / directory buttons)
   if (match && (NAV_PAGES as readonly string[]).includes(match)) {
     if (match === "leaderboard") {

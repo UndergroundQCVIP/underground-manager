@@ -738,7 +738,9 @@ adminComposer.callbackQuery("admin:sync_dir_menu", async (ctx) => {
     {
       parse_mode: "Markdown",
       reply_markup: new InlineKeyboard()
-        .text("🔄 Synchroniser le répertoire public maintenant", "admin:sync_dir")
+        .text("🔄 Actualiser — en activité", "admin:sync_dir:regular")
+        .row()
+        .text("🔄 Actualiser — inactifs", "admin:sync_dir:retro")
         .row()
         .text("🛠️ Réparer le répertoire", "admin:repair_dir")
         .row()
@@ -766,13 +768,15 @@ adminComposer.callbackQuery("admin:plans", async (ctx) => {
 });
 
 // Trigger Public Directory Sync
-adminComposer.callbackQuery("admin:sync_dir", async (ctx) => {
+adminComposer.callbackQuery(/^admin:sync_dir(?::(regular|retro))?$/, async (ctx) => {
   const { syncPublicDirectory } = await import("../../directory/sync.ts");
-  await ctx.answerCallbackQuery({ text: "Synchronisation du répertoire public des créateurs..." });
+  const collection = ctx.match[1] as "regular" | "retro" | undefined;
+  const label = collection === "regular" ? "des créateurs en activité" : collection === "retro" ? "des créateurs qui ne sont plus en activité" : "public";
+  await ctx.answerCallbackQuery({ text: `Synchronisation du répertoire ${label}...` });
 
-  const result = await syncPublicDirectory(ctx.api, true);
+  const result = await syncPublicDirectory(ctx.api, true, collection);
   if (result.updated) {
-    await ctx.reply(`✅ *Répertoire public synchronisé!*\n${result.publishedCount} message(s) publié(s) ou mis à jour.`, {
+    await ctx.reply(`✅ *Répertoire ${label} synchronisé!*\n${result.publishedCount} message(s) publié(s) ou mis à jour.`, {
       parse_mode: "Markdown",
       reply_markup: new InlineKeyboard().text("⬅️ Menu des créateurs", "admin:creators_menu"),
     });

@@ -325,8 +325,8 @@ Deno.test("AUDIT DIRECTORY — recently added creators are flagged 🆕 in the f
 
     // the whole list is re-published (edited in place), with both names present
     const text = String(api.editedMessages.at(-1)?.text ?? api.sentMessages.at(-1)?.text);
-    assert(text.includes("*Alpha*") && text.includes("*Beta*"));
-    assert(text.includes("🆕 *Beta*"), "new creator is flagged");
+    assert(text.includes("[Alpha]") && text.includes("[Beta]"));
+    assert(text.includes("🆕 [Beta]"), "new creator is flagged");
 
     // once the 7-day window has passed the flag disappears on the next sync
     const k = await getKv();

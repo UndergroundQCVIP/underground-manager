@@ -6,8 +6,9 @@
  *  - a pinned information message in the public lobby group,
  *  - a navigation keyboard on the public creator directory posts.
  *
- * All buttons are plain URL buttons to official bot deep links
+ * Welcome/lobby buttons are plain URL buttons to official bot deep links
  * (https://t.me/<bot>?start=<page>), which work on mobile and desktop.
+ * Each directory post also has a callback to refresh its own collection.
  * Nothing here ever contains a private invitation link or member data.
  */
 
@@ -17,7 +18,7 @@ import { membershipMethods } from "../bot/messages.ts";
 import { getNavigationState, saveNavigationState } from "../db/navigation.ts";
 import { getDirectorySyncState } from "../db/directory.ts";
 import { isMessageGone, isMessageNotModified, sha256Hex } from "../wanted/service.ts";
-import { MembershipMode } from "../types.ts";
+import { CollectionCategory, MembershipMode } from "../types.ts";
 
 export type NavPage = "explore" | "directory" | "regular" | "retro" | "how" | "contribute" | "join" | "rules" | "leaderboard";
 export const NAV_PAGES: readonly NavPage[] = [
@@ -29,6 +30,9 @@ export interface UrlButton {
   url: string;
 }
 export type UrlKeyboard = { inline_keyboard: UrlButton[][] };
+export type DirectoryKeyboard = {
+  inline_keyboard: (UrlButton | { text: string; callback_data: string })[][];
+};
 
 export function botLink(page: NavPage): string {
   return `https://t.me/${getConfig().BOT_USERNAME}?start=${page}`;
@@ -56,11 +60,11 @@ export function welcomeKeyboard(): UrlKeyboard {
 }
 
 /** Navigation keyboard attached to every public directory post. */
-export function directoryNavKeyboard(): UrlKeyboard {
+export function directoryNavKeyboard(collection?: CollectionCategory): DirectoryKeyboard {
   return {
     inline_keyboard: [
-      [{ text: "🧭 Explorer LA CONFRÉRIE", url: exploreUrl() }, { text: "❓ Comment adhérer", url: botLink("how") }],
-      [{ text: "➕ Contribuer du contenu", url: botLink("contribute") }, { text: "💎 Options d'adhésion", url: botLink("join") }],
+      [{ text: "💎 Rejoindre", url: botLink("join") }, { text: "➕ Contribuer", url: botLink("contribute") }],
+      ...(collection ? [[{ text: `🔄 Actualiser — ${collection === "regular" ? "en activité" : "inactifs"}`, callback_data: `dir:refresh:${collection}` }]] : []),
     ],
   };
 }
@@ -175,11 +179,14 @@ export async function syncDirectoryButtons(
   const dir = await getDirectorySyncState();
   if (!api.editMessageReplyMarkup || dir.publishedMessageIds.length === 0) return { outcome: "unchanged" };
 
-  const markup = directoryNavKeyboard();
-  const hash = await sha256Hex(JSON.stringify([markup, dir.publishedMessageIds]));
+  const posts = dir.collections
+    ? (["regular", "retro"] as const).flatMap((collection) =>
+      (dir.collections?.[collection]?.publishedMessageIds ?? []).map((id) => ({ id, markup: directoryNavKeyboard(collection) })))
+    : dir.publishedMessageIds.map((id) => ({ id, markup: directoryNavKeyboard() }));
+  const hash = await sha256Hex(JSON.stringify(posts));
   if (!force && (await getNavigationState()).directoryKeyboardHash === hash) return { outcome: "unchanged" };
   try {
-    for (const id of dir.publishedMessageIds) {
+    for (const { id, markup } of posts) {
       try {
         await api.editMessageReplyMarkup(config.PUBLIC_DIRECTORY_CHAT_ID, id, { reply_markup: markup });
       } catch (err) {

@@ -106,7 +106,7 @@ export async function getMembershipSummary(userId: number): Promise<MembershipSu
   const activeEntitlements = await getActiveUserEntitlements(userId);
   const hasPaid = activeEntitlements.some((e) => e.source === "telegram_stars");
   const hasComplimentary = activeEntitlements.some((e) => e.source === "complimentary");
-  const hasContribution = activeEntitlements.some((e) => e.source === "contribution");
+  const hasContribution = activeEntitlements.some(isContentEarnedEntitlement);
 
   const accessibleSpaceSet = new Set<SpaceId>();
   let latestExpiryMs = 0;
@@ -149,6 +149,12 @@ export async function getMembershipSummary(userId: number): Promise<MembershipSu
     isRecurring: hasPaid,
     canRejoin: isMember,
   };
+}
+
+/** Includes older admin grants explicitly recorded as a content contribution reward. */
+export function isContentEarnedEntitlement(e: Entitlement): boolean {
+  return e.source === "contribution" ||
+    (e.source === "complimentary" && e.metadata?.reason === "content_contribution");
 }
 
 /**
@@ -547,13 +553,13 @@ export async function applyContributionDays(
   throw new Error(`Contribution reward for ${params.userId} could not be applied (write conflict)`);
 }
 
-/** UG-05: distinct members who may vote — active paid OR contribution-earned (complimentary excluded). */
+/** Distinct eligible members: paid or content-earned, including legacy content reward grants. */
 export async function countEligibleParticipants(): Promise<number> {
   const all = await listAllEntitlements();
   const nowMs = Date.now();
   const users = new Set<number>();
   for (const e of all) {
-    if ((e.source === "telegram_stars" || e.source === "contribution") && isEntitlementActive(e, nowMs)) {
+    if ((e.source === "telegram_stars" || isContentEarnedEntitlement(e)) && isEntitlementActive(e, nowMs)) {
       users.add(e.userId);
     }
   }

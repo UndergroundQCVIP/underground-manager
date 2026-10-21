@@ -257,6 +257,7 @@ Deno.test("UG06 IMPORT — Undo removes exactly the bot's copies and nothing els
     assertEquals(api.deletedMessages.map((d) => d.chatId), [REGULAR_CHAT, REGULAR_CHAT]);
     assertEquals(api.deletedMessages.flatMap((d) => d.ids).sort((a, b) => a - b), [...dest].sort((a, b) => a - b));
     assertEquals((await getImportJob(job!.id))!.status, "undone");
+    assertEquals(await listMediaIndex(c.id), []); // removed copies cannot inflate directory counts
     assertEquals(api.deletedTopics.length, 0); // the topic itself is never deleted
     // the block can be imported again after an undo
     assertEquals((await prepareImport(api, { adminId: ADMIN, creatorId: c.id, link1: link(1), link2: link(120), isNewCreator: false })).ok, true);

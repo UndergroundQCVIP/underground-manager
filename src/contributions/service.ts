@@ -43,7 +43,9 @@ import {
   ContributionDecision,
   ContributionItem,
   Creator,
+  WANTED_REQUEST_CLASSES,
 } from "../types.ts";
+import { escapeMd, escapeMdUrl } from "../util/markdown.ts";
 import { fmtDay, grantContributionReward, scopesLabel, validateRewardParams } from "./rewards.ts";
 import { awardContributionBonus } from "../referrals/service.ts";
 import { awardContributionPoints } from "../points/service.ts";
@@ -286,14 +288,18 @@ export async function finishContribution(
       await api.copyMessages(adminId, userId, ids);
       await api.sendMessage(
         adminId,
-        isNew
-          ? `📥 *Nouvelle contribution — NOUVEAU créateur « ${submitted.creatorName} »* (${submitted.proposal?.collection === "retro" ? "Retro" : "Regular"})\n` +
+        (isNew
+          ? `📥 *Nouvelle contribution — NOUVEAU créateur « ${escapeMd(submitted.creatorName)} »* (${submitted.proposal?.collection === "retro" ? "Retro" : "Regular"})\n` +
             `${submitted.items.length} élément(s) de l'utilisateur \`${userId}\` — aperçu ci-dessus.\n` +
             ((submitted.proposal?.duplicateCandidateIds.length ?? 0) > 0 ? `⚠️ Doublon possible détecté — examinez la proposition.\n` : "") +
             `Examinez l'identité du créateur et les droits avant d'approuver.`
-          : `📥 *Nouvelle contribution pour ${submitted.creatorName}*\n` +
+          : `📥 *Nouvelle contribution pour ${escapeMd(submitted.creatorName)}*\n` +
             `${submitted.items.length} élément(s) de l'utilisateur \`${userId}\` — aperçu ci-dessus.\n` +
-            `Approuvez (avec ou sans récompense) ou refusez.`,
+            `Approuvez (avec ou sans récompense) ou refusez.`) +
+          (submitted.wantedRequest
+            ? `\n🔎 *Liste recherchée — ${WANTED_REQUEST_CLASSES[submitted.wantedRequest.category]}*\n` +
+              `[Profil social](${escapeMdUrl(submitted.wantedRequest.profileUrl)})`
+            : ""),
         { parse_mode: "Markdown", reply_markup: reviewKeyboard(submitted.id, isNew) }
       );
     } catch (err) {
