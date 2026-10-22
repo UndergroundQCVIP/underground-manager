@@ -6,9 +6,11 @@
 const MAX_BODY_BYTES = 1_000_000; // Telegram updates are a few KB
 
 /** Deno previews have separate databases but may inherit the LIVE Telegram credentials. */
-export function isLiveBotRuntime(timeline: string | undefined): boolean {
-  // Undefined preserves polling/self-hosted and classic Deploy installations.
-  return timeline === undefined || timeline === "production";
+export function isLiveBotRuntime(timeline: string | undefined, hostedDeploy?: string): boolean {
+  // Modern Deploy omits DENO_TIMELINE during builds. Treat that as a warmup,
+  // never as production: builds may inherit credentials but open an empty KV.
+  // Local/self-hosted and classic Deploy have no DENO_DEPLOY flag.
+  return timeline === "production" || (timeline === undefined && !hostedDeploy);
 }
 
 /** A preview can pass deployment health checks without ever constructing a Telegram bot. */

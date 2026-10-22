@@ -91,7 +91,7 @@ async function main() {
 // evaluated (before any `await`); jobs registered later on Deno Deploy never run.
 let bot: ReturnType<typeof createBot>;
 if (import.meta.main) {
-  if (!isLiveBotRuntime(Deno.env.get("DENO_TIMELINE"))) {
+  if (!isLiveBotRuntime(Deno.env.get("DENO_TIMELINE"), Deno.env.get("DENO_DEPLOY"))) {
     // Build warmup starts previews with a fresh KV database. Never let them publish
     // empty directories, accept live updates or register reconciliation workers.
     console.log("[Preview] Telegram bot and scheduled jobs disabled.");

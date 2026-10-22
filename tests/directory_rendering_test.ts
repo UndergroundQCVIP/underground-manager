@@ -219,3 +219,14 @@ Deno.test("DIRECTORY DEPLOY — previews are health-only and cannot consume live
     method: "POST", headers: { "x-telegram-bot-api-secret-token": "live-secret" }, body: "{}",
   }))).status, 503);
 });
+
+Deno.test("DIRECTORY DEPLOY — hosted builds without a timeline cannot run the live bot", async () => {
+  const { isLiveBotRuntime } = await import("../src/server.ts");
+  for (const hosted of ["true", "1"]) {
+    assertEquals(isLiveBotRuntime(undefined, hosted), false);
+    assertEquals(isLiveBotRuntime("preview/revision", hosted), false);
+    assertEquals(isLiveBotRuntime("git-branch/main", hosted), false);
+    assertEquals(isLiveBotRuntime("production", hosted), true);
+  }
+  assertEquals(isLiveBotRuntime(undefined, undefined), true); // local and classic Deploy
+});
