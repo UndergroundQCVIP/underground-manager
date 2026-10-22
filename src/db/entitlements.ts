@@ -2,11 +2,14 @@
  * LA CONFRÉRIE — Entitlement Repository
  */
 
+import { isAdministrator } from "../config.ts";
 import { getKv } from "./kv.ts";
 import {
   Entitlement,
   EntitlementStatus,
-  CollectionCategory,
+  RewardScope,
+  SPACE_IDS,
+  COMPLIMENTARY_SPACES,
   MembershipPlanId,
   MembershipSummary,
   SpaceId,
@@ -102,11 +105,21 @@ export async function hasAccessToSpace(userId: number, spaceId: SpaceId): Promis
   return active.some((ent) => entitlementGrantsSpace(ent, spaceId));
 }
 
-/** Amateur requires an explicit manual admin grant, never a paid/contribution/full entitlement. */
+/** Expand old and new grants consistently, without changing their expiration. */
+export function effectiveEntitlementSpaces(ent: Entitlement): SpaceId[] {
+  const explicitlyApproved = Number.isSafeInteger(ent.metadata?.grantedBy) && (ent.metadata?.grantedBy ?? 0) > 0 &&
+    ((ent.source === "complimentary" && ent.metadata?.accessLevel === "amateur") ||
+      (ent.source === "contribution" && ent.contributionScope === "amateur"));
+  if (explicitlyApproved && ent.spaces.includes("amateur_collections")) return [...COMPLIMENTARY_SPACES.amateur];
+  const spaces = new Set<SpaceId>(ent.spaces.filter(s => s !== "amateur_collections" && s !== "amateur_chat"));
+  if (spaces.has("vip_collections") || spaces.has("retro_collections")) {
+    spaces.add("wanted_list"); spaces.add("general_chat");
+  }
+  return SPACE_IDS.filter(s => spaces.has(s));
+}
+
 export function entitlementGrantsSpace(ent: Entitlement, spaceId: SpaceId): boolean {
-  return ent.spaces.includes(spaceId) && (spaceId !== "amateur_collections" ||
-    (ent.source === "complimentary" && ent.metadata?.accessLevel === "amateur" &&
-      Number.isSafeInteger(ent.metadata.grantedBy) && (ent.metadata.grantedBy ?? 0) > 0));
+  return effectiveEntitlementSpaces(ent).includes(spaceId);
 }
 
 export async function getMembershipSummary(userId: number): Promise<MembershipSummary> {
@@ -119,7 +132,7 @@ export async function getMembershipSummary(userId: number): Promise<MembershipSu
   let latestExpiryMs = 0;
 
   for (const ent of activeEntitlements) {
-    for (const space of ent.spaces) {
+    for (const space of effectiveEntitlementSpaces(ent)) {
       if (entitlementGrantsSpace(ent, space)) accessibleSpaceSet.add(space);
     }
     const expMs = new Date(ent.expiresAt).getTime();
@@ -148,7 +161,7 @@ export async function getMembershipSummary(userId: number): Promise<MembershipSu
     hasPaid,
     hasComplimentary,
     hasContribution,
-    canParticipate: hasPaid || hasContribution,
+    canParticipate: hasPaid || hasContribution || activeEntitlements.some(e => entitlementGrantsSpace(e, "amateur_collections")),
     primaryType,
     activeEntitlements,
     accessibleSpaces: Array.from(accessibleSpaceSet),
@@ -467,7 +480,8 @@ export async function countActiveComplimentaryMembers(): Promise<number> {
 
 export interface ApplyContributionDaysParams {
   userId: number;
-  scope: CollectionCategory;
+  scope: RewardScope;
+  grantedBy?: number;
   days: number;
   /** The submission this reward belongs to. Applying it twice is a no-op. */
   contributionId: string;
@@ -491,6 +505,7 @@ export async function applyContributionDays(
   params: ApplyContributionDaysParams
 ): Promise<ApplyContributionDaysResult> {
   const kv = await getKv();
+  if (params.scope === "amateur" && !isAdministrator(params.grantedBy ?? 0)) throw new Error("Administrateur requis pour Amateur.");
   const pointerKey = ["contrib_ent_ptr", params.userId, params.scope];
 
   for (let attempt = 0; attempt < 20; attempt++) {
@@ -526,6 +541,7 @@ export async function applyContributionDays(
         updatedAt: nowIso,
         metadata: {
           ...existing.metadata,
+          grantedBy: params.grantedBy ?? existing.metadata?.grantedBy,
           rewardIds: [...(existing.metadata?.rewardIds ?? []), params.contributionId],
           lastRewardId: params.contributionId,
           reminderSent: false, // a new expiry deserves a fresh 3-day reminder
@@ -542,7 +558,7 @@ export async function applyContributionDays(
         startsAt: nowIso,
         expiresAt,
         status: "active",
-        metadata: { rewardIds: [params.contributionId], lastRewardId: params.contributionId },
+        metadata: { grantedBy: params.grantedBy, rewardIds: [params.contributionId], lastRewardId: params.contributionId },
         createdAt: nowIso,
         updatedAt: nowIso,
       };
@@ -566,7 +582,7 @@ export async function countEligibleParticipants(): Promise<number> {
   const nowMs = Date.now();
   const users = new Set<number>();
   for (const e of all) {
-    if ((e.source === "telegram_stars" || isContentEarnedEntitlement(e)) && isEntitlementActive(e, nowMs)) {
+    if ((e.source === "telegram_stars" || isContentEarnedEntitlement(e) || entitlementGrantsSpace(e, "amateur_collections")) && isEntitlementActive(e, nowMs)) {
       users.add(e.userId);
     }
   }

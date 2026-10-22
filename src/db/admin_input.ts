@@ -15,20 +15,20 @@ export type AdminInputRequest =
 
 const TTL_MS = 10 * 60 * 1000;
 
-export async function requestAdminInput(adminId: number, req: AdminInputRequest): Promise<void> {
+export async function requestAdminInput(adminId: number, req: AdminInputRequest, chatId = adminId): Promise<void> {
   const kv = await getKv();
-  await kv.set(["admin_input", adminId], req, { expireIn: TTL_MS });
+  await kv.set(["admin_input", adminId, ...(chatId === adminId ? [] : [chatId])], req, { expireIn: TTL_MS });
 }
 
-export async function takeAdminInput(adminId: number): Promise<AdminInputRequest | null> {
+export async function takeAdminInput(adminId: number, chatId = adminId): Promise<AdminInputRequest | null> {
   const kv = await getKv();
-  const res = await kv.get<AdminInputRequest>(["admin_input", adminId]);
+  const res = await kv.get<AdminInputRequest>(["admin_input", adminId, ...(chatId === adminId ? [] : [chatId])]);
   if (!res.value) return null;
-  await kv.delete(["admin_input", adminId]);
+  await kv.delete(["admin_input", adminId, ...(chatId === adminId ? [] : [chatId])]);
   return res.value;
 }
 
-export async function peekAdminInput(adminId: number): Promise<AdminInputRequest | null> {
+export async function peekAdminInput(adminId: number, chatId = adminId): Promise<AdminInputRequest | null> {
   const kv = await getKv();
-  return (await kv.get<AdminInputRequest>(["admin_input", adminId])).value ?? null;
+  return (await kv.get<AdminInputRequest>(["admin_input", adminId, ...(chatId === adminId ? [] : [chatId])])).value ?? null;
 }

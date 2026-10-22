@@ -303,7 +303,7 @@ Deno.test("E2E C — Complimentary→paid conversion has no gap; expiring comp n
   });
 });
 
-Deno.test("E2E C — Narrow complimentary level only keeps its own spaces when paid time ends", async () => {
+Deno.test("E2E C — Regular complimentary access keeps its community bundle when paid time ends", async () => {
   await withApp(async (tg) => {
     const userId = 7103;
     await grantComplimentaryAccess({ adminId: ADMIN, userId, durationDays: 30, reason: "partnership", level: "vip_only" });
@@ -316,7 +316,7 @@ Deno.test("E2E C — Narrow complimentary level only keeps its own spaces when p
     await runHourlyReconciliation(tg.bot);
 
     const banned = tg.callsOf("banChatMember").map((c) => c.payload.chat_id).sort();
-    assertEquals(banned, [GENERAL, WANTED].sort(), "removed only from spaces with no remaining entitlement");
+    assertEquals(banned, [], "Regular approval includes the community spaces");
   });
 });
 

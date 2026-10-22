@@ -7,6 +7,7 @@
 export type SpaceId =
   | "vip_collections"
   | "retro_collections"
+  | "amateur_chat"
   | "amateur_collections"
   | "wanted_list"
   | "general_chat";
@@ -15,6 +16,7 @@ export const SPACE_IDS: readonly SpaceId[] = [
   "vip_collections",
   "retro_collections",
   "amateur_collections",
+  "amateur_chat",
   "wanted_list",
   "general_chat",
 ] as const;
@@ -42,12 +44,14 @@ export interface SpaceDefinition {
   envVar:
     | "VIP_COLLECTIONS_CHAT_ID"
     | "TELEGRAM_RETRO_FORUM_CHAT_ID"
+    | "TELEGRAM_AMATEUR_CHAT_ID"
     | "TELEGRAM_AMATEUR_FORUM_CHAT_ID"
     | "WANTED_LIST_CHAT_ID"
     | "GENERAL_CHAT_ID";
 }
 
 export const SPACE_DEFINITIONS: Record<SpaceId, SpaceDefinition> = {
+  amateur_chat: { id: "amateur_chat", name: "Clavardage Amateur", type: "group", description: "Community for explicitly approved Amateur members", envVar: "TELEGRAM_AMATEUR_CHAT_ID" },
   amateur_collections: {
     id: "amateur_collections", name: "AMATEUR | LA CONFRÉRIE", type: "forum_group",
     description: "Private collection; access granted separately by administrators only",
@@ -92,7 +96,7 @@ export type ComplimentaryAccessLevel =
   | "full_retro";
 
 export const COMPLIMENTARY_SPACES: Record<ComplimentaryAccessLevel, SpaceId[]> = {
-  amateur: ["amateur_collections"],
+  amateur: ["amateur_collections", "amateur_chat", "vip_collections", "retro_collections", "wanted_list", "general_chat"],
   vip_only: ["vip_collections"],
   vip_and_chat: ["vip_collections", "general_chat"],
   regular: ["vip_collections", "wanted_list", "general_chat"],
@@ -101,9 +105,9 @@ export const COMPLIMENTARY_SPACES: Record<ComplimentaryAccessLevel, SpaceId[]> =
 };
 
 export const COMPLIMENTARY_ACCESS_LABELS: Record<ComplimentaryAccessLevel, string> = {
-  amateur: "Amateur seulement — autorisation administrative distincte",
-  vip_only: "Collections en activité seulement",
-  vip_and_chat: "Collections en activité + clavardage",
+  amateur: "Amateur + en activité + Retro + communautés",
+  vip_only: "En activité + clavardage + suggestions et votes",
+  vip_and_chat: "En activité + clavardage + suggestions et votes",
   regular: "En activité + clavardage + suggestions et votes",
   full: "Accès complet — en activité + Retro + communauté",
   full_retro: "Accès complet — en activité + Retro + communauté",
@@ -122,14 +126,16 @@ export const PLAN_PAYLOAD_IDS: Record<MembershipPlanId, string> = {
 };
 
 export type CollectionCategory = "regular" | "retro";
-/** Amateur is private and deliberately excluded from paid/reward scopes and public sync state. */
+/** Amateur is private and excluded from public directory sync. */
 export type CreatorCollection = CollectionCategory | "amateur";
+export type RewardScope = CreatorCollection;
 
 /**
  * UG-05: spaces covered by a contribution-earned entitlement, per creator forum.
  * Any earned forum access also includes the community spaces (Wanted List, General Chat).
  */
-export const CONTRIBUTION_SPACES: Record<CollectionCategory, SpaceId[]> = {
+export const CONTRIBUTION_SPACES: Record<RewardScope, SpaceId[]> = {
+  amateur: [...COMPLIMENTARY_SPACES.amateur],
   regular: ["vip_collections", "wanted_list", "general_chat"],
   retro: ["retro_collections", "wanted_list", "general_chat"],
 };
@@ -172,7 +178,7 @@ export interface Entitlement {
   /** UG-04: purchased plan. Absent on legacy records (treated as "regular"). */
   plan?: MembershipPlanId;
   /** UG-05: for source "contribution", which creator forum this earned access covers. */
-  contributionScope?: CollectionCategory;
+  contributionScope?: RewardScope;
   startsAt: string; // ISO 8601
   expiresAt: string; // ISO 8601
   status: EntitlementStatus;
@@ -221,6 +227,7 @@ export interface AccessSyncState {
 }
 
 export type AuditEventType =
+  | "private_chat_configured"
   | "amateur_forum_configured"
   | "wanted_request_created"
   | "wanted_request_updated"
@@ -904,13 +911,14 @@ export interface ContributionItem {
   messageId: number; // Message ID inside the contributor's private chat with the bot
   kind: "photo" | "video";
   mediaGroupId?: string;
+  purpose?: "profile_screenshot";
 }
 
 /** UG-05: proposal for a creator that does not exist yet. Nothing is created until approval. */
 export interface NewCreatorProposal {
   name: string;
   profileUrl?: string;
-  collection: CollectionCategory;
+  collection: CreatorCollection;
   /** Existing creators with a similar name, detected at submission. */
   duplicateCandidateIds: string[];
   /** Administrator chose an existing creator instead of creating a new one. */
@@ -922,7 +930,7 @@ export interface NewCreatorProposal {
 }
 
 export type ContributionDecision =
-  | { type: "reward"; scopes: CollectionCategory[]; days: number }
+  | { type: "reward"; scopes: RewardScope[]; days: number }
   | { type: "no_reward" };
 
 export interface Contribution {
@@ -945,7 +953,10 @@ export interface Contribution {
   kind?: "existing" | "new"; // absent = existing (UG-04 records)
   proposal?: NewCreatorProposal;
   /** Conversation step while a new-creator proposal is being collected. */
-  step?: "name" | "url" | "collection" | "media";
+  step?: "name" | "url" | "collection" | "profile_screenshot" | "media";
+  submissionCollection?: CreatorCollection;
+  profileScreenshotMessageId?: number;
+  reviewMessages?: { chatId: number; messageId: number }[];
   /** The administrator's final choice, recorded when approval starts. */
   decision?: ContributionDecision;
   /** Reward bookkeeping: none = approved without reward, granted = days applied. */
@@ -959,19 +970,19 @@ export interface Contribution {
   /** Epoch ms before which Telegram asked us to wait (429). */
   retryAfter?: number;
   /** Administrator's in-progress reward configuration (before confirming). */
-  draft?: { scopes: CollectionCategory[]; days: number };
+  draft?: { scopes: RewardScope[]; days: number };
 }
 
 /** UG-05: one finalized reward per submission (key = contribution id). */
 export interface ContributionReward {
   contributionId: string;
   userId: number;
-  scopes: CollectionCategory[];
+  scopes: RewardScope[];
   days: number;
   grantedBy: number;
   status: "applying" | "granted";
   /** New expiry per scope after this reward. */
-  expiresAt: Partial<Record<CollectionCategory, string>>;
+  expiresAt: Partial<Record<RewardScope, string>>;
   createdAt: string;
   grantedAt?: string;
 }

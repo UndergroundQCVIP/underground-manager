@@ -87,12 +87,12 @@ Deno.test("COMPLIMENTARY — Member joins authorized spaces but is rejected from
     });
     assertEquals(vipRes.approved, true);
 
-    // 2. Request to join General Chat (-1001003) -> MUST DECLINE (not in level)
+    // Regular content grants now include its community chat.
     const chatRes = await processChatJoinRequest(api, {
       chat: { id: -1001003, title: "Underground General Chat" },
       from: { id: recipientId, first_name: "Promo User" },
     });
-    assertEquals(chatRes.approved, false);
+    assertEquals(chatRes.approved, true);
   } finally {
     await kv.close();
   }

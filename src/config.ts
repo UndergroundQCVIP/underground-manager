@@ -13,6 +13,8 @@ export interface AppConfig {
   /** UG-04: private RETRO | LA CONFRÉRIE forum (0 = not configured). */
   TELEGRAM_RETRO_FORUM_CHAT_ID: number;
   TELEGRAM_AMATEUR_FORUM_CHAT_ID: number;
+  TELEGRAM_AMATEUR_CHAT_ID: number;
+  TELEGRAM_ADMIN_REVIEW_CHAT_ID: number;
   PUBLIC_DIRECTORY_CHAT_ID: number;
   /** UG-05: optional public t.me link of the directory channel (used by navigation buttons). */
   PUBLIC_DIRECTORY_URL: string;
@@ -83,6 +85,8 @@ export function loadConfig(envOverride?: Record<string, string>): AppConfig {
     ADMIN_USER_IDS: adminIds,
     VIP_COLLECTIONS_CHAT_ID: Number(getEnv("VIP_COLLECTIONS_CHAT_ID", "0")),
     TELEGRAM_RETRO_FORUM_CHAT_ID: Number(getEnv("TELEGRAM_RETRO_FORUM_CHAT_ID", "0")),
+    TELEGRAM_AMATEUR_CHAT_ID: Number(getEnv("TELEGRAM_AMATEUR_CHAT_ID", "0")),
+    TELEGRAM_ADMIN_REVIEW_CHAT_ID: Number(getEnv("TELEGRAM_ADMIN_REVIEW_CHAT_ID", "0")),
     TELEGRAM_AMATEUR_FORUM_CHAT_ID: Number(getEnv("TELEGRAM_AMATEUR_FORUM_CHAT_ID", "0")),
     PUBLIC_DIRECTORY_CHAT_ID: Number(getEnv("PUBLIC_DIRECTORY_CHAT_ID", "0")),
     PUBLIC_DIRECTORY_URL: getEnv("PUBLIC_DIRECTORY_URL", "").trim(),
@@ -185,7 +189,7 @@ export function validateConfig(config: AppConfig): string[] {
 
   if (
     config.TELEGRAM_PUBLIC_LOBBY_CHAT_ID !== 0 &&
-    [config.VIP_COLLECTIONS_CHAT_ID, config.TELEGRAM_RETRO_FORUM_CHAT_ID, config.TELEGRAM_AMATEUR_FORUM_CHAT_ID, config.WANTED_LIST_CHAT_ID, config.GENERAL_CHAT_ID].includes(
+    [config.VIP_COLLECTIONS_CHAT_ID, config.TELEGRAM_RETRO_FORUM_CHAT_ID, config.TELEGRAM_AMATEUR_FORUM_CHAT_ID, config.TELEGRAM_AMATEUR_CHAT_ID, config.TELEGRAM_ADMIN_REVIEW_CHAT_ID, config.WANTED_LIST_CHAT_ID, config.GENERAL_CHAT_ID].includes(
       config.TELEGRAM_PUBLIC_LOBBY_CHAT_ID
     )
   ) {
@@ -226,6 +230,8 @@ export function validateConfig(config: AppConfig): string[] {
     config.VIP_COLLECTIONS_CHAT_ID,
     config.TELEGRAM_RETRO_FORUM_CHAT_ID,
     config.TELEGRAM_AMATEUR_FORUM_CHAT_ID,
+    config.TELEGRAM_AMATEUR_CHAT_ID,
+    config.TELEGRAM_ADMIN_REVIEW_CHAT_ID,
     config.PUBLIC_DIRECTORY_CHAT_ID,
     config.WANTED_LIST_CHAT_ID,
     config.GENERAL_CHAT_ID,
@@ -266,6 +272,8 @@ export function getChatIdForSpace(spaceId: SpaceId, config: AppConfig = getConfi
       return config.VIP_COLLECTIONS_CHAT_ID;
     case "retro_collections":
       return config.TELEGRAM_RETRO_FORUM_CHAT_ID;
+    case "amateur_chat":
+      return config.TELEGRAM_AMATEUR_CHAT_ID;
     case "amateur_collections":
       return config.TELEGRAM_AMATEUR_FORUM_CHAT_ID;
     case "wanted_list":
@@ -280,6 +288,7 @@ export function getSpaceIdForChatId(chatId: number, config: AppConfig = getConfi
   if (config.TELEGRAM_RETRO_FORUM_CHAT_ID && chatId === config.TELEGRAM_RETRO_FORUM_CHAT_ID) {
     return "retro_collections";
   }
+  if (config.TELEGRAM_AMATEUR_CHAT_ID && chatId === config.TELEGRAM_AMATEUR_CHAT_ID) return "amateur_chat";
   if (chatId === config.WANTED_LIST_CHAT_ID) return "wanted_list";
   if (config.TELEGRAM_AMATEUR_FORUM_CHAT_ID && chatId === config.TELEGRAM_AMATEUR_FORUM_CHAT_ID) return "amateur_collections";
   if (chatId === config.GENERAL_CHAT_ID) return "general_chat";

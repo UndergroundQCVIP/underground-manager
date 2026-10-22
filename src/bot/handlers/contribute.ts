@@ -6,10 +6,10 @@
  */
 
 import { Composer, Context, InlineKeyboard } from "grammy";
-import { getClubName, isAdministrator } from "../../config.ts";
+import { getClubName, getConfig, isAdministrator } from "../../config.ts";
 import { adminRouteGuard } from "../middleware/auth.ts";
 import { creatorCollection, getCreator, listCreators } from "../../db/creators.ts";
-import { getContribution, listContributions } from "../../db/contributions.ts";
+import { getContribution, listContributions, getModeratorRewardDraft, setModeratorRewardDraft } from "../../db/contributions.ts";
 import { peekAdminInput, requestAdminInput, takeAdminInput } from "../../db/admin_input.ts";
 import { getSystemSettings, updateSystemSettings } from "../../db/settings.ts";
 import {
@@ -21,7 +21,6 @@ import {
   rejectContribution,
   resolvePartialPublication,
   retryContributionReward,
-  setRewardDraft,
   startContribution,
   startNewCreatorContribution,
   submitProposalCollection,
@@ -33,7 +32,7 @@ import { listContributionRewards, scopesLabel, fmtDay, validateRewardParams } fr
 import { contributionRewardsEnabled } from "../../membership/mode.ts";
 import { getReferralOf } from "../../db/referrals.ts";
 import { referralBonusDays } from "../../referrals/service.ts";
-import { Contribution, ContributionStatus, CollectionCategory, WANTED_REQUEST_CLASSES } from "../../types.ts";
+import { Contribution, ContributionStatus, CollectionCategory, RewardScope, WANTED_REQUEST_CLASSES } from "../../types.ts";
 import { escapeMdUrl } from "../../util/markdown.ts";
 
 export const contributeComposer = new Composer();
@@ -53,6 +52,8 @@ export async function contributeChooser(ctx: Context): Promise<void> {
     .text("👩‍🎤 Créateur existant", "contrib:existing")
     .row()
     .text("✨ Nouveau créateur", "contrib:new")
+    .row()
+    .text("🔒 Soumettre pour Amateur", "contrib:amateur")
     .row()
     .text("⬅️ Menu principal", "member:home");
   const text =
@@ -126,26 +127,34 @@ contributeComposer.callbackQuery("contrib:new", async (ctx) => {
   );
 });
 
+contributeComposer.callbackQuery("contrib:amateur", async ctx => {
+  await ctx.answerCallbackQuery();
+  await startNewCreatorContribution(ctx.from.id, "amateur");
+  await ctx.reply("🔒 CONTRIBUTION AMATEUR\n\nIndiquez le prénom et le nom complets de la personne. Ensuite, envoyez une capture de son profil social, puis les photos et vidéos dont vous avez les droits de diffusion. La capture sera publiée avec le contenu accepté. Un administrateur vérifiera l'identité, la majorité et le consentement avant toute publication.", { reply_markup: new InlineKeyboard().text("❌ Annuler", "contrib:cancel") });
+});
+
 const urlPrompt = () =>
   `🔗 Avez-vous un *lien public de profil* du créateur ? Envoyez-le en message, ou passez cette étape.`;
 
 contributeComposer.on("message:text", async (ctx, next) => {
-  if (ctx.chat.type !== "private" || ctx.message.text.startsWith("/")) return next();
+  if (ctx.message.text.startsWith("/")) return next();
+  const reviewGroup = ctx.chat.id === getConfig().TELEGRAM_ADMIN_REVIEW_CHAT_ID;
+  if (ctx.chat.type !== "private" && !reviewGroup) return next();
   const userId = ctx.from.id;
   const text = ctx.message.text;
 
   // --- Administrator prompts (custom duration, proposal rename, rejection reason) ---
-  if (isAdministrator(userId) && (await peekAdminInput(userId))) {
-    const req = (await takeAdminInput(userId))!;
+  if (isAdministrator(userId) && (await peekAdminInput(userId, ctx.chat.id))) {
+    const req = (await takeAdminInput(userId, ctx.chat.id))!;
     if (req.type === "custom_days") {
       const days = Number(text.trim());
       const invalid = validateRewardParams(["regular"], days);
       if (invalid) {
-        await requestAdminInput(userId, req);
+        await requestAdminInput(userId, req, ctx.chat.id);
         await ctx.reply(`⚠️ ${invalid.replace("Choisissez le ou les forums accessibles.", "")} Entrez un nombre de jours valide.`);
         return;
       }
-      await setRewardDraft(req.contributionId, { days });
+      await setModeratorRewardDraft(req.contributionId, userId, { days });
       await showRewardConfig(ctx, req.contributionId, true);
     } else if (req.type === "rename_proposal") {
       const res = await adminUpdateProposal(req.contributionId, { name: text });
@@ -161,6 +170,8 @@ contributeComposer.on("message:text", async (ctx, next) => {
     return;
   }
 
+  if (ctx.chat.type !== "private") return next();
+
   // --- Contributor: new-creator proposal steps ---
   const { getActiveContribution } = await import("../../db/contributions.ts");
   const active = await getActiveContribution(userId);
@@ -170,6 +181,10 @@ contributeComposer.on("message:text", async (ctx, next) => {
     const res = await submitProposalName(userId, text);
     if (!res.ok) {
       await ctx.reply(`⚠️ ${res.error}`);
+      return;
+    }
+    if (res.contribution?.submissionCollection === "amateur") {
+      await ctx.reply("📸 Envoyez une capture d’écran du profil social, en photo. Elle sera publiée avec le contenu accepté. Envoyez ensuite les autres photos et vidéos.", { reply_markup: new InlineKeyboard().text("❌ Annuler", "contrib:cancel") });
       return;
     }
     if (res.duplicates && res.duplicates.length > 0) {
@@ -272,6 +287,10 @@ contributeComposer.on(["message:photo", "message:video"], async (ctx, next) => {
     kind: msg.photo ? "photo" : "video",
     mediaGroupId: msg.media_group_id,
   });
+  if (res.contribution?.step === "profile_screenshot") { await ctx.reply("Envoyez d’abord une capture du profil social en photo, puis le contenu."); return; }
+  if (res.added && res.contribution?.profileScreenshotMessageId === msg.message_id) {
+    await ctx.reply("✅ Capture reçue. Envoyez maintenant le contenu, puis appuyez sur Terminer.", { reply_markup: collectingKeyboard() }); return;
+  }
   if (!res.contribution) return next(); // no open session (or details incomplete): ignore silently
   if (res.added && res.newAlbum) {
     await ctx.reply(`✔ Reçu (${res.count} jusqu'ici). Envoyez-en d'autres ou appuyez sur Terminer.`, {
@@ -317,6 +336,12 @@ contributeComposer.callbackQuery("contrib:cancel", async (ctx) => {
 // ===========================================================================
 
 contributeComposer.use(adminRouteGuard({ callbackPrefixes: ["cadm:"], commands: [] }));
+contributeComposer.use(async (ctx, next) => {
+  if (ctx.callbackQuery?.data?.startsWith("cadm:") && ctx.chat?.type !== "private" && ctx.chat?.id !== getConfig().TELEGRAM_ADMIN_REVIEW_CHAT_ID) {
+    await ctx.answerCallbackQuery({ text: "Ouvrez le bot en privé ou le groupe de modération configuré.", show_alert: true }); return;
+  }
+  await next();
+});
 
 const STATUS_ICON: Record<ContributionStatus, string> = {
   collecting: "✍️", pending: "⏳", publishing: "🔄", approved: "✅", rejected: "❌",
@@ -422,8 +447,8 @@ async function renderReview(c: Contribution): Promise<{ text: string; kb: Inline
 
   if (isNew && c.proposal) {
     const p = c.proposal;
-    text += `\n✨ *NOUVEAU CRÉATEUR PROPOSÉ*\n*Nom :* ${mdEsc(p.name)}\n*Collection :* ${p.collection === "retro" ? "Retro" : "Regular"}\n` +
-      `*Lien :* ${p.profileUrl ?? "—"}\n`;
+    text += `\n✨ *NOUVEAU CRÉATEUR PROPOSÉ*\n*Nom :* ${mdEsc(p.name)}\n*Collection :* ${p.collection === "amateur" ? "Amateur" : p.collection === "retro" ? "Retro" : "En activité"}\n` +
+      `*Lien :* ${p.profileUrl ? `[Profil social](${escapeMdUrl(p.profileUrl)})` : "—"}\n`;
     if (p.useExistingCreatorId) {
       const ex = await getCreator(p.useExistingCreatorId);
       text += `🔗 *Utilisera le créateur existant :* ${mdEsc(ex?.name ?? "?")}\n`;
@@ -436,6 +461,9 @@ async function renderReview(c: Contribution): Promise<{ text: string; kb: Inline
   } else {
     text += `*Créateur :* ${mdEsc(c.creatorName)}\n`;
   }
+  if (c.reviewedBy) text += `*Décision par :* administrateur \`${c.reviewedBy}\` — ${c.reviewedAt ?? ""}\n`;
+  if (c.profileScreenshotMessageId) text += "*Capture du profil :* incluse et publiée avec le contenu accepté.\n";
+  if (c.decision?.type === "reward") text += `*Accès décidé :* ${scopesLabel(c.decision.scopes)} — ${c.decision.days} jours\n`;
   if (c.rejectionReason) text += `*Raison du refus :* ${mdEsc(c.rejectionReason)}\n`;
   if (c.rewardStatus) text += `*Récompense :* ${c.rewardStatus === "granted" ? "accordée" : c.rewardStatus === "pending" ? "en attente" : "aucune"}\n`;
   if (c.note) text += `\n_${mdEsc(c.note)}_\n`;
@@ -444,7 +472,9 @@ async function renderReview(c: Contribution): Promise<{ text: string; kb: Inline
 
   const open = c.status === "pending" || c.status === "failed";
   if (open && isNew && c.proposal) {
-    kb.text("✏️ Corriger le nom", `cadm:ren:${c.id}`).text(`🔁 ${c.proposal.collection === "retro" ? "→ Regular" : "→ Retro"}`, `cadm:col:${c.id}`).row();
+    kb.text("✏️ Corriger le nom", `cadm:ren:${c.id}`);
+    if (c.proposal.collection !== "amateur") kb.text(`🔁 ${c.proposal.collection === "retro" ? "→ En activité" : "→ Retro"}`, `cadm:col:${c.id}`);
+    kb.row();
     c.proposal.duplicateCandidateIds.slice(0, 3).forEach((_, i) => kb.text(`🔗 Utiliser le doublon ${i + 1}`, `cadm:dup:${c.id}:${i}`).row());
     if (c.proposal.useExistingCreatorId) kb.text("↩️ Ne pas utiliser le doublon", `cadm:dup:${c.id}:x`).row();
     kb.text(c.proposal.identityRightsConfirmed ? "☑️ Identité et droits attestés" : "☐ J'atteste l'identité et les droits", `cadm:rt:${c.id}`).row();
@@ -482,21 +512,21 @@ contributeComposer.callbackQuery(/^cadm:pv:([\w-]+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   if (!c || c.items.length === 0) return;
   try {
-    await ctx.api.copyMessages(ctx.from.id, c.userId, c.items.map((i) => i.messageId).sort((a, b) => a - b));
+    for (let i = 0; i < c.items.length; i += 50) await ctx.api.copyMessages(ctx.chat?.id === getConfig().TELEGRAM_ADMIN_REVIEW_CHAT_ID ? ctx.chat.id : ctx.from.id, c.userId, c.items.slice(i, i + 50).map(it => it.messageId).sort((a,b) => a-b));
   } catch {
     await ctx.reply("⚠️ Aperçu indisponible (le membre a peut-être supprimé les originaux).");
   }
 });
 
 contributeComposer.callbackQuery(/^cadm:ren:([\w-]+)$/, async (ctx) => {
-  await requestAdminInput(ctx.from.id, { type: "rename_proposal", contributionId: ctx.match[1] });
+  await requestAdminInput(ctx.from.id, { type: "rename_proposal", contributionId: ctx.match[1] }, ctx.chat?.id);
   await ctx.answerCallbackQuery();
   await ctx.reply("✏️ Envoyez le nom corrigé du créateur (message texte).");
 });
 
 contributeComposer.callbackQuery(/^cadm:col:([\w-]+)$/, async (ctx) => {
   const c = await getContribution(ctx.match[1]);
-  if (c?.proposal) {
+  if (c?.proposal && c.proposal.collection !== "amateur") {
     await adminUpdateProposal(c.id, { collection: c.proposal.collection === "retro" ? "regular" : "retro" });
   }
   await ctx.answerCallbackQuery();
@@ -541,7 +571,7 @@ contributeComposer.callbackQuery(/^cadm:nox:([\w-]+)$/, async (ctx) => {
 });
 
 contributeComposer.callbackQuery(/^cadm:nor:([\w-]+)$/, async (ctx) => {
-  await requestAdminInput(ctx.from.id, { type: "reject_reason", contributionId: ctx.match[1] });
+  await requestAdminInput(ctx.from.id, { type: "reject_reason", contributionId: ctx.match[1] }, ctx.chat?.id);
   await ctx.answerCallbackQuery();
   await ctx.reply("Envoyez la raison du refus (message texte, visible par le contributeur).");
 });
@@ -572,29 +602,31 @@ contributeComposer.callbackQuery(/^cadm:(?:nr|ok):([\w-]+)$/, async (ctx) => {
 
 // ---- Approve & reward: configuration screen --------------------------------------------------
 
-const SCOPE_CODE: Record<string, CollectionCategory[]> = { rg: ["regular"], rt: ["retro"], bo: ["regular", "retro"] };
+const SCOPE_CODE: Record<string, RewardScope[]> = { rg: ["regular"], rt: ["retro"], bo: ["regular", "retro"], am: ["amateur"] };
 
 async function showRewardConfig(ctx: Context, id: string, asNewMessage = false) {
   const c = await getContribution(id);
   if (!c) return;
   const settings = await getSystemSettings();
-  const scopes = c.draft?.scopes ?? [];
-  const days = c.draft?.days ?? settings.contributionDefaultDays;
+  const draft = await getModeratorRewardDraft(id, ctx.from!.id) ?? await setModeratorRewardDraft(id, ctx.from!.id, {}, settings.contributionDefaultDays);
+  const scopes = draft.scopes;
+  const days = draft.days;
   const referrer = await getReferralOf(c.userId);
-  const setKey = scopes.length === 2 ? "bo" : scopes[0] === "retro" ? "rt" : scopes[0] === "regular" ? "rg" : "";
+  const setKey = scopes.includes("amateur") ? "am" : scopes.length === 2 ? "bo" : scopes[0] === "retro" ? "rt" : scopes[0] === "regular" ? "rg" : "";
   const mark = (on: boolean, label: string) => (on ? `• ${label}` : label);
 
   const kb = new InlineKeyboard()
     .text(mark(setKey === "rg", "Regular seulement"), `cadm:sc:${id}:rg`)
     .text(mark(setKey === "rt", "Retro seulement"), `cadm:sc:${id}:rt`)
     .text(mark(setKey === "bo", "Accès complet (Regular + Retro)"), `cadm:sc:${id}:bo`)
-    .row();
+    .row()
+    .text(mark(setKey === "am", "Amateur + en activité + Retro + communautés"), `cadm:sc:${id}:am`).row();
   for (const d of [7, 15, 30]) kb.text(mark(days === d, `${d} jours`), `cadm:du:${id}:${d}`);
   kb.row();
   for (const d of [60, 90]) kb.text(mark(days === d, `${d} jours`), `cadm:du:${id}:${d}`);
   const custom = ![7, 15, 30, 60, 90].includes(days);
   kb.text(mark(custom, custom ? `${days} jours (perso.)` : "Personnalisé…"), `cadm:duc:${id}`).row();
-  if (scopes.length > 0) kb.text("✅ Confirmer l'approbation", `cadm:cf:${id}`).row();
+  if (scopes.length > 0) kb.text("✅ Confirmer l'approbation", `cadm:cf:${id}:${draft.nonce}`).row();
   kb.text("↩️ Retour", `cadm:view:${id}`);
 
   const text =
@@ -603,7 +635,7 @@ async function showRewardConfig(ctx: Context, id: string, asNewMessage = false) 
     `*Envoi :* ${c.items.length} élément(s)\n\n` +
     `*Accès :* ${scopes.length ? scopesLabel(scopes) : "_à choisir — aucun accès Retro n'est accordé automatiquement_"}\n` +
     `*Durée :* ${days} jours\n\n` +
-    (referrer
+    (referrer && !scopes.includes("amateur")
       ? `🤝 *Parrain :* \`${referrer.referrerId}\` recevra *+${referralBonusDays(days)} jour${referralBonusDays(days) > 1 ? "s" : ""}* ` +
         `(50 %, arrondi vers le haut) pour les mêmes forums.\n\n`
       : "") +
@@ -622,32 +654,33 @@ contributeComposer.callbackQuery(/^cadm:rw:([\w-]+)$/, async (ctx) => {
   await showRewardConfig(ctx, ctx.match[1]);
 });
 
-contributeComposer.callbackQuery(/^cadm:sc:([\w-]+):(rg|rt|bo)$/, async (ctx) => {
-  await setRewardDraft(ctx.match[1], { scopes: SCOPE_CODE[ctx.match[2]] });
+contributeComposer.callbackQuery(/^cadm:sc:([\w-]+):(rg|rt|bo|am)$/, async (ctx) => {
+  await setModeratorRewardDraft(ctx.match[1], ctx.from.id, { scopes: SCOPE_CODE[ctx.match[2]] });
   await ctx.answerCallbackQuery();
   await showRewardConfig(ctx, ctx.match[1]);
 });
 
 contributeComposer.callbackQuery(/^cadm:du:([\w-]+):(\d+)$/, async (ctx) => {
-  await setRewardDraft(ctx.match[1], { days: Number(ctx.match[2]) });
+  await setModeratorRewardDraft(ctx.match[1], ctx.from.id, { days: Number(ctx.match[2]) });
   await ctx.answerCallbackQuery();
   await showRewardConfig(ctx, ctx.match[1]);
 });
 
 contributeComposer.callbackQuery(/^cadm:duc:([\w-]+)$/, async (ctx) => {
-  await requestAdminInput(ctx.from.id, { type: "custom_days", contributionId: ctx.match[1] });
+  await requestAdminInput(ctx.from.id, { type: "custom_days", contributionId: ctx.match[1] }, ctx.chat?.id);
   await ctx.answerCallbackQuery();
   await ctx.reply("🔢 Envoyez le nombre de jours (entier, 1 à 3650).");
 });
 
-contributeComposer.callbackQuery(/^cadm:cf:([\w-]+)$/, async (ctx) => {
+contributeComposer.callbackQuery(/^cadm:cf:([\w-]+)(?::([a-f0-9]{8}))?$/, async (ctx) => {
   const c = await getContribution(ctx.match[1]);
   await ctx.answerCallbackQuery({ text: "Publication..." });
-  if (!c?.draft || c.draft.scopes.length === 0) {
-    await ctx.reply("⚠️ Choisissez d'abord le ou les forums accessibles.");
+  const draft = c ? await getModeratorRewardDraft(c.id, ctx.from.id) : null;
+  if (!c || !draft || draft.nonce !== ctx.match[2] || draft.scopes.length === 0) {
+    await ctx.reply("⚠️ Ces choix ne sont plus valides pour vous. Rouvrez « Approuver et récompenser », puis choisissez les accès et la durée.");
     return;
   }
-  await runApproval(ctx, c.id, { type: "reward", scopes: c.draft.scopes, days: c.draft.days });
+  await runApproval(ctx, c.id, { type: "reward", scopes: draft.scopes, days: draft.days });
 });
 
 contributeComposer.callbackQuery(/^cadm:res:([\w-]+)$/, async (ctx) => {
