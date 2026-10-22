@@ -28,6 +28,8 @@ import {
   submitProposalUrl,
   switchToExistingCreator,
 } from "../../contributions/service.ts";
+import { syncContributionReceipt } from "../../contributions/intake.ts";
+import { syncContributionReview } from "../../contributions/review.ts";
 import { listContributionRewards, scopesLabel, fmtDay, validateRewardParams } from "../../contributions/rewards.ts";
 import { contributionRewardsEnabled } from "../../membership/mode.ts";
 import { getReferralOf } from "../../db/referrals.ts";
@@ -291,6 +293,17 @@ contributeComposer.on(["message:photo", "message:video"], async (ctx, next) => {
     kind: msg.photo ? "photo" : "video",
     mediaGroupId: msg.media_group_id,
   });
+  if (res.closed) {
+    await ctx.reply("⚠️ Cet élément de l’album est arrivé après le début de sa publication ou sa clôture. Il n’a pas été ajouté. Utilisez Contribuer pour envoyer cet élément dans une nouvelle contribution."); return;
+  }
+  if (res.contribution?.status === "pending") {
+    if (res.added) {
+      await syncContributionReceipt(ctx.api, res.contribution.id).catch(error => console.error("[Contributions] Receipt update failed:", error));
+      await syncContributionReview(ctx.api, res.contribution.id).catch(error => console.error("[Contributions] Late album review queued:", error));
+    }
+    return;
+  }
+  if (res.contribution && res.contribution.status !== "collecting") return;
   if (res.contribution?.kind === "new" && res.contribution.step === "collection") { await askCollection(ctx); return; }
   if (res.contribution?.kind === "new" && res.contribution.step !== "media") {
     await ctx.reply(res.contribution.step === "name" ? "Indiquez d'abord le nom complet de la personne." : "Ajoutez un lien de profil social ou appuyez sur Passer avant d'envoyer le contenu.", {
@@ -298,10 +311,8 @@ contributeComposer.on(["message:photo", "message:video"], async (ctx, next) => {
     }); return;
   }
   if (!res.contribution) return next(); // no open session (or details incomplete): ignore silently
-  if (res.added && res.newAlbum) {
-    await ctx.reply(`✔ Reçu (${res.count} jusqu'ici). Envoyez-en d'autres ou appuyez sur Terminer.`, {
-      reply_markup: collectingKeyboard(),
-    });
+  if (res.added) {
+    await syncContributionReceipt(ctx.api, res.contribution.id).catch(error => console.error("[Contributions] Receipt update failed:", error));
   }
 });
 
@@ -318,8 +329,9 @@ contributeComposer.on("message", async (ctx, next) => {
 });
 
 contributeComposer.callbackQuery("contrib:finish", async (ctx) => {
+  await ctx.answerCallbackQuery({ text: "Vérification des éléments reçus…" });
   const res = await finishContribution(ctx.api, ctx.from.id);
-  await ctx.answerCallbackQuery();
+  if (res.ok) await syncContributionReceipt(ctx.api, res.contribution!.id).catch(() => {});
   await ctx.reply(
     res.ok
       ? `✅ Merci ! Vos ${res.contribution!.items.length} élément(s) pour *${mdEsc(res.contribution!.creatorName)}* ont été envoyés pour examen. ` +

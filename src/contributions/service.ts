@@ -32,6 +32,7 @@ import {
   saveContribution,
   transitionContribution,
   appendContributionItem,
+  getAlbumContribution,
 } from "../db/contributions.ts";
 import { withJobLease } from "../ops/locks.ts";
 import { classifyTelegramError } from "../migration/service.ts";
@@ -47,6 +48,7 @@ import {
   ContributionItem,
   Creator,
 } from "../types.ts";
+import { waitForAlbumReceipt, flushContributionReceipts } from "./intake.ts";
 import { notifyContributionReview, syncContributionReview, flushContributionReviews } from "./review.ts";
 import { fmtDay, grantContributionReward, scopesLabel, validateRewardParams } from "./rewards.ts";
 import { awardContributionBonus } from "../referrals/service.ts";
@@ -230,17 +232,20 @@ export async function switchToExistingCreator(
 export async function addContributionItem(
   userId: number,
   item: ContributionItem
-): Promise<{ added: boolean; count: number; newAlbum: boolean; contribution?: Contribution }> {
+): Promise<{ added: boolean; count: number; newAlbum: boolean; closed?: boolean; contribution?: Contribution }> {
   // Album updates may arrive concurrently through separate webhook requests.
   for (let attempt = 0; attempt < 20; attempt++) {
-    const c = await getActiveContribution(userId);
+    const bound = item.mediaGroupId ? await getAlbumContribution(userId, item.mediaGroupId) : null;
+    const c = bound ?? await getActiveContribution(userId);
     if (!c) return { added: false, count: 0, newAlbum: false };
-    if (c.kind === "new" && c.step !== "media") return { added: false, count: c.items.length, newAlbum: false, contribution: c };
     if (c.items.some(i => i.messageId === item.messageId)) return { added: false, count: c.items.length, newAlbum: false, contribution: c };
+    if (c.status !== "collecting" && c.status !== "pending") return { added: false, count: c.items.length, newAlbum: false, closed: true, contribution: c };
+    if (c.status === "collecting" && c.kind === "new" && c.step !== "media") return { added: false, count: c.items.length, newAlbum: false, contribution: c };
     const last = c.items[c.items.length - 1];
     const newAlbum = !(item.mediaGroupId && last?.mediaGroupId === item.mediaGroupId);
     const updated = await appendContributionItem(c, item);
     if (updated) return { added: true, count: updated.items.length, newAlbum, contribution: updated };
+    await new Promise(resolve => setTimeout(resolve, 2 + Math.random() * 8));
   }
   throw new Error("Plusieurs médias arrivent simultanément. Réessayez cet élément.");
 }
@@ -267,21 +272,26 @@ export async function finishContribution(
   api: ContributionApiLike,
   userId: number
 ): Promise<{ ok: boolean; contribution?: Contribution; error?: string }> {
-  const c = await getActiveContribution(userId);
-  if (!c) return { ok: false, error: "Vous n'avez aucune contribution en cours." };
-  if (c.kind === "new" && (c.step !== "media" || !c.proposal)) {
-    return { ok: false, error: "Complétez d'abord les informations du créateur (nom, lien, collection)." };
+  const active = await getActiveContribution(userId);
+  if (!active) return { ok: false, error: "Vous n'avez aucune contribution en cours." };
+  const deadline = Date.now() + 8000;
+  let submitted: Contribution | null = null;
+  while (Date.now() < deadline) {
+    const c = await waitForAlbumReceipt(active.id, deadline);
+    if (!c) return { ok: false, error: "La réception de l’album est encore en cours. Vos éléments sont conservés ; appuyez de nouveau sur Terminer dans quelques instants." };
+    if (c.status !== "collecting") return { ok: false, error: "Cette contribution a déjà été soumise ou annulée." };
+    if (c.kind === "new" && (c.step !== "media" || !c.proposal)) return { ok: false, error: "Complétez d'abord les informations du créateur." };
+    const amateurError = validateAmateurSubmission(c);
+    if (amateurError) return { ok: false, error: amateurError };
+    if (c.items.length === 0) return { ok: false, error: "Envoyez d'abord au moins une photo ou une vidéo." };
+    submitted = await transitionContribution(c.id, ["collecting"], x => {
+      x.status = "pending";
+      x.step = undefined;
+      x.submittedAt = new Date().toISOString();
+    }, c);
+    if (submitted) break; // A racing append changes the snapshot and restarts the quiet window.
   }
-  const amateurError = validateAmateurSubmission(c);
-  if (amateurError) return { ok: false, error: amateurError };
-  if (c.items.length === 0) return { ok: false, error: "Envoyez d'abord au moins une photo ou une vidéo." };
-
-  const submitted = await transitionContribution(c.id, ["collecting"], (x) => {
-    x.status = "pending";
-    x.step = undefined;
-    x.submittedAt = new Date().toISOString();
-  });
-  if (!submitted) return { ok: false, error: "Cette contribution a déjà été soumise." };
+  if (!submitted) return { ok: false, error: "La réception est encore en cours. Vos éléments sont conservés ; réessayez Terminer." };
   await logAuditEvent(
     "contribution_submitted",
     { contributionId: submitted.id, creatorId: submitted.creatorId, kind: submitted.kind ?? "existing", items: submitted.items.length },
@@ -290,7 +300,7 @@ export async function finishContribution(
   );
 
   await notifyContributionReview(api, submitted.id).catch(error => console.error("[Review] Notification queued:", error));
-  return { ok: true, contribution: submitted };
+  return { ok: true, contribution: (await getContribution(submitted.id)) ?? submitted };
 }
 
 // ---------------------------------------------------------------------------
@@ -365,6 +375,8 @@ export async function rejectContribution(
     x.itemCount = x.items.length;
     x.items = [];
     x.profileScreenshotMessageId = undefined;
+    x.lateAlbumMessageIds = undefined;
+    x.reviewMessages = x.reviewMessages?.map(({ chatId, messageId }) => ({ chatId, messageId }));
   });
   if (!updated) return { ok: false, error: "Cette contribution n'est plus en attente d'examen." };
   await logAuditEvent("contribution_rejected", { contributionId: id, reason: cleanReason }, adminId, updated.userId);
@@ -467,8 +479,8 @@ export async function approveContribution(
   adminId: number,
   decision: ContributionDecision = { type: "no_reward" }
 ): Promise<PublishOutcome> {
-  const current = await getContribution(id);
-  if (!current) return { ok: false, error: "Contribution introuvable." };
+  const current = await waitForAlbumReceipt(id);
+  if (!current) return { ok: false, error: "La réception de l’album est encore en cours. Réessayez dans quelques instants." };
 
   if ((current.submissionCollection === "amateur" || (decision.type === "reward" && decision.scopes.includes("amateur"))) && !isAdministrator(adminId)) return { ok: false, error: "Administrateur requis pour Amateur." };
   const invalid = approveValidation(current, decision);
@@ -688,6 +700,7 @@ export async function continueAllPublishing(api: ContributionApiLike): Promise<n
     if (r.ok && !r.inProgress) n++;
   }
   await flushContributionReviews(api);
+  await flushContributionReceipts(api);
   return n;
 }
 

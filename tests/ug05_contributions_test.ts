@@ -44,8 +44,9 @@ const ADMIN = 111111;
 const DAY = 86_400_000;
 
 async function submit(api: MockMigrationApi, creatorId: string, user = MEMBER, ids = [31, 32, 33]) {
-  assert((await startContribution(user, creatorId)).ok);
-  for (const id of ids) await addContributionItem(user, { messageId: id, kind: "photo", mediaGroupId: id < 33 ? "g" : undefined });
+  const started = await startContribution(user, creatorId);
+  assert(started.ok);
+  for (const id of ids) await addContributionItem(user, { messageId: id, kind: "photo", mediaGroupId: id < 33 ? `album-${started.contribution!.id}` : undefined });
   const f = await finishContribution(api, user);
   assert(f.ok, f.error);
   return f.contribution!;

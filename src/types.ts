@@ -956,7 +956,11 @@ export interface Contribution {
   step?: "name" | "url" | "collection" | "profile_screenshot" | "media";
   submissionCollection?: CreatorCollection;
   profileScreenshotMessageId?: number;
-  reviewMessages?: { chatId: number; messageId: number }[];
+  reviewMessages?: { chatId: number; messageId: number; previewMessageIds?: number[] }[];
+  /** Last durable media receipt, independent of UI edits/review changes. */
+  lastMediaAt?: number;
+  /** Late album members accepted while the submission still awaits review. */
+  lateAlbumMessageIds?: number[];
   /** The administrator's final choice, recorded when approval starts. */
   decision?: ContributionDecision;
   /** Reward bookkeeping: none = approved without reward, granted = days applied. */

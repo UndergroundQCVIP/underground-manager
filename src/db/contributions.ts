@@ -14,10 +14,16 @@ export async function getContribution(id: string): Promise<Contribution | null> 
 export async function saveContribution(c: Contribution): Promise<void> {
   const kv = await getKv();
   const next = { ...c, updatedAt: new Date().toISOString() };
-  const atomic = kv.atomic().set(["contributions", c.id], next);
-  if (c.status === "collecting") atomic.set(["contrib_active", c.userId], c.id);
-  else atomic.delete(["contrib_active", c.userId]);
-  await atomic.commit();
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const atomic = kv.atomic().set(["contributions", c.id], next);
+    if (c.status === "collecting") atomic.set(["contrib_active", c.userId], c.id);
+    else {
+      const active = await kv.get<string>(["contrib_active", c.userId]);
+      if (active.value === c.id) atomic.check(active).delete(active.key);
+    }
+    if ((await atomic.commit()).ok) return;
+  }
+  throw new Error("La contribution a changé pendant son enregistrement. Réessayez.");
 }
 
 /** The member's open (collecting) session, if any. */
@@ -58,7 +64,11 @@ export async function transitionContribution(
   const atomic = kv.atomic().check(cur).set(["contributions", id], next);
   if (next.status !== "collecting" && next.status !== "cancelled") atomic.set(["contribution_review_dirty", id], crypto.randomUUID());
   if (next.status === "collecting") atomic.set(["contrib_active", next.userId], id);
-  else atomic.delete(["contrib_active", next.userId]);
+  else {
+    const active = await kv.get<string>(["contrib_active", next.userId]);
+    if (active.value === id) atomic.check(active).delete(active.key);
+  }
+  if (next.items.length && (next.status === "collecting" || next.status === "pending")) atomic.set(["contribution_receipt_dirty", id], crypto.randomUUID());
   const res = await atomic.commit();
   return res.ok ? next : null;
 }
@@ -79,13 +89,40 @@ export async function setModeratorRewardDraft(id: string, adminId: number, patch
   throw new Error("Les choix ont changé. Réessayez.");
 }
 
-/** Append only against the exact collecting snapshot; concurrent album updates retry. */
+/** Album routing survives Finish and isolates, so delayed updates cannot enter a new submission. */
+export async function getAlbumContribution(userId: number, mediaGroupId: string): Promise<Contribution | null> {
+  const kv = await getKv();
+  const id = (await kv.get<string>(["contribution_album", userId, mediaGroupId])).value;
+  const c = id ? await getContribution(id) : null;
+  return c?.userId === userId ? c : null;
+}
+
+/** Append one distinct message atomically; keep late album members in their original pending submission. */
 export async function appendContributionItem(snapshot: Contribution, item: import("../types.ts").ContributionItem): Promise<Contribution | null> {
   const kv = await getKv();
   const entry = await kv.get<Contribution>(["contributions", snapshot.id]);
-  if (!entry.value || entry.value.status !== "collecting" || JSON.stringify(entry.value) !== JSON.stringify(snapshot)) return null;
+  if (!entry.value || JSON.stringify(entry.value) !== JSON.stringify(snapshot)) return null;
   const next = structuredClone(entry.value);
+  const pendingAlbum = next.status === "pending" && !!item.mediaGroupId && next.items.some(i => i.mediaGroupId === item.mediaGroupId);
+  if (next.status !== "collecting" && !pendingAlbum) return null;
+  if (next.items.some(i => i.messageId === item.messageId)) return null;
+  const active = await kv.get<string>(["contrib_active", next.userId]);
+  if (next.status === "collecting" && active.value !== next.id) return null;
+  const atomic = kv.atomic().check(entry);
+  if (next.status === "collecting") atomic.check(active);
+  if (item.mediaGroupId) {
+    const album = await kv.get<string>(["contribution_album", next.userId, item.mediaGroupId]);
+    if (album.value && album.value !== next.id) return null;
+    atomic.check(album).set(album.key, next.id, { expireIn: 7 * 86400000 });
+  }
   next.items.push(item);
+  next.lastMediaAt = Date.now();
   next.updatedAt = new Date().toISOString();
-  return (await kv.atomic().check(entry).set(entry.key, next).commit()).ok ? next : null;
+  if (pendingAlbum) {
+    next.lateAlbumMessageIds = [...(next.lateAlbumMessageIds ?? []), item.messageId];
+    if (next.proposal) next.proposal.identityRightsConfirmed = false;
+    atomic.set(["contribution_review_dirty", next.id], crypto.randomUUID());
+  }
+  atomic.set(["contribution_receipt_dirty", next.id], crypto.randomUUID());
+  return (await atomic.set(entry.key, next).commit()).ok ? next : null;
 }
