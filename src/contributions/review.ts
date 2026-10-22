@@ -81,16 +81,18 @@ export async function notifyContributionReview(
     if (!c || c.status !== "pending" || c.reviewMessages?.length) return;
     const config = getConfig();
     const deliver = async (chatId: number) => {
+      const previewMessageIds: number[] = [];
       // Preview failures must not hide the moderation request.
       try {
         for (let i = 0; i < c.items.length; i += 50) {
-          await api.copyMessages(
+          const copied = await api.copyMessages(
             chatId,
             c.userId,
             c.items.slice(i, i + 50).map((it) => it.messageId).sort((a, b) =>
               a - b
             ),
           );
+          if (copied.length === c.items.slice(i, i + 50).length) previewMessageIds.push(...c.items.slice(i, i + 50).map(it => it.messageId));
         }
       } catch (error) {
         console.error("[Review] Preview unavailable:", error);
@@ -111,6 +113,7 @@ export async function notifyContributionReview(
           x.reviewMessages = [...(x.reviewMessages ?? []), {
             chatId,
             messageId: sent.message_id!,
+            previewMessageIds,
           }];
         });
       }
@@ -151,6 +154,21 @@ export async function syncContributionReview(
     ) return;
     const card = reviewCard(entry.value);
     for (const ref of entry.value.reviewMessages ?? []) {
+      const progressKey = ["contribution_review_preview", id, ref.chatId, ref.messageId];
+      if (entry.value.status === "rejected" || entry.value.status === "cancelled") await kv.delete(progressKey);
+      const progress = (await kv.get<number[]>(progressKey)).value;
+      // Old cards predate preview tracking; only new late album items are unknown there.
+      const previewed = new Set(progress ?? ref.previewMessageIds ?? entry.value.items
+        .filter(item => !entry.value!.lateAlbumMessageIds?.includes(item.messageId)).map(item => item.messageId));
+      const missing = entry.value.items.filter(item => !previewed.has(item.messageId)).sort((a,b) => a.messageId-b.messageId);
+      for (let i = 0; i < missing.length; i += 50) {
+        const ids = missing.slice(i, i + 50).map(item => item.messageId);
+        const copied = await api.copyMessages(ref.chatId, entry.value.userId, ids);
+        if (copied.length !== ids.length) throw new Error("Aperçu incomplet : utilisez Revoir l’aperçu pour vérifier les originaux.");
+        ids.forEach(messageId => previewed.add(messageId));
+        await kv.set(progressKey, [...previewed]);
+      }
+
       try {
         await api.editMessageText!(
           ref.chatId,
