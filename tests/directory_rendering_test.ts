@@ -110,6 +110,7 @@ Deno.test("DIRECTORY RENDER — undeletable legacy trailing posts are compacted 
     const stale = api.editedMessages.find((m) => m.messageId === 12)!;
     assert(stale.text.length < 100);
     assert(!stale.text.includes("Aria"));
+    assertEquals((stale.options as { reply_markup: unknown }).reply_markup, { inline_keyboard: [] });
     const state = await getDirectorySyncState();
     assertEquals(state.lastError, undefined);
     assertEquals(state.isDirty, false);

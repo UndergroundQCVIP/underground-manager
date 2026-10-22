@@ -336,7 +336,7 @@ async function syncCollection(
           // Telegram may refuse deletion of older posts. Remove the obsolete list by editing it.
           try {
             await api.editMessageText(channelId, id, "📚 Ce répertoire a été regroupé. Consultez les messages épinglés.", {
-              reply_markup: directoryNavKeyboard(collection),
+              reply_markup: { inline_keyboard: [] },
             });
           } catch (editError) {
             if (!isMessageGone(editError) && !isMessageNotModified(editError)) throw editError;

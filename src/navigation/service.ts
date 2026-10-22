@@ -164,7 +164,7 @@ async function syncOneLocked(
         catch (error) {
           if (!isMessageGone(error) && !String(error).toLowerCase().includes("message to delete not found")) {
             if (!/can't be deleted|cannot be deleted/i.test(String(error))) throw error;
-            try { await api.editMessageText(chatId, navigation.lobby.messageId, "🧭 Le menu d'accueil a été regroupé. Consultez le message épinglé."); }
+            try { await api.editMessageText(chatId, navigation.lobby.messageId, "🧭 Le menu d'accueil a été regroupé. Consultez le message épinglé.", { reply_markup: { inline_keyboard: [] } }); }
             catch (editError) { if (!isMessageGone(editError) && !isMessageNotModified(editError)) throw editError; }
           }
         }

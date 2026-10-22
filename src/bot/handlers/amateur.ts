@@ -167,7 +167,7 @@ amateurComposer.callbackQuery(/^amateur:(directory|page:(\d+))$/, async (ctx) =>
       try { await ctx.api.deleteMessage(ctx.from.id, id); }
       catch (error) {
         if (isMessageGone(error) || String(error).toLowerCase().includes("message to delete not found")) continue;
-        try { await ctx.api.editMessageText(ctx.from.id, id, "🔒 Ancienne liste remplacée par le répertoire Amateur actualisé."); }
+        try { await ctx.api.editMessageText(ctx.from.id, id, "🔒 Ancienne liste remplacée par le répertoire Amateur actualisé.", { reply_markup: { inline_keyboard: [] } }); }
         catch (editError) { if (!isMessageGone(editError) && !isMessageNotModified(editError)) throw editError; }
       }
     }
