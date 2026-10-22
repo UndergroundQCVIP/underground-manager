@@ -129,7 +129,7 @@ export async function repairDirectory(): Promise<RepairReport> {
 }
 
 export function collectionLabel(c: Creator): string {
-  return creatorCollection(c) === "retro" ? "Retro" : "Regular";
+  return creatorCollection(c) === "amateur" ? "Amateur" : creatorCollection(c) === "retro" ? "Retro" : "Regular";
 }
 
 /**

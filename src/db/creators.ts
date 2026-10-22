@@ -4,7 +4,7 @@
  */
 
 import { getKv } from "./kv.ts";
-import { CollectionCategory, Creator } from "../types.ts";
+import { CreatorCollection, Creator } from "../types.ts";
 import { markDirectoryDirty } from "./directory.ts";
 
 /** Case- and whitespace-insensitive (NFKC) key used to de-duplicate creator names. */
@@ -17,7 +17,7 @@ export function normalizeCreatorName(name: string): string {
 }
 
 /** Legacy creators carry no collection and are Regular. */
-export function creatorCollection(creator: Pick<Creator, "collection">): CollectionCategory {
+export function creatorCollection(creator: Pick<Creator, "collection">): CreatorCollection {
   return creator.collection ?? "regular";
 }
 
@@ -64,7 +64,7 @@ export async function getCreatorByName(name: string): Promise<Creator | null> {
 export async function listCreators(filter?: {
   status?: "active" | "archived";
   hasContentOnly?: boolean;
-  collection?: CollectionCategory;
+  collection?: CreatorCollection;
 }): Promise<Creator[]> {
   const kv = await getKv();
   const iter = kv.list<Creator>({ prefix: ["creators"] });
@@ -73,6 +73,8 @@ export async function listCreators(filter?: {
   for await (const entry of iter) {
     const creator = entry.value;
     if (!creator) continue;
+    // Private creators are opt-in, never included by public/member "all" callers.
+    if (creatorCollection(creator) === "amateur" && filter?.collection !== "amateur") continue;
 
     if (filter?.status && creator.status !== filter.status) {
       continue;
@@ -120,6 +122,11 @@ export async function updateCreatorName(
   newName: string
 ): Promise<Creator | null> {
   const trimmed = newName.trim();
+  const current = await getCreator(id);
+  const existing = await getCreatorByName(trimmed);
+  if (existing && existing.id !== id && (current?.collection === "amateur" || existing.collection === "amateur")) {
+    throw new Error("Ce nom est déjà associé à un autre sujet. Utilisez un nom distinct pour la collection privée.");
+  }
   const updated = await patchCreator(id, (cur) => ({
     ...cur,
     name: trimmed,
@@ -194,7 +201,7 @@ export async function linkCreatorToWantedList(
  */
 export async function relocateCreator(
   id: string,
-  target: { chatId: number; topicId: number; collection: CollectionCategory }
+  target: { chatId: number; topicId: number; collection: CreatorCollection }
 ): Promise<Creator | null> {
   const kv = await getKv();
   const current = await getCreator(id);

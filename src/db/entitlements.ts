@@ -99,7 +99,14 @@ export async function getActivePaidEntitlements(
 
 export async function hasAccessToSpace(userId: number, spaceId: SpaceId): Promise<boolean> {
   const active = await getActiveUserEntitlements(userId);
-  return active.some((ent) => ent.spaces.includes(spaceId));
+  return active.some((ent) => entitlementGrantsSpace(ent, spaceId));
+}
+
+/** Amateur requires an explicit manual admin grant, never a paid/contribution/full entitlement. */
+export function entitlementGrantsSpace(ent: Entitlement, spaceId: SpaceId): boolean {
+  return ent.spaces.includes(spaceId) && (spaceId !== "amateur_collections" ||
+    (ent.source === "complimentary" && ent.metadata?.accessLevel === "amateur" &&
+      Number.isSafeInteger(ent.metadata.grantedBy) && (ent.metadata.grantedBy ?? 0) > 0));
 }
 
 export async function getMembershipSummary(userId: number): Promise<MembershipSummary> {
@@ -113,7 +120,7 @@ export async function getMembershipSummary(userId: number): Promise<MembershipSu
 
   for (const ent of activeEntitlements) {
     for (const space of ent.spaces) {
-      accessibleSpaceSet.add(space);
+      if (entitlementGrantsSpace(ent, space)) accessibleSpaceSet.add(space);
     }
     const expMs = new Date(ent.expiresAt).getTime();
     if (expMs > latestExpiryMs) {
@@ -136,7 +143,7 @@ export async function getMembershipSummary(userId: number): Promise<MembershipSu
   return {
     userId,
     isMember,
-    plan: hasRetroAccess ? "retro_plus" : isMember ? "regular" : "none",
+    plan: hasRetroAccess ? "retro_plus" : accessibleSpaceSet.has("vip_collections") ? "regular" : "none",
     hasRetroAccess,
     hasPaid,
     hasComplimentary,

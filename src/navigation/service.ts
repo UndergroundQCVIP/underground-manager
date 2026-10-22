@@ -20,9 +20,9 @@ import { getDirectorySyncState } from "../db/directory.ts";
 import { isMessageGone, isMessageNotModified, sha256Hex } from "../wanted/service.ts";
 import { CollectionCategory, MembershipMode } from "../types.ts";
 
-export type NavPage = "explore" | "directory" | "regular" | "retro" | "how" | "contribute" | "join" | "rules" | "leaderboard";
+export type NavPage = "explore" | "directory" | "regular" | "retro" | "amateur" | "how" | "contribute" | "join" | "rules" | "leaderboard";
 export const NAV_PAGES: readonly NavPage[] = [
-  "explore", "directory", "regular", "retro", "how", "contribute", "join", "rules", "leaderboard",
+  "explore", "directory", "regular", "retro", "amateur", "how", "contribute", "join", "rules", "leaderboard",
 ];
 
 export interface UrlButton {
@@ -53,6 +53,7 @@ export function welcomeKeyboard(): UrlKeyboard {
     inline_keyboard: [
       [{ text: "🧭 Explorer le club", url: exploreUrl() }, { text: "📚 Répertoire des créateurs", url: directoryUrl() }],
       [{ text: "📖 Collection Regular", url: botLink("regular") }, { text: "🎞️ Collection Retro", url: botLink("retro") }],
+      [{ text: "🔒 Collection Amateur — accès sur autorisation", url: botLink("amateur") }],
       [{ text: "❓ Comment ça fonctionne", url: botLink("how") }, { text: "➕ Contribuer du contenu", url: botLink("contribute") }],
       [{ text: "💎 Joindre LA CONFRÉRIE", url: botLink("join") }, { text: "📜 Règles et soutien", url: botLink("rules") }],
     ],
@@ -90,6 +91,7 @@ export function buildLobbyMessage(mode: MembershipMode): { text: string; reply_m
       `*À explorer :*\n` +
       `• Collection *Regular* — forum privé de créateurs\n` +
       `• Collection *Retro* — forum privé distinct\n` +
+      `• Collection *Amateur* — accès sur autorisation administrative distincte\n` +
       `• Répertoire public des créateurs\n` +
       `• Liste de souhaits et votes (réservés aux membres)\n` +
       `• Comment fonctionnent les contributions\n` +

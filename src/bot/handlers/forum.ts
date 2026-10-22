@@ -12,6 +12,7 @@ import {
   handleMediaUpload,
   registerOrRepairTopic,
 } from "../../creators/service.ts";
+import { collectionLabel } from "../../creators/admin.ts";
 import { getKv } from "../../db/kv.ts";
 
 export const forumComposer = new Composer();
@@ -54,7 +55,7 @@ forumComposer.command("register_here", async (ctx) => {
   const collection = collectionForChat(ctx.chat.id);
   if (!collection) {
     await ctx.reply(
-      `⚠️ Ce forum n'est pas géré par le robot. Vérifiez que son identifiant (${ctx.chat.id}) correspond à VIP_COLLECTIONS_CHAT_ID ou TELEGRAM_RETRO_FORUM_CHAT_ID dans l'environnement du robot (Deno Deploy), puis redéployez.`,
+      `⚠️ Ce forum n'est pas géré par le robot. Vérifiez que son identifiant (${ctx.chat.id}) correspond à VIP_COLLECTIONS_CHAT_ID, TELEGRAM_RETRO_FORUM_CHAT_ID ou TELEGRAM_AMATEUR_FORUM_CHAT_ID dans l'environnement du robot (Deno Deploy), puis redéployez.`,
       { message_thread_id: ctx.msg.message_thread_id }
     );
     return;
@@ -74,7 +75,7 @@ forumComposer.command("register_here", async (ctx) => {
   try {
     const creator = await registerOrRepairTopic(ctx.from?.id ?? 0, ctx.chat.id, threadId, name);
     await ctx.reply(
-      `✅ « ${creator.name} » est inscrit (${collection === "retro" ? "Retro" : "Regular"}). Il apparaît dans le répertoire à la prochaine synchronisation.`,
+      `✅ « ${creator.name} » est inscrit (${collectionLabel(creator)}). ${collection === "amateur" ? "Son répertoire reste privé, dans Administration → Amateur." : "Il apparaît dans le répertoire à la prochaine synchronisation."}`,
       { message_thread_id: threadId }
     );
   } catch (err) {
@@ -145,7 +146,7 @@ forumComposer.on(["message:photo", "message:video"], async (ctx) => {
       // Still nothing registered although an administrator uploaded media: say why, once a day.
       if (!creator && isAdminSender) {
         if (!collectionForChat(ctx.chat.id)) {
-          await hintOncePerDay(ctx, [ctx.chat.id], `⚠️ Ce forum n'est pas géré par le robot : son identifiant (${ctx.chat.id}) ne correspond ni à VIP_COLLECTIONS_CHAT_ID ni à TELEGRAM_RETRO_FORUM_CHAT_ID dans l'environnement du robot. Corrigez la configuration puis redéployez.`);
+          await hintOncePerDay(ctx, [ctx.chat.id], `⚠️ Ce forum n'est pas géré par le robot : son identifiant (${ctx.chat.id}) ne correspond ni à VIP_COLLECTIONS_CHAT_ID ni à TELEGRAM_RETRO_FORUM_CHAT_ID ni à TELEGRAM_AMATEUR_FORUM_CHAT_ID dans l'environnement du robot. Corrigez la configuration puis redéployez.`);
         } else {
           await hintOncePerDay(ctx, [ctx.chat.id, threadId], "ℹ️ Ce sujet n'est pas encore inscrit au répertoire. Tapez /register_here ici pour l'inscrire.");
         }

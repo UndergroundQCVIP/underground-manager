@@ -7,6 +7,7 @@
  */
 
 import { Api, Composer, Context, InlineKeyboard } from "grammy";
+import { collectionLabel } from "../../creators/admin.ts";
 import { isAdministrator } from "../../config.ts";
 import { adminRouteGuard } from "../middleware/auth.ts";
 import { collectionForChat, handleForumTopicCreated } from "../../creators/service.ts";
@@ -35,7 +36,7 @@ const mdEsc = (t: string) => t.replace(/([_*`\[])/g, "\\$1");
  */
 export async function presentImport(
   api: Api,
-  params: { adminId: number; creator: Creator; isNewCreator: boolean; link1: string; link2: string; forum: "Retro" | "Regular" }
+  params: { adminId: number; creator: Creator; isNewCreator: boolean; link1: string; link2: string; forum: "Retro" | "Regular" | "Amateur" }
 ): Promise<{ ok: false; error: string } | { ok: true; blocked: boolean; dmSent: boolean; jobId: string }> {
   const { adminId, creator, isNewCreator, forum } = params;
   const res = await prepareImport(api, { adminId, creatorId: creator.id, link1: params.link1, link2: params.link2, isNewCreator });
@@ -166,7 +167,7 @@ importsComposer.command("import", async (ctx, next) => {
     }
   }
 
-  const forum = collectionForChat(ctx.chat.id) === "retro" ? "Retro" : "Regular";
+  const forum = collectionLabel(creator) as "Retro" | "Regular" | "Amateur";
   const out = await presentImport(ctx.api, { adminId, creator, isNewCreator, link1, link2, forum });
   if (!out.ok) {
     await ctx.reply(`⚠️ ${out.error}`, { message_thread_id: topicId });

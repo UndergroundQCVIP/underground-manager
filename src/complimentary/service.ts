@@ -2,7 +2,7 @@
  * LA CONFRÉRIE — Complimentary Membership Service
  */
 
-import { getClubName } from "../config.ts";
+import { getClubName, getConfig, isAdministrator } from "../config.ts";
 import {
   COMPLIMENTARY_REASONS,
   COMPLIMENTARY_SPACES,
@@ -42,6 +42,12 @@ export interface GrantComplimentaryResult {
 export async function grantComplimentaryAccess(
   params: GrantComplimentaryParams
 ): Promise<GrantComplimentaryResult> {
+  if (params.level === "amateur" && !isAdministrator(params.adminId)) {
+    return { success: false, error: "Seul un administrateur peut accorder l'accès Amateur." };
+  }
+  if (params.level === "amateur" && !getConfig().TELEGRAM_AMATEUR_FORUM_CHAT_ID) {
+    return { success: false, error: "Configurez d'abord le forum Amateur avec /setup_amateur." };
+  }
   if (params.durationDays <= 0) {
     return { success: false, error: "Duration must be greater than zero days." };
   }
@@ -57,7 +63,7 @@ export async function grantComplimentaryAccess(
   // Check existing entitlements to ensure we do not shorten existing valid access
   const active = await getActiveUserEntitlements(params.userId);
   let baseMs = nowMs;
-  const existingComplimentary = active.find((e) => e.source === "complimentary");
+  const existingComplimentary = active.find((e) => e.source === "complimentary" && e.spaces.some((s) => spaces.includes(s)));
   if (existingComplimentary) {
     const existingExpiryMs = new Date(existingComplimentary.expiresAt).getTime();
     if (existingExpiryMs > nowMs) {

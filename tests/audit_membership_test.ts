@@ -84,7 +84,7 @@ Deno.test("AUDIT SECURITY — configuration without a webhook secret is fatal in
   assertEquals(fatalConfigErrors({ ...base, BOT_MODE: "polling", WEBHOOK_SECRET: "" }).length, 0);
   // three different spaces are required
   assert(validateConfig({ ...base, GENERAL_CHAT_ID: base.VIP_COLLECTIONS_CHAT_ID, WEBHOOK_SECRET: "x".repeat(32) })
-    .some((e) => e.includes("three different chats")));
+    .some((e) => e.includes("different chats")));
   assertEquals(getDailySyncHour({ ...base, DIRECTORY_UPDATE_CRON: "0 3 * * *" }), 3);
   assertEquals(getDailySyncHour({ ...base, DIRECTORY_UPDATE_CRON: "30 5 * * *" }), 5);
   assertEquals(getDailySyncHour({ ...base, DIRECTORY_UPDATE_CRON: "garbage" }), 3);

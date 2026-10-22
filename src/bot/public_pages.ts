@@ -15,6 +15,7 @@ import { membershipMethods, messages } from "./messages.ts";
 import { exploreUrl, directoryUrl, NavPage } from "../navigation/service.ts";
 import { MembershipMode, MembershipSummary, SpaceId } from "../types.ts";
 import { InviteApiLike } from "../access/links.ts";
+import { hasAccessToSpace } from "../db/entitlements.ts";
 
 export interface PageResult {
   text: string;
@@ -84,6 +85,15 @@ export async function renderNavPage(
   const kb = new InlineKeyboard();
 
   switch (page) {
+    case "amateur": {
+      let text = "🔒 *COLLECTION AMATEUR*\n\nL'accès est accordé uniquement par les administrateurs, sur autorisation distincte.\nLes abonnements et les récompenses Regular/Retro ne débloquent pas cette collection.";
+      if (getChatId("amateur_collections") && await hasAccessToSpace(summary.userId, "amateur_collections")) {
+        try { kb.url("👉 Joindre la collection Amateur", await getOrCreateJoinLink(api, "amateur_collections")).row();
+          text += "\n\n✅ Votre autorisation Amateur est active.";
+        } catch { text += "\n\nLe lien est temporairement indisponible. Communiquez avec un administrateur."; }
+      } else text += "\n\n🔐 Collection verrouillée. Communiquez avec un administrateur pour demander l'accès.";
+      return { text, kb: back(kb) };
+    }
     case "regular":
     case "retro":
       return await collectionPage(page, api, summary, mode);
@@ -138,11 +148,12 @@ export async function renderNavPage(
       const lobby = getConfig().TELEGRAM_PUBLIC_LOBBY_URL;
       if (lobby) kb.url("🧭 Ouvrir LA CONFRÉRIE | ACCUEIL", exploreUrl()).row();
       kb.text("📖 Collection Regular", "nav:regular").text("🎞️ Collection Retro", "nav:retro").row();
+      kb.text("🔒 Collection Amateur", "nav:amateur").row();
       kb.text("❓ Comment ça fonctionne", "nav:how").text("📚 Répertoire", "nav:directory").row();
       return {
         text:
           `🧭 *EXPLORER ${club}*\n\n` +
-          `Une collection de créateurs propulsée par la communauté, avec deux forums privés distincts (Regular et Retro).\n\n` +
+          `Une collection de créateurs propulsée par la communauté : Regular et Retro, ainsi qu'une collection Amateur sur autorisation administrative distincte.\n\n` +
           `${membershipMethods(mode)}`,
         kb: back(kb),
       };
