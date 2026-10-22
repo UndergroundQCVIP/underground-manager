@@ -8,7 +8,7 @@
 import { Composer, InlineKeyboard } from "grammy";
 import { getConfig, isAdministrator } from "../../config.ts";
 import { listCreators } from "../../db/creators.ts";
-import { buildDirectoryMessages, directoryContentCounts, syncPublicDirectory } from "../../directory/sync.ts";
+import { buildDirectoryMessages, datedDirectoryPage, directoryContentCounts, showDirectoryPage, syncPublicDirectory } from "../../directory/sync.ts";
 import { getKv } from "../../db/kv.ts";
 import { withJobLease } from "../../ops/locks.ts";
 import { isMessageGone, isMessageNotModified } from "../../wanted/service.ts";
@@ -24,7 +24,15 @@ directoryComposer.callbackQuery(/^dir:refresh:(regular|retro)$/, async (ctx) => 
   }
   const collection = ctx.match[1] as CollectionCategory;
   await ctx.answerCallbackQuery({ text: `Actualisation des créateurs ${collection === "regular" ? "en activité" : "qui ne sont plus en activité"}…` });
-  await syncPublicDirectory(ctx.api, false, collection);
+  const result = await syncPublicDirectory(ctx.api, isAdministrator(ctx.from.id), collection);
+  if (result.error && isAdministrator(ctx.from.id)) await ctx.api.sendMessage(ctx.from.id, `⚠️ Le canal n'a pas pu être actualisé : ${result.error}`);
+});
+
+directoryComposer.callbackQuery(/^dir:page:(regular|retro):(\d+)$/, async ctx => {
+  await ctx.answerCallbackQuery();
+  if (!ctx.chat || !ctx.callbackQuery.message) return;
+  await showDirectoryPage(ctx.api, ctx.chat.id, ctx.callbackQuery.message.message_id,
+    ctx.match[1] as CollectionCategory, Number(ctx.match[2]));
 });
 
 function filterKeyboard(active: "all" | CollectionCategory): InlineKeyboard {
@@ -63,7 +71,7 @@ directoryComposer.callbackQuery(/^dir:(all|regular|retro)$/, async (ctx) => {
       });
     } catch (error) { if (!isMessageNotModified(error)) throw error; }
     for (let i = 0; i < messages.length; i++) {
-      const message = messages[i];
+      const message = datedDirectoryPage(messages[i], new Date().toISOString());
       const options = {
         entities: message.entities,
         reply_markup: admin ? new InlineKeyboard().text("📢 Actualiser le canal — " +

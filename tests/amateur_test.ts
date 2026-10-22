@@ -158,7 +158,7 @@ Deno.test("AMATEUR — a membership update removes someone who entered around th
   } finally { await kv.close(); }
 });
 
-Deno.test("AMATEUR — long private directories reuse continuation messages and never publish to other chats", async () => {
+Deno.test("AMATEUR — long private directories paginate one dated message and never publish to other chats", async () => {
   const kv = await setupTestEnvironment();
   try {
     configure();
@@ -169,10 +169,18 @@ Deno.test("AMATEUR — long private directories reuse continuation messages and 
     const open = callback(ADMIN, "amateur:directory");
     await tg.send(open);
     await tg.send(open);
-    assertEquals(tg.callsOf("sendMessage").length, 1);
+    assertEquals(tg.callsOf("sendMessage").length, 0);
+    const turn = callback(ADMIN, "amateur:page:1");
+    turn.callback_query.message.message_id = open.callback_query.message.message_id;
+    await tg.send(turn);
+    const page = tg.callsOf("editMessageText").at(-1)!;
+    assertStringIncludes(String(page.payload.text), "Private 099");
+    assertStringIncludes(String(page.payload.text), "Page 2/2");
+    assertStringIncludes(String(page.payload.text), "Mis à jour :");
+    assertEquals(page.payload.message_id, open.callback_query.message.message_id);
     for (const call of tg.calls.filter((c) => c.method === "sendMessage" || c.method === "editMessageText")) {
       assertEquals(call.payload.chat_id, ADMIN);
-      assert(String(call.payload.text).length <= 3500);
+      assert(String(call.payload.text).length <= 4096);
       assert(!JSON.stringify(call.payload.reply_markup ?? {}).includes("sync_dir"));
     }
   } finally { await kv.close(); }

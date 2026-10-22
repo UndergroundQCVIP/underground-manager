@@ -408,6 +408,11 @@ export interface DirectoryCollectionState {
   lastSyncAt?: string;
   syncedSeq?: number;
   lastError?: string;
+  /** One channel post; long lists are pages of this same post. */
+  pageCount?: number;
+  activePage?: number;
+  pageGeneration?: string;
+  refreshedAt?: string;
 }
 
 export type WantedCandidateStatus =

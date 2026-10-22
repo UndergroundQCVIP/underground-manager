@@ -14,15 +14,16 @@
 
 import { getClubName, getConfig } from "../config.ts";
 import { getMembershipMode } from "../membership/mode.ts";
-import { membershipMethods } from "../bot/messages.ts";
 import { getNavigationState, saveNavigationState } from "../db/navigation.ts";
 import { getDirectorySyncState } from "../db/directory.ts";
 import { isMessageGone, isMessageNotModified, sha256Hex } from "../wanted/service.ts";
 import { CollectionCategory, MembershipMode } from "../types.ts";
+import { withJobLease } from "../ops/locks.ts";
+import { withDirectoryLock } from "../directory/lock.ts";
 
-export type NavPage = "explore" | "directory" | "regular" | "retro" | "amateur" | "how" | "contribute" | "join" | "rules" | "leaderboard";
+export type NavPage = "explore" | "directory" | "directory_regular" | "directory_retro" | "regular" | "retro" | "amateur" | "how" | "contribute" | "join" | "rules" | "leaderboard";
 export const NAV_PAGES: readonly NavPage[] = [
-  "explore", "directory", "regular", "retro", "amateur", "how", "contribute", "join", "rules", "leaderboard",
+  "explore", "directory", "directory_regular", "directory_retro", "regular", "retro", "amateur", "how", "contribute", "join", "rules", "leaderboard",
 ];
 
 export interface UrlButton {
@@ -52,7 +53,9 @@ export function welcomeKeyboard(): UrlKeyboard {
   return {
     inline_keyboard: [
       [{ text: "🧭 Explorer le club", url: exploreUrl() }, { text: "📚 Répertoire des créateurs", url: directoryUrl() }],
-      [{ text: "📖 Collection Regular", url: botLink("regular") }, { text: "🎞️ Collection Retro", url: botLink("retro") }],
+      [{ text: "📚 Créateurs en activité", url: botLink("directory_regular") }],
+      [{ text: "🎞️ Créateurs qui ne sont plus en activité", url: botLink("directory_retro") }],
+      [{ text: "📖 Accès en activité", url: botLink("regular") }, { text: "🎞️ Accès Retro", url: botLink("retro") }],
       [{ text: "🔒 Collection Amateur — accès sur autorisation", url: botLink("amateur") }],
       [{ text: "❓ Comment ça fonctionne", url: botLink("how") }, { text: "➕ Contribuer du contenu", url: botLink("contribute") }],
       [{ text: "💎 Joindre LA CONFRÉRIE", url: botLink("join") }, { text: "📜 Règles et soutien", url: botLink("rules") }],
@@ -60,10 +63,30 @@ export function welcomeKeyboard(): UrlKeyboard {
   };
 }
 
+/** Link straight to the maintained public posts as soon as they have been published. */
+async function publishedWelcomeKeyboard(): Promise<UrlKeyboard> {
+  const keyboard = welcomeKeyboard();
+  const state = await getDirectorySyncState();
+  const channelId = getConfig().PUBLIC_DIRECTORY_CHAT_ID;
+  if (String(channelId).startsWith("-100")) {
+    for (const [index, collection] of (["regular", "retro"] as const).entries()) {
+      const slot = state.collections?.[collection];
+      if (slot?.channelId === channelId && slot.publishedMessageIds[0]) {
+        keyboard.inline_keyboard[index + 1][0].url = `https://t.me/c/${String(channelId).slice(4)}/${slot.publishedMessageIds[0]}`;
+      }
+    }
+  }
+  return keyboard;
+}
+
 /** Navigation keyboard attached to every public directory post. */
-export function directoryNavKeyboard(collection?: CollectionCategory): DirectoryKeyboard {
+export function directoryNavKeyboard(collection?: CollectionCategory, page = 0, pages = 1): DirectoryKeyboard {
   return {
     inline_keyboard: [
+      ...(collection && pages > 1 ? [[
+        ...(page > 0 ? [{ text: "◀️ Précédent", callback_data: `dir:page:${collection}:${page - 1}` }] : []),
+        ...(page + 1 < pages ? [{ text: "Suivant ▶️", callback_data: `dir:page:${collection}:${page + 1}` }] : []),
+      ]] : []),
       [{ text: "💎 Rejoindre", url: botLink("join") }, { text: "➕ Contribuer", url: botLink("contribute") }],
       ...(collection ? [[{ text: `🔄 Actualiser — ${collection === "regular" ? "en activité" : "inactifs"}`, callback_data: `dir:refresh:${collection}` }]] : []),
     ],
@@ -72,46 +95,28 @@ export function directoryNavKeyboard(collection?: CollectionCategory): Directory
 
 export function buildWelcomeMessage(mode: MembershipMode): { text: string; reply_markup: UrlKeyboard } {
   const club = getClubName();
+  const methods = mode === "contribution_only" ? "➕ Contribuer : un administrateur peut récompenser vos envois approuvés par un accès."
+    : mode === "stars_only" ? "💎 Rejoignez le club avec un abonnement en Étoiles."
+    : "➕ Contribuer pour gagner un accès, ou rejoindre le club avec un abonnement en Étoiles.";
   return {
     text:
       `✨ *BIENVENUE À ${club}*\n\n` +
-      `Une collection de créateurs propulsée par la communauté.\n\n` +
-      `${membershipMethods(mode)}\n\n` +
+      `Consultez les répertoires des créateurs en activité et de ceux qui ne sont plus en activité. Amateur : accès sur autorisation administrative.\n\n` +
+      `${methods}\n\n` +
       `Choisissez une option ci-dessous 👇`,
     reply_markup: welcomeKeyboard(),
   };
 }
 
 export function buildLobbyMessage(mode: MembershipMode): { text: string; reply_markup: UrlKeyboard } {
-  const club = getClubName();
-  return {
-    text:
-      `🧭 *${club}*\n\n` +
-      `Bienvenue dans notre collection de créateurs propulsée par la communauté.\n\n` +
-      `*À explorer :*\n` +
-      `• Collection *Regular* — forum privé de créateurs\n` +
-      `• Collection *Retro* — forum privé distinct\n` +
-      `• Collection *Amateur* — accès sur autorisation administrative distincte\n` +
-      `• Répertoire public des créateurs\n` +
-      `• Liste de souhaits et votes (réservés aux membres)\n` +
-      `• Comment fonctionnent les contributions\n` +
-      `• Options d'adhésion, règles et soutien\n\n` +
-      `*À savoir :*\n` +
-      `• Regular et Retro sont deux forums privés séparés.\n` +
-      `• Les membres peuvent gagner un accès temporaire grâce à des contributions approuvées.\n` +
-      `• Les administrateurs choisissent la durée de la récompense et le ou les forums accessibles.\n` +
-      `• Tous les envois acceptés ne donnent pas nécessairement droit à une récompense.\n` +
-      `• Seul du contenu approuvé et autorisé est publié.\n` +
-      `• L'accès prend fin lorsque le membre n'a plus aucun droit valide.\n\n` +
-      `*Options d'adhésion actuelles :*\n${membershipMethods(mode)}`,
-    reply_markup: welcomeKeyboard(),
-  };
+  return buildWelcomeMessage(mode);
 }
 
 export interface NavApiLike {
   sendMessage(chatId: number | string, text: string, other?: Record<string, unknown>): Promise<{ message_id: number }>;
   editMessageText(chatId: number | string, messageId: number, text: string, other?: Record<string, unknown>): Promise<unknown>;
   pinChatMessage?(chatId: number | string, messageId: number): Promise<unknown>;
+  deleteMessage?(chatId: number | string, messageId: number): Promise<unknown>;
   editMessageReplyMarkup?(chatId: number | string, messageId: number, other?: Record<string, unknown>): Promise<unknown>;
 }
 
@@ -135,21 +140,51 @@ async function syncOne(
   force: boolean
 ): Promise<{ outcome: SyncOutcome; error?: string }> {
   if (!chatId) return { outcome: "not_configured" };
+  const leased = await withJobLease(`navigation:${slot}`, 60_000, () => syncOneLocked(api, slot, chatId, message, force));
+  return leased.result ?? { outcome: "error", error: "Une actualisation est déjà en cours. Réessayez dans un instant." };
+}
+
+async function syncOneLocked(
+  api: NavApiLike, slot: "welcome" | "lobby" | "leaderboard", chatId: number,
+  message: { text: string; reply_markup: UrlKeyboard }, force: boolean,
+): Promise<{ outcome: SyncOutcome; error?: string }> {
 
   const hash = await sha256Hex(JSON.stringify(message));
-  const state = (await getNavigationState())[slot];
-  if (!force && state && state.chatId === chatId && state.hash === hash) return { outcome: "unchanged" };
+  const navigation = await getNavigationState();
+  const state = navigation[slot] ?? (slot === "welcome" && navigation.lobby?.chatId === chatId ? navigation.lobby : undefined);
+  const sharedLobby = slot === "welcome" && navigation.lobby?.chatId === chatId;
+  if (!force && !sharedLobby && state && state.chatId === chatId && state.hash === hash) return { outcome: "unchanged" };
+
+  const saveSlot = async (messageId: number) => {
+    await saveNavigationState({ [slot]: { chatId, messageId, hash } });
+    if (sharedLobby && navigation.lobby) {
+      if (navigation.lobby.messageId !== messageId) {
+        if (!api.deleteMessage) return;
+        try { await api.deleteMessage(chatId, navigation.lobby.messageId); }
+        catch (error) {
+          if (!isMessageGone(error) && !String(error).toLowerCase().includes("message to delete not found")) {
+            if (!/can't be deleted|cannot be deleted/i.test(String(error))) throw error;
+            try { await api.editMessageText(chatId, navigation.lobby.messageId, "🧭 Le menu d'accueil a été regroupé. Consultez le message épinglé."); }
+            catch (editError) { if (!isMessageGone(editError) && !isMessageNotModified(editError)) throw editError; }
+          }
+        }
+      }
+      await saveNavigationState({ lobby: undefined });
+    }
+  };
 
   const opts = { parse_mode: "Markdown", reply_markup: message.reply_markup, link_preview_options: { is_disabled: true } };
   try {
     if (state && state.chatId === chatId) {
       try {
         await api.editMessageText(chatId, state.messageId, message.text, opts);
-        await saveNavigationState({ [slot]: { chatId, messageId: state.messageId, hash } });
+        await saveSlot(state.messageId);
+        if (force && api.pinChatMessage) await api.pinChatMessage(chatId, state.messageId).catch(() => {});
         return { outcome: "updated" };
       } catch (err) {
         if (isMessageNotModified(err)) {
-          await saveNavigationState({ [slot]: { chatId, messageId: state.messageId, hash } });
+          await saveSlot(state.messageId);
+          if (force && api.pinChatMessage) await api.pinChatMessage(chatId, state.messageId).catch(() => {});
           return { outcome: "unchanged" };
         }
         if (!isMessageGone(err)) throw err;
@@ -157,8 +192,8 @@ async function syncOne(
       }
     }
     const sent = await api.sendMessage(chatId, message.text, opts);
+    await saveSlot(sent.message_id);
     if (api.pinChatMessage) await api.pinChatMessage(chatId, sent.message_id).catch(() => {});
-    await saveNavigationState({ [slot]: { chatId, messageId: sent.message_id, hash } });
     return { outcome: "published" };
   } catch (err) {
     return { outcome: "error", error: err instanceof Error ? err.message : String(err) };
@@ -176,6 +211,11 @@ export async function syncDirectoryButtons(
   api: NavApiLike,
   force = false
 ): Promise<{ outcome: SyncOutcome; error?: string }> {
+  const job = await withDirectoryLock(() => syncDirectoryButtonsLocked(api, force));
+  return job.result ?? { outcome: "unchanged" };
+}
+
+async function syncDirectoryButtonsLocked(api: NavApiLike, force: boolean): Promise<{ outcome: SyncOutcome; error?: string }> {
   const config = getConfig();
   if (!config.PUBLIC_DIRECTORY_CHAT_ID) return { outcome: "not_configured" };
   const dir = await getDirectorySyncState();
@@ -183,7 +223,8 @@ export async function syncDirectoryButtons(
 
   const posts = dir.collections
     ? (["regular", "retro"] as const).flatMap((collection) =>
-      (dir.collections?.[collection]?.publishedMessageIds ?? []).map((id) => ({ id, markup: directoryNavKeyboard(collection) })))
+      (dir.collections?.[collection]?.publishedMessageIds ?? []).map((id) => ({ id,
+        markup: directoryNavKeyboard(collection, dir.collections?.[collection]?.activePage, dir.collections?.[collection]?.pageCount) })))
     : dir.publishedMessageIds.map((id) => ({ id, markup: directoryNavKeyboard() }));
   const hash = await sha256Hex(JSON.stringify(posts));
   if (!force && (await getNavigationState()).directoryKeyboardHash === hash) return { outcome: "unchanged" };
@@ -208,32 +249,35 @@ export async function syncDirectoryButtons(
  */
 export async function syncNavigationMessages(
   api: NavApiLike,
-  options: { force?: boolean; only?: "welcome" | "lobby" | "directory" } = {}
+  options: { force?: boolean; only?: "welcome" | "lobby" | "accueil" | "directory" } = {}
 ): Promise<NavSyncResult> {
   const config = getConfig();
   const mode = await getMembershipMode();
   const force = options.force ?? false;
   const skip = { outcome: "unchanged" as SyncOutcome };
+  const keyboard = await publishedWelcomeKeyboard();
+  const welcome = { ...buildWelcomeMessage(mode), reply_markup: keyboard };
+  const lobby = { ...buildLobbyMessage(mode), reply_markup: keyboard };
+  const sameAccueil = !!config.TELEGRAM_PUBLIC_WELCOME_CHAT_ID &&
+    config.TELEGRAM_PUBLIC_WELCOME_CHAT_ID === config.TELEGRAM_PUBLIC_LOBBY_CHAT_ID;
   return {
     welcome:
-      options.only && options.only !== "welcome"
+      options.only && options.only !== "welcome" && options.only !== "accueil"
         ? skip
-        : await syncOne(api, "welcome", config.TELEGRAM_PUBLIC_WELCOME_CHAT_ID, buildWelcomeMessage(mode), force),
+        : await syncOne(api, "welcome", config.TELEGRAM_PUBLIC_WELCOME_CHAT_ID, welcome, force),
     lobby:
-      options.only && options.only !== "lobby"
+      sameAccueil || (options.only && options.only !== "lobby" && options.only !== "accueil")
         ? skip
-        : await syncOne(api, "lobby", config.TELEGRAM_PUBLIC_LOBBY_CHAT_ID, buildLobbyMessage(mode), force),
+        : await syncOne(api, "lobby", config.TELEGRAM_PUBLIC_LOBBY_CHAT_ID, lobby, force),
     directory:
       options.only && options.only !== "directory" ? skip : await syncDirectoryButtons(api, force),
   };
 }
 
 export const LOBBY_SETUP_INSTRUCTIONS =
-  `*Configurer le groupe public d'accueil*\n` +
-  `1. Dans Telegram, créez un groupe (ou un canal) nommé \`${"LA CONFRÉRIE | ACCUEIL"}\` et rendez-le public (lien t.me).\n` +
-  `2. Ajoutez le robot comme administrateur avec les droits *Publier des messages*, *Modifier les messages* et *Épingler des messages*.\n` +
-  `3. Obtenez l'identifiant numérique du groupe (commençant par -100) et définissez \`TELEGRAM_PUBLIC_LOBBY_CHAT_ID\`.\n` +
-  `4. Définissez \`TELEGRAM_PUBLIC_LOBBY_URL\` avec le lien public (ex. https://t.me/votre_groupe).\n` +
-  `5. Optionnel : \`TELEGRAM_PUBLIC_WELCOME_CHAT_ID\` (canal d'accueil) et \`PUBLIC_DIRECTORY_URL\` (lien du canal du répertoire).\n` +
-  `6. Redéployez, puis utilisez *Paramètres → Navigation publique → Synchroniser*.\n\n` +
-  `⚠️ Ne réutilisez jamais le clavardage général privé : il reste réservé aux membres.`;
+  `*Publier le menu dans Accueil*\n\n` +
+  `1. Ajoutez le bot comme administrateur dans votre canal ou groupe Accueil (publier et épingler).\n` +
+  `2. En privé au bot, envoyez \`/setup_accueil -100IDENTIFIANT\`. Vous pouvez aussi envoyer \`/setup_accueil\` directement dans le groupe avec votre profil personnel.\n` +
+  `3. Le message de bienvenue en français est publié et épinglé immédiatement, avec les boutons des répertoires.\n` +
+  `4. Pour le mettre à jour : *Admin → Paramètres → Navigation publique → Mettre à jour le menu d'accueil*.\n\n` +
+  `Utilisez un espace d'information distinct des collections, de Wanted et des clavardages privés.`;

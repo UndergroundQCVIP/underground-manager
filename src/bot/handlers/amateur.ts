@@ -5,7 +5,7 @@ import { getConfig, isAdministrator } from "../../config.ts";
 import { adminRouteGuard } from "../middleware/auth.ts";
 import { amateurChatCollision, bindAmateurForum } from "../../db/amateur.ts";
 import { listCreators } from "../../db/creators.ts";
-import { directoryContentCounts, isRetired } from "../../directory/sync.ts";
+import { datedDirectoryPage, directoryContentCounts, isRetired } from "../../directory/sync.ts";
 import { getKv } from "../../db/kv.ts";
 import { withJobLease } from "../../ops/locks.ts";
 import { isMessageGone, isMessageNotModified } from "../../wanted/service.ts";
@@ -102,12 +102,37 @@ amateurComposer.on("chat_member", async (ctx, next) => {
   }
 });
 
-amateurComposer.callbackQuery("amateur:directory", async (ctx) => {
+amateurComposer.callbackQuery(/^amateur:(directory|page:(\d+))$/, async (ctx) => {
   if (!privateAdmin(ctx)) { await ctx.answerCallbackQuery({ text: "Le répertoire Amateur est réservé aux administrateurs en conversation privée.", show_alert: true }); return; }
   await ctx.answerCallbackQuery();
   const root = ctx.callbackQuery.message?.message_id;
   if (!root) return;
-  await withJobLease(`amateur_directory:${ctx.from.id}:${root}`, 60_000, async () => {
+  await withJobLease(`amateur_directory:${ctx.from.id}`, 60_000, async () => {
+    const kv = await getKv();
+    const postKey = ["amateur_directory_post", ctx.from.id];
+    type PrivatePost = { root: number; generation: string; pageCount: number; refreshedAt: string; cleanupIds?: number[] };
+    type Page = { text: string; entities: MessageEntity[] };
+    const previousPost = (await kv.get<PrivatePost>(postKey)).value;
+    const pageKey = (generation: string, page: number) => ["amateur_directory_page", ctx.from.id, generation, page];
+    const keyboard = (page: number, count: number) => {
+      const kb = new InlineKeyboard();
+      if (page > 0) kb.text("◀️ Précédent", `amateur:page:${page - 1}`);
+      if (page + 1 < count) kb.text("Suivant ▶️", `amateur:page:${page + 1}`);
+      return kb.row().text("🔄 Actualiser la liste privée", "amateur:directory").row().text("⬅️ Amateur", "amateur:admin");
+    };
+    const turnPage = ctx.match[2] !== undefined;
+    if (turnPage) {
+      const page = Number(ctx.match[2]);
+      if (previousPost?.root !== root || !Number.isSafeInteger(page) || page < 0 || page >= previousPost.pageCount) return;
+      const message = (await kv.get<Page>(pageKey(previousPost.generation, page))).value;
+      if (!message) return;
+      try {
+        await ctx.editMessageText(datedDirectoryPage(message, previousPost.refreshedAt, page, previousPost.pageCount).text, {
+          entities: message.entities, link_preview_options: { is_disabled: true }, reply_markup: keyboard(page, previousPost.pageCount),
+        });
+      } catch (error) { if (!isMessageNotModified(error)) throw error; }
+      return;
+    }
     const creators = (await listCreators({ collection: "amateur", status: "active", hasContentOnly: true })).filter((c) => !isRetired(c));
     const counts = await directoryContentCounts(creators);
     const header = "🔒 RÉPERTOIRE AMATEUR — PRIVÉ\nAccès sur autorisation administrative uniquement.\n(? = inventaire inconnu ; + = inventaire partiel)\n\n";
@@ -125,28 +150,32 @@ amateurComposer.callbackQuery("amateur:directory", async (ctx) => {
     }
     if (!creators.length) chunk.text += "Aucun créateur Amateur inscrit avec du contenu pour le moment.";
     chunks.push(chunk);
-    const kv = await getKv();
-    const key = ["amateur_directory_view", ctx.from.id, root];
-    const previous = (await kv.get<number[]>(key)).value ?? [];
-    const ids: number[] = [];
-    for (const [index, message] of chunks.entries()) {
-      const options = { entities: message.entities, link_preview_options: { is_disabled: true },
-        reply_markup: index === 0 ? new InlineKeyboard().text("🔄 Actualiser la liste privée", "amateur:directory").row()
-          .text("⬅️ Amateur", "amateur:admin") : undefined };
-      if (index === 0) {
-        try { await ctx.editMessageText(message.text, options); } catch (error) { if (!isMessageNotModified(error)) throw error; }
-      } else {
-        let id = previous[index - 1];
-        if (id) {
-          try { await ctx.api.editMessageText(ctx.from.id, id, message.text, options); }
-          catch (error) { if (isMessageGone(error)) id = (await ctx.reply(message.text, options)).message_id; else if (!isMessageNotModified(error)) throw error; }
-        } else id = (await ctx.reply(message.text, options)).message_id;
-        ids.push(id);
-        await kv.set(key, [...ids, ...previous.slice(ids.length)]);
+    const generation = crypto.randomUUID();
+    const refreshedAt = new Date().toISOString();
+    for (const [page, message] of chunks.entries()) await kv.set(pageKey(generation, page), message);
+    const message = datedDirectoryPage(chunks[0], refreshedAt, 0, chunks.length);
+    const options = { entities: message.entities, link_preview_options: { is_disabled: true }, reply_markup: keyboard(0, chunks.length) };
+    try { await ctx.editMessageText(message.text, options); } catch (error) { if (!isMessageNotModified(error)) throw error; }
+    const legacyKey = ["amateur_directory_view", ctx.from.id, root];
+    const staleIds = [...(previousPost?.cleanupIds ?? []), ...((await kv.get<number[]>(legacyKey)).value ?? [])];
+    if (previousPost && previousPost.root !== root) staleIds.push(previousPost.root);
+    const post: PrivatePost = { root, generation, refreshedAt, pageCount: chunks.length,
+      cleanupIds: [...new Set(staleIds)].filter(id => id !== root) };
+    // Checkpoint before cleanup so a later retry knows both the current post and obsolete IDs.
+    await kv.set(postKey, post);
+    for (const id of post.cleanupIds ?? []) {
+      try { await ctx.api.deleteMessage(ctx.from.id, id); }
+      catch (error) {
+        if (isMessageGone(error) || String(error).toLowerCase().includes("message to delete not found")) continue;
+        try { await ctx.api.editMessageText(ctx.from.id, id, "🔒 Ancienne liste remplacée par le répertoire Amateur actualisé."); }
+        catch (editError) { if (!isMessageGone(editError) && !isMessageNotModified(editError)) throw editError; }
       }
     }
-    for (const id of previous.slice(ids.length)) await ctx.api.deleteMessage(ctx.from.id, id).catch(() => {});
-    await kv.set(key, ids);
+    await kv.set(postKey, { ...post, cleanupIds: [] });
+    await kv.delete(legacyKey);
+    if (previousPost) {
+      for (let page = 0; page < previousPost.pageCount; page++) await kv.delete(pageKey(previousPost.generation, page));
+    }
   });
 });
 

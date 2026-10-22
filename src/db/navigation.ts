@@ -14,7 +14,10 @@ export async function getNavigationState(): Promise<NavigationState> {
 
 export async function saveNavigationState(patch: Partial<NavigationState>): Promise<NavigationState> {
   const kv = await getKv();
-  const next = { ...(await getNavigationState()), ...patch };
-  await kv.set(KEY, next);
-  return next;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const current = await kv.get<NavigationState>(KEY);
+    const next = { ...current.value, ...patch };
+    if ((await kv.atomic().check(current).set(KEY, next).commit()).ok) return next;
+  }
+  throw new Error("Could not save navigation state (write conflict)");
 }
