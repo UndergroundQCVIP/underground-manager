@@ -27,7 +27,7 @@ directoryComposer.callbackQuery(/^dir:refresh:(regular|retro)$/, async (ctx) => 
   await syncPublicDirectory(ctx.api, false, collection);
 });
 
-function filterKeyboard(active: "all" | CollectionCategory, collection: CollectionCategory, admin: boolean): InlineKeyboard {
+function filterKeyboard(active: "all" | CollectionCategory): InlineKeyboard {
   const mark = (id: string, label: string) => (active === id ? `• ${label}` : label);
   const kb = new InlineKeyboard()
     .text(mark("all", "Tous"), "dir:all")
@@ -35,7 +35,6 @@ function filterKeyboard(active: "all" | CollectionCategory, collection: Collecti
     .text(mark("retro", "Plus en activité"), "dir:retro")
     .row()
     .text("⬅️ Menu principal", "member:home");
-  if (admin) kb.row().text("📢 Actualiser le canal — " + (collection === "regular" ? "en activité" : "inactifs"), `admin:sync_dir:${collection}`);
   return kb;
 }
 
@@ -53,24 +52,25 @@ directoryComposer.callbackQuery(/^dir:(all|regular|retro)$/, async (ctx) => {
     });
     const admin = isAdministrator(ctx.from.id);
     const kv = await getKv();
-    const key = ["directory_view_messages", chatId, rootId];
+    // The menu remains a compact control panel; BOTH lists are their own messages.
+    // Previously the first list replaced the menu and only Retro appeared as a new reply.
+    const key = ["directory_view_messages_v3", chatId, rootId];
     const existing = (await kv.get<number[]>(key)).value ?? [];
     const extraIds: number[] = [];
+    try {
+      await ctx.editMessageText("📚 Répertoire\nChoisissez les créateurs en activité ou ceux qui ne sont plus en activité. Les listes sont affichées ci-dessous.", {
+        reply_markup: filterKeyboard(filter),
+      });
+    } catch (error) { if (!isMessageNotModified(error)) throw error; }
     for (let i = 0; i < messages.length; i++) {
       const message = messages[i];
       const options = {
         entities: message.entities,
-        reply_markup: i === 0 ? filterKeyboard(filter, message.collection, admin) :
-          admin ? new InlineKeyboard().text("📢 Actualiser le canal — " +
+        reply_markup: admin ? new InlineKeyboard().text("📢 Actualiser le canal — " +
             (message.collection === "regular" ? "en activité" : "inactifs"), `admin:sync_dir:${message.collection}`) : undefined,
         link_preview_options: { is_disabled: true },
       };
-      if (i === 0) {
-        try { await ctx.editMessageText(message.text, options); }
-        catch (error) { if (!isMessageNotModified(error)) throw error; }
-        continue;
-      }
-      let id = existing[i - 1];
+      let id = existing[i];
       if (id) {
         try { await ctx.api.editMessageText(chatId, id, message.text, options); }
         catch (error) {
@@ -84,6 +84,12 @@ directoryComposer.callbackQuery(/^dir:(all|regular|retro)$/, async (ctx) => {
     for (const stale of existing.slice(extraIds.length)) {
       await ctx.api.deleteMessage(chatId, stale).catch(() => {});
     }
+    // Remove continuation replies made by the previous view format when reopening it.
+    const legacyKey = ["directory_view_messages", chatId, rootId];
+    for (const stale of (await kv.get<number[]>(legacyKey)).value ?? []) {
+      await ctx.api.deleteMessage(chatId, stale).catch(() => {});
+    }
+    await kv.delete(legacyKey);
     await kv.set(key, extraIds);
   });
 });

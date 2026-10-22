@@ -2,7 +2,7 @@
  * LA CONFRÉRIE — Administrator Handlers & Controls
  */
 
-import { Composer, InlineKeyboard } from "grammy";
+import { Composer, Context, InlineKeyboard } from "grammy";
 import { formatTorontoDate } from "../../util/time.ts";
 import { getClubName, getConfig } from "../../config.ts";
 import { adminRouteGuard } from "../middleware/auth.ts";
@@ -35,6 +35,7 @@ import {
   revokeComplimentaryAccess,
 } from "../../complimentary/service.ts";
 import {
+  CollectionCategory,
   ComplimentaryAccessLevel,
   ComplimentaryReason,
   SPACE_IDS,
@@ -47,7 +48,7 @@ export const adminComposer = new Composer();
 // Admin authentication, scoped to this composer's own commands and admin buttons
 // (see adminRouteGuard: a blanket gate would block every member feature after it).
 export const ADMIN_COMMANDS = [
-  "admin", "lookup", "grant", "register_creator",
+  "admin", "lookup", "grant", "register_creator", "sync_directory",
   "index_media", "attest_inventory", "retire_creator", "move_to_retro", "relink_creator", "diag",
 ];
 adminComposer.use(
@@ -656,7 +657,7 @@ adminComposer.callbackQuery(/^admin:creator_view:([a-zA-Z0-9-]+)$/, async (ctx) 
   const indexed = (await listMediaIndex(creator.id, { chatId: creator.chatId, topicId: creator.topicId })).length;
   const job = await getActiveMigrationForCreator(creator.id);
   const text =
-    `👩‍🎤 *${creator.name}*\n\n` +
+    `👩‍🎤 *${escapeMd(creator.name)}*\n\n` +
     `*Collection :* ${collection === "retro" ? "Retro" : "Regular"}\n` +
     `*Forum / Sujet :* \`${creator.chatId}\` / \`${creator.topicId}\`\n` +
     `*Dernière mise à jour du contenu :* ${creator.lastContentUpdatedAt ? new Date(creator.lastContentUpdatedAt).toLocaleDateString("en-US") : "—"}\n` +
@@ -665,6 +666,7 @@ adminComposer.callbackQuery(/^admin:creator_view:([a-zA-Z0-9-]+)$/, async (ctx) 
     (creator.retiredAt ? `*Retraite :* ${new Date(creator.retiredAt).toLocaleDateString("en-US")}\n` : "") +
     (job ? `*Migration:* ${job.status.replace(/_/g, " ")}\n` : "");
   const kb = new InlineKeyboard();
+  kb.text("🔢 Vérifier le compteur", `admin:creator_inventory:${creator.id}`).row();
   if (collection === "regular") kb.text("🎞️ Passer à Retro", `mig:sel:${creator.id}`).row();
   if (job) kb.text("🚚 Open Migration", `mig:view:${job.id}`).row();
   kb.text("⬅️ Créateurs", "admin:creators_list:0");
@@ -718,15 +720,24 @@ adminComposer.callbackQuery("admin:sync_dir_menu", async (ctx) => {
   const { getDirectorySyncState } = await import("../../db/directory.ts");
   const { listCreators, creatorCollection } = await import("../../db/creators.ts");
   const state = await getDirectorySyncState();
+  const { directoryPostLinks, isRetired } = await import("../../directory/sync.ts");
   const listed = await listCreators({ status: "active", hasContentOnly: true });
+  const visible = listed.filter((c) => !isRetired(c));
   const everyone = await listCreators();
-  const retro = listed.filter((c) => creatorCollection(c) === "retro").length;
+  const retro = visible.filter((c) => creatorCollection(c) === "retro").length;
   const retroRegistered = everyone.filter((c) => creatorCollection(c) === "retro");
   const retroHidden = retroRegistered.filter((c) => !c.hasContent || c.status !== "active").length;
   await ctx.answerCallbackQuery();
+  const kb = new InlineKeyboard()
+    .text("🔄 Actualiser — en activité", "admin:sync_dir:regular").row()
+    .text("🔄 Actualiser — inactifs", "admin:sync_dir:retro").row();
+  for (const link of await directoryPostLinks()) kb.url(link.label, link.url).row();
+  kb.text("🔢 Vérifier les compteurs", "admin:directory_counts:0").row()
+    .text("🛠️ Réparer le répertoire", "admin:repair_dir").row()
+    .text("⬅️ Admin Menu", "admin:menu");
   await ctx.editMessageText(
     `📚 *RÉPERTOIRE*\n\n` +
-    `• Créateurs listés : ${listed.length} (Regular ${listed.length - retro} · Retro ${retro})\n` +
+    `• Créateurs listés : ${visible.length} (en activité ${visible.length - retro} · plus en activité ${retro})\n` +
     `• Forum Retro configuré dans le robot en ligne : ${getConfig().TELEGRAM_RETRO_FORUM_CHAT_ID ? `oui (…${String(getConfig().TELEGRAM_RETRO_FORUM_CHAT_ID).slice(-4)})` : "⚠️ NON — définissez TELEGRAM_RETRO_FORUM_CHAT_ID dans Deno Deploy"}\n` +
     `• Retro inscrits : ${retroRegistered.length}${retroHidden ? ` (dont ${retroHidden} sans contenu détecté, donc non listés)` : ""}\n` +
     (state.lastError ? `• ⚠️ Dernière erreur de synchronisation : ${escapeMd(state.lastError)}\n` : "") +
@@ -734,17 +745,11 @@ adminComposer.callbackQuery("admin:sync_dir_menu", async (ctx) => {
       ? `\n💡 _Aucun créateur Retro n'est inscrit. Faites publier une photo/vidéo dans le sujet Retro par un administrateur (le sujet s'inscrit tout seul), ou utilisez_ \`/register_creator retro <id_sujet> <nom>\`.\n\n`
       : "") +
     `• Dernière synchronisation : ${state.lastSyncAt ? new Date(state.lastSyncAt).toLocaleString("fr-CA") : "jamais"}\n` +
-    `• Changements en attente : ${state.isDirty ? "oui" : "non"}`,
+    `• Changements en attente : ${state.isDirty ? "oui" : "non"}\n\n` +
+    `L'actualisation modifie les messages existants dans le canal. Les boutons ci-dessous ouvrent chaque liste.`,
     {
       parse_mode: "Markdown",
-      reply_markup: new InlineKeyboard()
-        .text("🔄 Actualiser — en activité", "admin:sync_dir:regular")
-        .row()
-        .text("🔄 Actualiser — inactifs", "admin:sync_dir:retro")
-        .row()
-        .text("🛠️ Réparer le répertoire", "admin:repair_dir")
-        .row()
-        .text("⬅️ Admin Menu", "admin:menu"),
+      reply_markup: kb,
     }
   );
 });
@@ -767,24 +772,73 @@ adminComposer.callbackQuery("admin:plans", async (ctx) => {
   );
 });
 
-// Trigger Public Directory Sync
-adminComposer.callbackQuery(/^admin:sync_dir(?::(regular|retro))?$/, async (ctx) => {
-  const { syncPublicDirectory } = await import("../../directory/sync.ts");
-  const collection = ctx.match[1] as "regular" | "retro" | undefined;
-  const label = collection === "regular" ? "des créateurs en activité" : collection === "retro" ? "des créateurs qui ne sont plus en activité" : "public";
-  await ctx.answerCallbackQuery({ text: `Synchronisation du répertoire ${label}...` });
-
+// Trigger actual channel synchronization, with links to the resulting channel posts.
+async function publishDirectory(ctx: Context, collection?: CollectionCategory) {
+  const { directoryPostLinks, syncPublicDirectory } = await import("../../directory/sync.ts");
   const result = await syncPublicDirectory(ctx.api, true, collection);
-  if (result.updated) {
-    await ctx.reply(`✅ *Répertoire ${label} synchronisé!*\n${result.publishedCount} message(s) publié(s) ou mis à jour.`, {
-      parse_mode: "Markdown",
-      reply_markup: new InlineKeyboard().text("⬅️ Menu des créateurs", "admin:creators_menu"),
-    });
-  } else {
-    await ctx.reply(`ℹ️ Synchronisation du répertoire terminée : ${result.reason || result.error || "Aucune mise à jour nécessaire."}`, {
-      reply_markup: new InlineKeyboard().text("⬅️ Menu des créateurs", "admin:creators_menu"),
-    });
+  const kb = new InlineKeyboard();
+  for (const link of await directoryPostLinks(collection)) kb.url(link.label, link.url).row();
+  kb.text("⬅️ Répertoire", "admin:sync_dir_menu");
+  const label = collection === "regular" ? "Créateurs en activité" : collection === "retro" ? "Créateurs qui ne sont plus en activité" : "Les deux répertoires";
+  let text: string;
+  if (result.error) text = `⚠️ Synchronisation incomplète : ${result.error}`;
+  else if (result.reason === "channel_not_configured") text = "⚠️ Aucun canal de répertoire n'est configuré.";
+  else if (result.reason === "sync_in_progress") text = "⏳ Une synchronisation est déjà en cours. Réessayez dans un instant.";
+  else text = `✅ ${label} : canal synchronisé.\n${result.publishedCount} message(s) actualisé(s). Les messages existants sont modifiés sur place.\nOuvrez la liste dans le canal ci-dessous.`;
+  await ctx.reply(text, { reply_markup: kb });
+}
+
+adminComposer.callbackQuery(/^admin:sync_dir(?::(regular|retro))?$/, async (ctx) => {
+  const collection = ctx.match[1] as "regular" | "retro" | undefined;
+  await ctx.answerCallbackQuery({ text: "Actualisation du canal…" });
+  await publishDirectory(ctx, collection);
+});
+
+adminComposer.command("sync_directory", async (ctx) => {
+  const scope = ctx.match.trim().toLowerCase();
+  if (scope && scope !== "regular" && scope !== "retro") {
+    await ctx.reply("Utilisation : /sync_directory (les deux listes), /sync_directory regular ou /sync_directory retro.");
+    return;
   }
+  await publishDirectory(ctx, scope === "regular" || scope === "retro" ? scope : undefined);
+});
+
+adminComposer.callbackQuery(/^admin:directory_counts:(\d+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const { listCreators } = await import("../../db/creators.ts");
+  const { directoryContentCounts, isRetired } = await import("../../directory/sync.ts");
+  const creators = (await listCreators({ status: "active", hasContentOnly: true })).filter((c) => !isRetired(c));
+  const counts = await directoryContentCounts(creators);
+  const incomplete = creators.filter((c) => c.inventoryStatus !== "complete");
+  const page = Math.min(Number(ctx.match[1]), Math.max(0, Math.ceil(incomplete.length / 10) - 1));
+  const kb = new InlineKeyboard();
+  for (const c of incomplete.slice(page * 10, (page + 1) * 10)) {
+    kb.text(`${c.name} (${counts.get(c.id) || "?"}${counts.get(c.id) ? "+" : ""})`, `admin:creator_inventory:${c.id}`).row();
+  }
+  if (page > 0) kb.text("◀️", `admin:directory_counts:${page - 1}`);
+  if ((page + 1) * 10 < incomplete.length) kb.text("▶️", `admin:directory_counts:${page + 1}`);
+  kb.row().text("⬅️ Répertoire", "admin:sync_dir_menu");
+  await ctx.editMessageText(`🔢 Compteurs à vérifier : ${incomplete.length}\n\n(?) : aucun média indexé pour ce sujet.\n(n+) : au moins n médias indexés, inventaire incomplet.\n\nTelegram ne fournit pas l'historique des sujets au robot. Choisissez un créateur pour indexer les anciens médias.`, { reply_markup: kb });
+});
+
+adminComposer.callbackQuery(/^admin:creator_inventory:([\w-]+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const { getCreator } = await import("../../db/creators.ts");
+  const { listMediaIndex } = await import("../../db/media_index.ts");
+  const c = await getCreator(ctx.match[1]);
+  if (!c) { await ctx.reply("⚠️ Créateur introuvable."); return; }
+  const count = (await listMediaIndex(c.id, c)).length;
+  const indexCommand = `/index_media ${c.id} `;
+  const attestCommand = `/attest_inventory ${c.id}`;
+  const text = `🔢 ${c.name} — ${count} média(s) indexé(s) dans le sujet actuel.\n\n` +
+    `1. Ouvrez le sujet et copiez les liens des anciens messages médias.\n2. Envoyez cette commande, suivie des liens (plusieurs par commande possibles) :\n${indexCommand}\n\n` +
+    `3. Une fois TOUS les médias indexés, confirmez avec :\n${attestCommand}\n\nLe répertoire se met ensuite à jour automatiquement. Une actualisation seule ne peut pas retrouver les anciens médias.`;
+  const kb = new InlineKeyboard().url("📂 Ouvrir le sujet", `https://t.me/c/${String(c.chatId).slice(4)}/${c.topicId}`).row()
+    .text("⬅️ Compteurs", "admin:directory_counts:0");
+  await ctx.editMessageText(text, { entities: [
+    { type: "code", offset: text.indexOf(indexCommand), length: indexCommand.trimEnd().length },
+    { type: "code", offset: text.indexOf(attestCommand), length: attestCommand.length },
+  ], reply_markup: kb });
 });
 
 // /register_creator command

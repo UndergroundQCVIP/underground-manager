@@ -168,7 +168,7 @@ Deno.test("DIRECTORY — A failed sync is no longer silent: the error is stored,
     await bot.handleUpdate(cb(ADMIN, "admin:sync_dir_menu") as never);
     const screen = String((calls.filter((x) => x.method === "editMessageText").at(-1)!.payload as { text: string }).text);
     assertStringIncludes(screen, "Dernière erreur de synchronisation");
-    assertStringIncludes(screen, "Retro 1");
+    assertStringIncludes(screen, "plus en activité 1");
 
     api.sendMessage = orig;
     assertEquals((await syncPublicDirectory(api, true)).updated, true);

@@ -74,7 +74,7 @@ export async function directoryContentCounts(creators: Creator[]): Promise<Map<s
   ] as const)));
 }
 
-export const DIRECTORY_RENDER_VERSION = 2;
+export const DIRECTORY_RENDER_VERSION = 3;
 export interface DirectoryMessage {
   collection: CollectionCategory;
   text: string;
@@ -108,13 +108,14 @@ export function buildDirectoryMessages(
     const prefix = "Voici la liste des créateurs ";
     const label = COLLECTION_LABELS[collection];
     const joinLink = `https://t.me/${botUsername}?start=join`;
-    const introduction = `${prefix}${label} que nous avons chez ${getClubName()}.\nPour rejoindre la plateforme : `;
-    const header = introduction + joinLink + "\n" +
+    const introduction = `${prefix}${label} que nous avons chez ${getClubName()}.\n`;
+    const joinLabel = "Rejoindre la plateforme";
+    const header = introduction + joinLabel + "\n" +
       (partial ? `(? = total inconnu ; + = inventaire partiel)\n` : "") +
       (listed.some((c) => isNewCreator(c, now)) ? `🆕 = ajout récent\n` : "") + "\n";
     const freshChunk = (): DirectoryMessage => ({ collection, text: header, entities: [
       { type: "bold", offset: prefix.length, length: label.length },
-      { type: "url", offset: introduction.length, length: joinLink.length },
+      { type: "text_link", offset: introduction.length, length: joinLabel.length, url: joinLink },
     ] });
     let chunk = freshChunk();
     let rows = 0;
@@ -169,6 +170,22 @@ export interface SyncDirectoryResult {
   publishedCount: number;
   reason?: string;
   error?: string;
+}
+
+/** Links to the actual saved channel posts, including every continuation chunk. */
+export async function directoryPostLinks(collection?: CollectionCategory): Promise<{ label: string; url: string }[]> {
+  const channelId = getConfig().PUBLIC_DIRECTORY_CHAT_ID;
+  if (!String(channelId).startsWith("-100")) return [];
+  const state = await getDirectorySyncState();
+  const collections: CollectionCategory[] = collection ? [collection] : ["regular", "retro"];
+  return collections.flatMap((category) => {
+    const slot = state.collections?.[category];
+    if (slot?.channelId !== channelId) return [];
+    return slot.publishedMessageIds.map((id, i, ids) => ({
+      label: `📚 ${category === "regular" ? "En activité" : "Plus en activité"}${ids.length > 1 ? ` (${i + 1}/${ids.length})` : ""}`,
+      url: `https://t.me/c/${String(channelId).slice(4)}/${id}`,
+    }));
+  });
 }
 
 /** Refresh just one collection, or both for the scheduled synchronization. */

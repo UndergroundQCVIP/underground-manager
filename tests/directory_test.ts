@@ -28,7 +28,7 @@ Deno.test("DIRECTORY — Creators are compact, linked and alphabetically sorted 
 
   const text = sections[0];
   assertEquals(text.startsWith("Voici la liste des créateurs toujours en activité"), true);
-  assertEquals(text.includes("https://t.me/UndergroundManagerBot?start=join"), true);
+  assertEquals(text.includes("Rejoindre la plateforme"), true);
   assertEquals(text.indexOf("Aria") < text.indexOf("Ashley"), true);
   assertEquals(text.indexOf("Ashley") < text.indexOf("Maya"), true);
   assertEquals(text.indexOf("Maya") < text.indexOf("Sophie"), true);
