@@ -587,7 +587,7 @@ async function showRewardConfig(ctx: Context, id: string, asNewMessage = false) 
   const kb = new InlineKeyboard()
     .text(mark(setKey === "rg", "Regular seulement"), `cadm:sc:${id}:rg`)
     .text(mark(setKey === "rt", "Retro seulement"), `cadm:sc:${id}:rt`)
-    .text(mark(setKey === "bo", "Les deux"), `cadm:sc:${id}:bo`)
+    .text(mark(setKey === "bo", "Accès complet (Regular + Retro)"), `cadm:sc:${id}:bo`)
     .row();
   for (const d of [7, 15, 30]) kb.text(mark(days === d, `${d} jours`), `cadm:du:${id}:${d}`);
   kb.row();

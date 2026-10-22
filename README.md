@@ -60,7 +60,8 @@ LA CONFRÉRIE's bot manages access and synchronization across five Telegram spac
 - **Complimentary Access Levels:**
   - `vip_only`: Access to TOKEBEC VIP COLLECTIONS only (default).
   - `vip_and_chat`: Access to TOKEBEC VIP COLLECTIONS + LA CONFRÉRIE General Chat.
-  - `full`: Full access to all 3 spaces (nominations and voting require paid or content-earned access; older grants explicitly marked content_contribution also qualify).
+  - `regular`: Active creators and community, without Retro.
+  - `full`: Full access to all 4 spaces, including Retro (nominations and voting require paid or content-earned access; older grants explicitly marked content_contribution also qualify).
 
 
 ---
@@ -239,7 +240,7 @@ Create a `.env` file for local development or set the following in Deno Deploy:
 | `VIP_COLLECTIONS_CHAT_ID` | Numeric Chat ID for the Regular forum (TOKEBEC VIP COLLECTIONS) | `-1001234567890` | *Required* |
 | `TELEGRAM_RETRO_FORUM_CHAT_ID` | **UG-04** Chat ID for the private `RETRO \| LA CONFRÉRIE` forum | `-1003975562920` | `0` (Retro tier off) |
 | `CLUB_DISPLAY_NAME` | **UG-04** Public club name used in all user-facing text | `LA CONFRÉRIE` | `LA CONFRÉRIE` |
-| `RETRO_PLUS_STARS_PRICE_AMOUNT` | **UG-04** Retro Plus price in Stars. Never defaulted: `0`/unset keeps Retro Plus billing **disabled** | *(owner decides)* | `0` (disabled) |
+| `RETRO_PLUS_STARS_PRICE_AMOUNT` | Retro Plus price in Stars per 30 days. Unset/blank defaults to 1,200; explicit `0` disables billing | Optional | `1200` |
 | `MIGRATION_BATCH_SIZE` | **UG-04** Max message IDs per `copyMessages` call (1–100) | `30` | `30` |
 | `MIGRATION_BATCH_DELAY_MS` | **UG-04** Pause between copy batches (rate-limit friendly) | `3000` | `3000` |
 | `PUBLIC_DIRECTORY_CHAT_ID` | Numeric Chat ID for Public Creator Directory channel | `-1001234567893` | `0` |
@@ -582,7 +583,7 @@ deno task test   # Runs all 234 unit, integration and security tests
 | Price | `STARS_PRICE_AMOUNT` (unchanged) | `RETRO_PLUS_STARS_PRICE_AMOUNT` |
 
 * Both are recurring 30-day Telegram Stars subscriptions handled by the existing payment engine. The purchased plan is stored on the payment and entitlement (`planId` / `plan`); records without it are **Regular** (legacy-safe).
-* **Retro Plus billing is OFF** until `RETRO_PLUS_STARS_PRICE_AMOUNT` is set to a positive number *and* `TELEGRAM_RETRO_FORUM_CHAT_ID` is set. The plans screen shows "Coming soon" and pre-checkout rejects Retro Plus invoices. No price is hardcoded anywhere.
+* **Retro Plus costs 1,200 Stars per 30 days by default.** `RETRO_PLUS_STARS_PRICE_AMOUNT` can override this; explicit `0` disables billing. The Retro forum must also be configured, and Stars checkout must be enabled by the membership mode. Invoice creation and pre-checkout use the same configured price.
 * Access is still decided only by entitlement `spaces`. Every invite link is a **join-request link**: the bot approves a request only if the user holds an active entitlement for that space, so an old or shared Retro link is useless to a Regular member. Hourly reconciliation covers the Retro forum and removes a user from Retro only, leaving valid Regular access intact.
 * Complimentary grants keep their existing levels; a new optional level **Full Access + Retro Vault** exists for admins.
 
@@ -655,6 +656,7 @@ Main menu → **➕ Contribute** → pick a creator → send photos/videos (albu
   * **Approve & Reward** → choose access *Regular only / Retro only / Both* (never preselected — a Retro creator does **not** imply Retro access) and duration *7 / 15 / 30 (default) / 60 / 90 / custom* days.
   * **Approve Without Reward** → publish only; nothing is granted.
   * **Reject** → optional reason; nothing is published or granted; message references are purged (only a count is kept).
+* Full access includes both Regular and Retro plus the community. The Regular-only option explicitly excludes Retro. At startup, an idempotent repair adds missing Retro access to still-active legacy content rewards whose audit event records `level: full`, without extending their expiry or reviving revoked/expired grants.
 * The reward is applied **only after the publication fully succeeded**. Partial publication → `needs review`, no reward until an admin verifies the topic and resolves it (the stored decision is then applied once). A failed publication can be retried safely.
 * Rewards live in the existing entitlement engine: one `contribution` entitlement **per scope** (Regular / Retro), `new_expiration = max(now, existing) + days`, never shortening anything, never touching Stars/complimentary entitlements or cancelling a subscription. One finalized reward per submission (ledger keyed by submission id; double clicks and concurrent approvals cannot duplicate it).
 * A contribution entitlement for a forum also includes **Wanted List + General Chat** and **voting/nomination eligibility** (other complimentary access stays excluded; older grants explicitly marked `content_contribution` also qualify). Expiry uses the existing hourly reconciliation (removes only what is no longer authorized) and a ~3-day reminder is sent.

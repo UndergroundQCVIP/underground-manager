@@ -76,7 +76,7 @@ Deno.test("UG04 BRAND — Member and admin menus match the contract", async () =
   }
 });
 
-Deno.test("UG04 CONFIG — Retro forum ID is wired as a managed space; Retro Plus billing is disabled without a price", async () => {
+Deno.test("UG04 CONFIG — Retro forum ID is wired as a managed space; Retro Plus defaults to 1200 Stars and an explicit zero disables billing", async () => {
   const kv = await setupTestEnvironment();
   try {
     assertEquals(getChatIdForSpace("retro_collections"), RETRO_CHAT);
@@ -84,7 +84,7 @@ Deno.test("UG04 CONFIG — Retro forum ID is wired as a managed space; Retro Plu
 
     const env = loadConfig({ TELEGRAM_RETRO_FORUM_CHAT_ID: "-1003975562920" });
     assertEquals(env.TELEGRAM_RETRO_FORUM_CHAT_ID, -1003975562920);
-    assertEquals(env.RETRO_PLUS_STARS_PRICE_AMOUNT, 0); // never invented
+    assertEquals(env.RETRO_PLUS_STARS_PRICE_AMOUNT, 1200); // owner-approved price
     assertEquals(validateConfig({ ...MOCK_CONFIG, TELEGRAM_RETRO_FORUM_CHAT_ID: REGULAR_CHAT }).length > 0, true);
 
     setConfigForTesting({ ...MOCK_CONFIG, RETRO_PLUS_STARS_PRICE_AMOUNT: 0 });
@@ -351,12 +351,15 @@ Deno.test("UG04 DOWNGRADE — Nothing is cancelled for a user without Retro Plus
   }
 });
 
-Deno.test("UG04 COMPLIMENTARY — Existing levels unchanged; legacy and Retro-inclusive grants work", async () => {
+Deno.test("UG04 COMPLIMENTARY — Full access includes Retro and Regular-only remains explicit", async () => {
   const kv = await setupTestEnvironment();
   try {
     const full = await grantComplimentaryAccess({ adminId: 111111, userId: 7050, durationDays: 30, reason: "partnership", level: "full" });
-    assertEquals(full.entitlement?.spaces.length, 3);
-    assertEquals(await hasAccessToSpace(7050, "retro_collections"), false);
+    assertEquals(full.entitlement?.spaces.length, 4);
+    assertEquals(await hasAccessToSpace(7050, "retro_collections"), true);
+    await grantComplimentaryAccess({ adminId: 111111, userId: 7052, durationDays: 30, reason: "partnership", level: "regular" });
+    assertEquals(await hasAccessToSpace(7052, "retro_collections"), false);
+    assertEquals(await hasAccessToSpace(7052, "vip_collections"), true);
 
     const retro = await grantComplimentaryAccess({ adminId: 111111, userId: 7051, durationDays: 30, reason: "partnership", level: "full_retro" });
     assertEquals(retro.entitlement?.spaces.length, 4);

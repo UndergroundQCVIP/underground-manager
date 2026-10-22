@@ -10,6 +10,7 @@ import { registerCronJobs } from "./cron/reconciliation.ts";
 import { getKv } from "./db/kv.ts";
 import { createFetchHandler, createPreviewFetchHandler, isLiveBotRuntime } from "./server.ts";
 import { syncDirectoryIfNeeded } from "./directory/sync.ts";
+import { repairLegacyFullContentRewards } from "./complimentary/service.ts";
 
 async function main() {
   const config = loadConfig();
@@ -47,6 +48,11 @@ async function main() {
     console.error("[Database Fatal] Could not open Deno KV database:", err);
     Deno.exit(1);
   }
+
+  try {
+    const repaired = await repairLegacyFullContentRewards();
+    if (repaired) console.log(`[Rewards] Added missing Retro access to ${repaired} full content reward(s).`);
+  } catch (error) { console.error("[Rewards repair] Will retry during reconciliation:", error); }
 
   if (config.BOT_MODE === "polling") {
     console.log("[Bot] Launching in long polling mode for development...");

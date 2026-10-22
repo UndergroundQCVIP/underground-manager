@@ -31,7 +31,7 @@ export interface AppConfig {
   CLUB_DISPLAY_NAME: string;
   /** Regular plan price (unchanged UG-01 variable). */
   STARS_PRICE_AMOUNT: number;
-  /** UG-04: Retro Plus price in Stars. 0 = not configured, billing disabled. */
+  /** Retro Plus: 1,200 Stars per 30 days by default; explicit 0 disables billing. */
   RETRO_PLUS_STARS_PRICE_AMOUNT: number;
   STARS_SUBSCRIPTION_PERIOD_SECONDS: number;
   CURRENCY: string;
@@ -93,7 +93,7 @@ export function loadConfig(envOverride?: Record<string, string>): AppConfig {
     GENERAL_CHAT_ID: Number(getEnv("GENERAL_CHAT_ID", "0")),
     CLUB_DISPLAY_NAME: getEnv("CLUB_DISPLAY_NAME", "").trim() || "LA CONFRÉRIE",
     STARS_PRICE_AMOUNT: Number(getEnv("STARS_PRICE_AMOUNT", "750")),
-    RETRO_PLUS_STARS_PRICE_AMOUNT: Number(getEnv("RETRO_PLUS_STARS_PRICE_AMOUNT", "0")) || 0,
+    RETRO_PLUS_STARS_PRICE_AMOUNT: Number(getEnv("RETRO_PLUS_STARS_PRICE_AMOUNT", "1200").trim() || "1200"),
     STARS_SUBSCRIPTION_PERIOD_SECONDS: Number(
       getEnv("STARS_SUBSCRIPTION_PERIOD_SECONDS", "2592000") // 30 days
     ),

@@ -174,13 +174,13 @@ export function grantSpacesKeyboard(
     )
     .row()
     .text(
-      "Accès complet (VIP + Clavardage + Liste de souhaits)",
-      `admin:grant_spc:${userId}:${duration}:${reason}:full`
+      "En activité + communauté (sans Retro)",
+      `admin:grant_spc:${userId}:${duration}:${reason}:regular`
     )
     .row()
     .text(
-      "Accès complet + voûte Retro",
-      `admin:grant_spc:${userId}:${duration}:${reason}:full_retro`
+      "Accès complet — en activité + Retro + communauté",
+      `admin:grant_spc:${userId}:${duration}:${reason}:full`
     )
     .row()
     .text("❌ Annuler", "admin:menu");
