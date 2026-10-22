@@ -12,9 +12,10 @@ import {
 import { logAuditEvent } from "../db/audit.ts";
 import { CollectionCategory, Creator } from "../types.ts";
 import type { MessageEntity } from "@grammyjs/types";
-import { directoryNavKeyboard } from "../navigation/service.ts";
+import { directoryNavKeyboard, syncNavigationMessages } from "../navigation/service.ts";
 import { listMediaIndex } from "../db/media_index.ts";
 import { getKv } from "../db/kv.ts";
+import { withDirectoryLock } from "./lock.ts";
 import { formatTorontoDate } from "../util/time.ts";
 import { isMessageGone, isMessageNotModified, sha256Hex } from "../wanted/service.ts";
 
@@ -74,11 +75,19 @@ export async function directoryContentCounts(creators: Creator[]): Promise<Map<s
   ] as const)));
 }
 
-export const DIRECTORY_RENDER_VERSION = 3;
+export const DIRECTORY_RENDER_VERSION = 4;
 export interface DirectoryMessage {
   collection: CollectionCategory;
   text: string;
   entities: MessageEntity[];
+}
+
+export function datedDirectoryPage<T extends { text: string }>(message: T, refreshedAt: string, page = 0, pages = 1): T {
+  const date = formatTorontoDate(refreshedAt, {
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
+  return { ...message, text: message.text.trimEnd() + `\n\nMis à jour : ${date} (Montréal)` +
+    (pages > 1 ? ` · Page ${page + 1}/${pages}` : "") };
 }
 
 type DirectoryOptions = { collection?: CollectionCategory; contentCounts?: ReadonlyMap<string, number> };
@@ -201,16 +210,7 @@ export async function syncPublicDirectory(
   if (!getConfig().PUBLIC_DIRECTORY_CHAT_ID) {
     return { updated: false, publishedCount: 0, reason: "channel_not_configured" };
   }
-  // Serialize public refresh buttons and cron so simultaneous clicks cannot create duplicate posts.
-  const kv = await getKv();
-  const key = ["directory_sync_lease"];
-  const lease = await kv.get<string>(key);
-  if (lease.value) return { updated: false, publishedCount: 0, reason: "sync_in_progress" };
-  const token = crypto.randomUUID();
-  if (!(await kv.atomic().check(lease).set(key, token, { expireIn: 300_000 }).commit()).ok) {
-    return { updated: false, publishedCount: 0, reason: "sync_in_progress" };
-  }
-  try {
+  const result = await directoryJob(async () => {
     const state = await getDirectorySyncState();
     // Upgrade the legacy combined posts once, reusing their IDs for Regular.
     const migrating = !state.collections && state.publishedMessageIds.length > 0;
@@ -228,10 +228,46 @@ export async function syncPublicDirectory(
     }
     if (errors.length) return { updated: false, publishedCount, error: errors.join("; ") };
     return { updated, publishedCount, ...(updated ? {} : { reason }) };
-  } finally {
-    const current = await kv.get<string>(key);
-    if (current.value === token) await kv.atomic().check(current).delete(key).commit();
+  });
+  if (result.updated) {
+    // A deleted/recreated directory post changes its URL in the Accueil menu too.
+    await syncNavigationMessages(api, { only: "accueil" }).catch(error => console.error("[Accueil navigation]", error));
   }
+  return result;
+}
+
+async function directoryJob(job: () => Promise<SyncDirectoryResult>): Promise<SyncDirectoryResult> {
+  const result = await withDirectoryLock(job);
+  return result.result ?? { updated: false, publishedCount: 0, reason: "sync_in_progress" };
+}
+
+const pageKey = (collection: CollectionCategory, generation: string, page: number) =>
+  ["directory_page", collection, generation, page];
+
+/** Reads only the saved public snapshot; private creator topics can never enter a page. */
+export async function showDirectoryPage(
+  api: DirectoryApiLike, chatId: number, messageId: number, collection: CollectionCategory, page: number,
+): Promise<SyncDirectoryResult> {
+  if (chatId !== getConfig().PUBLIC_DIRECTORY_CHAT_ID || !["regular", "retro"].includes(collection)) {
+    return { updated: false, publishedCount: 0, reason: "wrong_destination" };
+  }
+  return await directoryJob(async () => {
+    const slot = (await getDirectorySyncState()).collections?.[collection];
+    if (!slot || slot.channelId !== chatId || slot.publishedMessageIds[0] !== messageId ||
+      !slot.pageGeneration || !slot.refreshedAt || !Number.isSafeInteger(page) || page < 0 || page >= (slot.pageCount ?? 0)) {
+      return { updated: false, publishedCount: 0, reason: "stale_page" };
+    }
+    const message = (await (await getKv()).get<DirectoryMessage>(pageKey(collection, slot.pageGeneration, page))).value;
+    if (!message) return { updated: false, publishedCount: 0, reason: "stale_page" };
+    try {
+      await api.editMessageText(chatId, messageId, datedDirectoryPage(message, slot.refreshedAt, page, slot.pageCount).text, {
+        entities: message.entities, link_preview_options: { is_disabled: true },
+        reply_markup: directoryNavKeyboard(collection, page, slot.pageCount),
+      });
+    } catch (error) { if (!isMessageNotModified(error)) throw error; }
+    await checkpointDirectoryCollection(collection, { activePage: page });
+    return { updated: true, publishedCount: 1 };
+  });
 }
 
 async function syncCollection(
@@ -262,33 +298,35 @@ async function syncCollection(
     return { updated: false, publishedCount: 0, reason: "content_identical" };
   }
 
+  // Cache pages separately to stay within the KV value limit, even for very large lists.
+  const kv = await getKv();
+  for (const [page, message] of chunks.entries()) await kv.set(pageKey(collection, contentHash, page), message);
+  const refreshedAt = new Date().toISOString();
   const publishedIds: number[] = [];
   try {
-    for (let i = 0; i < chunks.length; i++) {
-      const options = {
-        entities: chunks[i].entities,
-        link_preview_options: { is_disabled: true },
-        reply_markup: directoryNavKeyboard(collection),
-      };
-      if (i < existingIds.length) {
-        try {
-          await api.editMessageText(channelId, existingIds[i], chunks[i].text, options);
-          publishedIds.push(existingIds[i]);
-        } catch (err) {
-          if (isMessageNotModified(err)) publishedIds.push(existingIds[i]);
-          else if (isMessageGone(err)) {
-            publishedIds.push((await api.sendMessage(channelId, chunks[i].text, options)).message_id);
-          } else throw err;
-        }
-      } else {
-        publishedIds.push((await api.sendMessage(channelId, chunks[i].text, options)).message_id);
+    // Telegram has a message size limit. Pagination keeps exactly one managed post per list.
+    const message = datedDirectoryPage(chunks[0], refreshedAt, 0, chunks.length);
+    const options = {
+      entities: message.entities,
+      link_preview_options: { is_disabled: true },
+      reply_markup: directoryNavKeyboard(collection, 0, chunks.length),
+    };
+    if (existingIds[0]) {
+      try {
+        await api.editMessageText(channelId, existingIds[0], message.text, options);
+        publishedIds.push(existingIds[0]);
+      } catch (err) {
+        if (isMessageNotModified(err)) publishedIds.push(existingIds[0]);
+        else if (isMessageGone(err)) publishedIds.push((await api.sendMessage(channelId, message.text, options)).message_id);
+        else throw err;
       }
-      // Persist after each send/edit, so a failed later chunk never duplicates earlier sends.
-      await checkpointDirectoryCollection(collection, {
-        publishedMessageIds: [...publishedIds, ...existingIds.slice(publishedIds.length)],
-      });
-    }
-    for (const id of existingIds.slice(chunks.length)) {
+    } else publishedIds.push((await api.sendMessage(channelId, message.text, options)).message_id);
+    // Save the root before cleanup so an interrupted sync reuses it on retry.
+    await checkpointDirectoryCollection(collection, {
+      publishedMessageIds: [...publishedIds, ...existingIds.slice(1)],
+      pageCount: chunks.length, activePage: 0, pageGeneration: contentHash, refreshedAt,
+    });
+    for (const id of existingIds.slice(1)) {
       if (api.deleteMessage) {
         try { await api.deleteMessage(channelId, id); }
         catch (err) {
@@ -298,7 +336,7 @@ async function syncCollection(
           // Telegram may refuse deletion of older posts. Remove the obsolete list by editing it.
           try {
             await api.editMessageText(channelId, id, "📚 Ce répertoire a été regroupé. Consultez les messages épinglés.", {
-              reply_markup: directoryNavKeyboard(collection),
+              reply_markup: { inline_keyboard: [] },
             });
           } catch (editError) {
             if (!isMessageGone(editError) && !isMessageNotModified(editError)) throw editError;
@@ -315,7 +353,14 @@ async function syncCollection(
       channelId,
       lastContentHash: contentHash,
       lastNewKey: newKey,
+      pageCount: chunks.length,
+      activePage: 0,
+      pageGeneration: contentHash,
+      refreshedAt,
     }, seqAtStart);
+    if (slot?.pageGeneration && slot.pageGeneration !== contentHash) {
+      for (let page = 0; page < (slot.pageCount ?? 0); page++) await kv.delete(pageKey(collection, slot.pageGeneration, page));
+    }
     await logAuditEvent("directory_synced", {
       collection, creatorsCount: creators.length, messageChunks: publishedIds.length, channelId,
     }, 0);

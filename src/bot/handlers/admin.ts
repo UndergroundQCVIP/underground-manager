@@ -792,7 +792,7 @@ async function publishDirectory(ctx: Context, collection?: CollectionCategory) {
   if (result.error) text = `⚠️ Synchronisation incomplète : ${result.error}`;
   else if (result.reason === "channel_not_configured") text = "⚠️ Aucun canal de répertoire n'est configuré.";
   else if (result.reason === "sync_in_progress") text = "⏳ Une synchronisation est déjà en cours. Réessayez dans un instant.";
-  else text = `✅ ${label} : canal synchronisé.\n${result.publishedCount} message(s) actualisé(s). Les messages existants sont modifiés sur place.\nOuvrez la liste dans le canal ci-dessous.`;
+  else text = `✅ ${label} : canal synchronisé.\n${result.publishedCount} message(s) actualisé(s). Une seule publication par répertoire, avec la date de mise à jour.\nLes messages existants sont modifiés sur place; les longues listes se parcourent avec les boutons de page.\nOuvrez la liste dans le canal ci-dessous.`;
   await ctx.reply(text, { reply_markup: kb });
 }
 

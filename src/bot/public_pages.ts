@@ -141,8 +141,17 @@ export async function renderNavPage(
       return { text: view.text, kb: view.kb };
     }
 
+    case "directory_regular":
+    case "directory_retro": {
+      const collection = page === "directory_regular" ? "regular" : "retro";
+      const { directoryPostLinks } = await import("../directory/sync.ts");
+      const [post] = await directoryPostLinks(collection);
+      if (post) kb.url("📚 Ouvrir la liste à jour", post.url).row();
+      kb.text("📋 Afficher la liste dans le bot", `dir:${collection}`).row();
+      return { text: `📚 *RÉPERTOIRE — ${collection === "regular" ? "EN ACTIVITÉ" : "PLUS EN ACTIVITÉ"}*\n\nChoisissez où consulter la liste :`, kb: back(kb) };
+    }
     case "directory":
-      kb.text("Tous", "dir:all").text("Regular", "dir:regular").text("Retro", "dir:retro").row();
+      kb.text("Tous", "dir:all").text("En activité", "dir:regular").text("Plus en activité", "dir:retro").row();
       kb.url("📣 Ouvrir le répertoire public", directoryUrl()).row();
       return { text: `📚 *RÉPERTOIRE DES CRÉATEURS*\n\nChoisissez un filtre :`, kb: back(kb) };
 

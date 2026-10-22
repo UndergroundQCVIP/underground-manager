@@ -124,7 +124,7 @@ adminSettingsComposer.callbackQuery("admin:nav", async (ctx) => {
       reply_markup: new InlineKeyboard()
         .text("📣 Mettre à jour le menu d'accueil", "admin:nav_sync:welcome")
         .row()
-        .text("📚 Mettre à jour les boutons du répertoire", "admin:nav_sync:directory")
+        .text("📚 Actualiser les répertoires", "admin:nav_sync:directory")
         .row()
         .text("🔄 Synchroniser les messages d'information", "admin:nav_sync:all")
         .row()
@@ -146,16 +146,24 @@ adminSettingsComposer.callbackQuery("admin:nav_lobby", async (ctx) => {
 adminSettingsComposer.callbackQuery(/^admin:nav_sync:(welcome|directory|all)$/, async (ctx) => {
   await ctx.answerCallbackQuery({ text: "Synchronisation..." });
   const which = ctx.match[1];
+  const directory = which === "directory" || which === "all"
+    ? await (await import("../../directory/sync.ts")).syncPublicDirectory(ctx.api, true) : undefined;
   const res = await syncNavigationMessages(ctx.api, {
     force: true,
-    only: which === "all" ? undefined : (which as "welcome" | "directory"),
+    only: which === "all" ? undefined : which === "welcome" ? "accueil" : "directory",
   });
+  if (directory) {
+    res.directory = directory.error ? { outcome: "error", error: directory.error }
+      : directory.reason === "channel_not_configured" ? { outcome: "not_configured" }
+      : directory.reason === "sync_in_progress" ? { outcome: "error", error: "Une synchronisation est déjà en cours. Réessayez dans un instant." }
+      : { outcome: "updated" };
+  }
   await logAuditEvent("navigation_synced", { which, result: res }, ctx.from.id);
   await ctx.editMessageText(
     `🔄 *SYNCHRONISATION*\n\n` +
     `• Menu d'accueil : ${OUTCOME[res.welcome.outcome]}${res.welcome.error ? ` — ${res.welcome.error}` : ""}\n` +
     `• Groupe d'accueil : ${OUTCOME[res.lobby.outcome]}${res.lobby.error ? ` — ${res.lobby.error}` : ""}\n` +
-    `• Boutons du répertoire : ${OUTCOME[res.directory.outcome]}${res.directory.error ? ` — ${res.directory.error}` : ""}`,
+    `• Répertoires : ${OUTCOME[res.directory.outcome]}${res.directory.error ? ` — ${res.directory.error}` : ""}`,
     { parse_mode: "Markdown", reply_markup: new InlineKeyboard().text("⬅️ Navigation publique", "admin:nav") }
   );
 });

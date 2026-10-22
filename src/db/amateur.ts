@@ -4,6 +4,7 @@ import { getKv } from "./kv.ts";
 import { logAuditEvent } from "./audit.ts";
 
 import { refreshChatBindings } from "./chat_bindings.ts";
+import { refreshAccueilConfiguration } from "./accueil.ts";
 
 const KEY = ["amateur_forum_config"];
 type Binding = { chatId: number; configuredBy: number; configuredAt: string };
@@ -23,6 +24,7 @@ export async function refreshAmateurConfiguration(): Promise<void> {
     getConfig().TELEGRAM_AMATEUR_FORUM_CHAT_ID = binding.chatId;
   }
   await refreshChatBindings();
+  await refreshAccueilConfiguration();
 }
 
 export async function bindAmateurForum(chatId: number, adminId: number): Promise<void> {

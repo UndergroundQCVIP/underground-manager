@@ -164,13 +164,13 @@ Deno.test("UG05 NAV — Welcome menu has every required button as an official bo
   try {
     setConfigForTesting({ ...MOCK_CONFIG, PUBLIC_DIRECTORY_URL: "", TELEGRAM_PUBLIC_LOBBY_URL: "" });
     const buttons = flat(welcomeKeyboard());
-    assertEquals(buttons.length, 9);
+    assertEquals(buttons.length, 11);
     for (const b of buttons) {
       assert(b.url && !b.callback_data, "public buttons must be plain URL buttons");
       assert(b.url!.startsWith("https://t.me/"), b.url);
     }
     const urls = buttons.map((b) => b.url!);
-    for (const page of ["regular", "retro", "amateur", "how", "contribute", "join", "rules"]) {
+    for (const page of ["regular", "retro", "amateur", "directory_regular", "directory_retro", "how", "contribute", "join", "rules"]) {
       assert(urls.includes(`https://t.me/${BOT}?start=${page}`), page);
     }
     // Directory + Explore fall back to the bot when no public URLs are configured...
@@ -199,8 +199,8 @@ Deno.test("UG05 NAV — Public messages never contain private invitation links o
     for (const id of [MOCK_CONFIG.VIP_COLLECTIONS_CHAT_ID, MOCK_CONFIG.TELEGRAM_RETRO_FORUM_CHAT_ID, MOCK_CONFIG.GENERAL_CHAT_ID, MOCK_CONFIG.WANTED_LIST_CHAT_ID]) {
       assert(!all.includes(String(id).replace("-100", "")), `leaks ${id}`);
     }
-    assertStringIncludes(buildLobbyMessage("contribution_only").text, "Tous les envois acceptés ne donnent pas nécessairement droit à une récompense");
-    assertStringIncludes(buildLobbyMessage("contribution_only").text, "L'accès prend fin");
+    assertStringIncludes(buildLobbyMessage("contribution_only").text, "BIENVENUE");
+    assert(buildLobbyMessage("contribution_only").text.length < 600);
   } finally {
     await kv.close();
   }
@@ -396,14 +396,14 @@ Deno.test("UG05 NAV — Admin menus expose Contributions, Settings → Membershi
 
     await bot.handleUpdate(cb(ADMIN, "admin:nav") as never);
     screen = JSON.stringify(calls.filter((c) => c.method === "editMessageText").at(-1));
-    for (const label of ["Mettre à jour le menu d'accueil", "Mettre à jour les boutons du répertoire", "Synchroniser les messages d'information"]) {
+    for (const label of ["Mettre à jour le menu d'accueil", "Actualiser les répertoires", "Synchroniser les messages d'information"]) {
       assertStringIncludes(screen, label);
     }
     // Unconfigured lobby → exact setup instructions, nothing invented
     await bot.handleUpdate(cb(ADMIN, "admin:nav_lobby") as never);
     screen = JSON.stringify(calls.filter((c) => c.method === "editMessageText").at(-1));
-    assertStringIncludes(screen, "TELEGRAM_PUBLIC_LOBBY_CHAT_ID");
-    assertStringIncludes(screen, "LA CONFRÉRIE | ACCUEIL");
+    assertStringIncludes(screen, "/setup_accueil -100IDENTIFIANT");
+    assertStringIncludes(screen, "Publier le menu dans Accueil");
 
     // Non-admins cannot open them
     calls.length = 0;

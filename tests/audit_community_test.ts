@@ -20,7 +20,7 @@ import { SPACE_IDS } from "../src/types.ts";
 import { closeAndFinalizeBallot, prepareMonthlyBallot, castVote, retryUnannouncedBallots } from "../src/voting/service.ts";
 import { getActiveBallot, getBallot, listPastBallots } from "../src/db/voting.ts";
 import { syncPublicDirectory } from "../src/directory/sync.ts";
-import { getDirectorySyncState, markDirectoryDirty } from "../src/db/directory.ts";
+import { getDirectorySyncState, markDirectoryDirty, saveDirectorySyncState } from "../src/db/directory.ts";
 import { handleForumTopicCreated, handleForumTopicEdited, handleMediaUpload } from "../src/creators/service.ts";
 import { getCreatorByTopic, listCreators } from "../src/db/creators.ts";
 import { getKv } from "../src/db/kv.ts";
@@ -225,7 +225,7 @@ async function makeCreators(names: string[]) {
   }
 }
 
-Deno.test("AUDIT DIRECTORY — unchanged chunks are not re-posted; transient failures never duplicate; stale chunks are deleted", async () => {
+Deno.test("AUDIT DIRECTORY — unchanged pages are not re-posted; transient failures never duplicate; legacy posts are deleted", async () => {
   const kv = await setupTestEnvironment();
   try {
     const api = new FlakyApi();
@@ -233,8 +233,8 @@ Deno.test("AUDIT DIRECTORY — unchanged chunks are not re-posted; transient fai
     await makeCreators(Array.from({ length: 100 }, (_, i) => `Creator Number ${String(i).padStart(3, "0")} With A Long Name`));
     const first = await syncPublicDirectory(api, true);
     assertEquals(first.updated, true);
-    const chunkCount = api.sentMessages.length;
-    assert(chunkCount >= 2, `expected multiple chunks, got ${chunkCount}`);
+    assertEquals(api.sentMessages.length, 2, "one root per public collection");
+    assert((await getDirectorySyncState()).collections!.regular!.pageCount! > 1);
 
     // Telegram says "message is not modified" for chunk 1 -> must NOT post a new message
     await markDirectoryDirty();
@@ -254,7 +254,11 @@ Deno.test("AUDIT DIRECTORY — unchanged chunks are not re-posted; transient fai
     assertEquals((await syncPublicDirectory(api)).updated, true);
     assert(api.editedMessages.length >= 1, "the retry edits the existing posts");
 
-    // The directory shrinks to one chunk: the leftover message is removed
+    // Simulate a tracked old continuation, then shrink the list to one page.
+    const previous = await getDirectorySyncState();
+    const root = previous.collections!.regular!.publishedMessageIds[0];
+    await saveDirectorySyncState({ ...previous, publishedMessageIds: [...previous.publishedMessageIds, 999],
+      collections: { ...previous.collections, regular: { ...previous.collections!.regular!, publishedMessageIds: [root, 999] } } });
     const k = await getKv();
     for await (const e of k.list({ prefix: ["creators"] })) {
       const c = e.value as { name: string; hasContent: boolean; id: string };
@@ -262,7 +266,9 @@ Deno.test("AUDIT DIRECTORY — unchanged chunks are not re-posted; transient fai
     }
     await markDirectoryDirty();
     await syncPublicDirectory(api);
-    assert(api.deleted.length >= 1, "stale trailing chunk deleted");
+    assert(api.deleted.includes(999), "tracked legacy continuation deleted");
+    assertEquals((await getDirectorySyncState()).collections!.regular!.publishedMessageIds, [root]);
+    assertEquals((await getDirectorySyncState()).collections!.regular!.pageCount, 1);
   } finally {
     await kv.close();
   }

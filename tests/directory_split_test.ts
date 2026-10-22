@@ -114,7 +114,7 @@ Deno.test("DIRECTORY SPLIT — interrupted publication checkpoints IDs and concu
       }
       return await send(chat, text, options);
     };
-    const failed = await syncPublicDirectory(api, true, "regular");
+    const failed = await syncPublicDirectory(api, true);
     assert(failed.error);
     assertEquals(api.sentMessages.length, 1);
     const failedState = await getDirectorySyncState();
@@ -122,8 +122,8 @@ Deno.test("DIRECTORY SPLIT — interrupted publication checkpoints IDs and concu
     assertStringIncludes(failedState.lastError!, "retry after");
     assertEquals(failedState.collections!.regular!.publishedMessageIds, [1]);
     api.sendMessage = send;
-    await syncPublicDirectory(api, false, "regular");
-    assertEquals(api.editedMessages[0].messageId, 1);
+    await syncPublicDirectory(api, false);
+    assertEquals((await getDirectorySyncState()).collections!.regular!.publishedMessageIds, [1]);
     assertEquals(api.sentMessages.filter((m) => m.text === api.sentMessages[0].text).length, 1);
     assertEquals((await getDirectorySyncState()).lastError, undefined);
   } finally { await kv.close(); }
