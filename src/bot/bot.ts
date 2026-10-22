@@ -23,6 +23,8 @@ import { adminSettingsComposer } from "./handlers/admin_settings.ts";
 import { referralsComposer } from "./handlers/referrals.ts";
 import { importsComposer } from "./handlers/imports.ts";
 import { leaderboardComposer } from "./handlers/leaderboard.ts";
+import { amateurComposer } from "./handlers/amateur.ts";
+import { refreshAmateurConfiguration } from "../db/amateur.ts";
 
 export function createBot(token?: string): Bot {
   const config = getConfig();
@@ -42,10 +44,12 @@ export function createBot(token?: string): Bot {
 
   // Global Middlewares
   bot.use(idempotencyMiddleware);
+  bot.use(async (_ctx, next) => { await refreshAmateurConfiguration(); await next(); });
   bot.use(trackUserMiddleware);
 
   // Feature Composers
   bot.use(startComposer);
+  bot.use(amateurComposer);
   bot.use(membershipComposer);
   bot.use(paymentsComposer);
   bot.use(joinReqComposer);

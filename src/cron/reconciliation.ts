@@ -29,6 +29,7 @@ import { withJobLease } from "../ops/locks.ts";
 import { torontoDateKey, torontoParts } from "../util/time.ts";
 import { checkBotPermissions } from "../access/sync.ts";
 import { SPACE_IDS } from "../types.ts";
+import { refreshAmateurConfiguration } from "../db/amateur.ts";
 
 export async function runHourlyReconciliation(bot: Bot): Promise<{
   reconciled: { checkedUsers: number; removedCount: number; errors: string[] };
@@ -39,6 +40,7 @@ export async function runHourlyReconciliation(bot: Bot): Promise<{
   daily?: { ran: boolean };
 }> {
   console.log(`[Cron] Starting hourly membership reconciliation at ${new Date().toISOString()}`);
+  await refreshAmateurConfiguration();
   try { await repairLegacyFullContentRewards(); }
   catch (error) { console.error("[Rewards repair]", error); }
 

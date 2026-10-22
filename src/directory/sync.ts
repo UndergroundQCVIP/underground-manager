@@ -91,6 +91,7 @@ export function buildDirectoryMessages(
   nowArg?: Date
 ): DirectoryMessage[] {
   const opts = optsOrNow instanceof Date ? {} : optsOrNow;
+  if (opts.collection && opts.collection !== "regular" && opts.collection !== "retro") return [];
   const now = optsOrNow instanceof Date ? optsOrNow : nowArg ?? new Date();
   const creators = allCreators
     .filter((c) => c.status === "active" && c.hasContent && !isRetired(c, now.getTime()))
@@ -194,6 +195,9 @@ export async function syncPublicDirectory(
   force = false,
   collection?: CollectionCategory
 ): Promise<SyncDirectoryResult> {
+  if (collection && collection !== "regular" && collection !== "retro") {
+    return { updated: false, publishedCount: 0, reason: "private_collection" };
+  }
   if (!getConfig().PUBLIC_DIRECTORY_CHAT_ID) {
     return { updated: false, publishedCount: 0, reason: "channel_not_configured" };
   }

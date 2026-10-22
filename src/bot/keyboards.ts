@@ -35,6 +35,7 @@ export function mainMenuKeyboard(
     .row();
 
   kb.text("🔎 Liste recherchée", "wreq:menu").row();
+  kb.text("🔒 Collection Amateur", "member:amateur").row();
 
   kb.text("➕ Contribuer", "contrib:start").text("🤝 Parrainage", "ref:menu").row();
   kb.text("🏆 Classement", "lb:month").row();
@@ -107,6 +108,7 @@ export function supportKeyboard(): InlineKeyboard {
 
 export function adminMenuKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
+    .text("🔒 Amateur — administration", "amateur:admin").row()
     .text("👥 Membres", "admin:roster:0")
     .text("🎁 Accès gracieux", "admin:grant_wizard")
     .row()
@@ -182,6 +184,8 @@ export function grantSpacesKeyboard(
       "Accès complet — en activité + Retro + communauté",
       `admin:grant_spc:${userId}:${duration}:${reason}:full`
     )
+    .row()
+    .text("🔐 Amateur seulement — autorisation distincte", `admin:grant_spc:${userId}:${duration}:${reason}:amateur`)
     .row()
     .text("❌ Annuler", "admin:menu");
 }

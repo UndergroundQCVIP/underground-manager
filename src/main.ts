@@ -3,7 +3,7 @@
  * Supports Deno Deploy (webhook + Deno.cron) and local development (polling).
  */
 
-import { webhookCallback } from "grammy";
+import { API_CONSTANTS, webhookCallback } from "grammy";
 import { fatalConfigErrors, loadConfig, validateConfig } from "./config.ts";
 import { createBot } from "./bot/bot.ts";
 import { registerCronJobs } from "./cron/reconciliation.ts";
@@ -11,6 +11,8 @@ import { getKv } from "./db/kv.ts";
 import { createFetchHandler, createPreviewFetchHandler, isLiveBotRuntime } from "./server.ts";
 import { syncDirectoryIfNeeded } from "./directory/sync.ts";
 import { repairLegacyFullContentRewards } from "./complimentary/service.ts";
+import { refreshAmateurConfiguration } from "./db/amateur.ts";
+import { syncNavigationMessages } from "./navigation/service.ts";
 
 async function main() {
   const config = loadConfig();
@@ -43,6 +45,7 @@ async function main() {
   // Ensure Deno KV database is accessible
   try {
     await getKv();
+    await refreshAmateurConfiguration();
     console.log("[Database] Deno KV connection initialized.");
   } catch (err) {
     console.error("[Database Fatal] Could not open Deno KV database:", err);
@@ -57,6 +60,7 @@ async function main() {
   if (config.BOT_MODE === "polling") {
     console.log("[Bot] Launching in long polling mode for development...");
     await bot.start({
+      allowed_updates: [...API_CONSTANTS.ALL_UPDATE_TYPES],
       onStart: (botInfo) => {
         console.log(`[Bot] Successfully started polling as @${botInfo.username}`);
       },
@@ -75,6 +79,11 @@ async function main() {
     void syncDirectoryIfNeeded(bot.api).then((result) => {
       if (result.error) console.error("[Directory startup]", result.error);
     }).catch((error) => console.error("[Directory startup]", error));
+    void syncNavigationMessages(bot.api).then((result) => {
+      for (const [page, outcome] of Object.entries(result)) {
+        if (outcome.error) console.error(`[Navigation startup: ${page}]`, outcome.error);
+      }
+    }).catch((error) => console.error("[Navigation startup]", error));
   }
 }
 

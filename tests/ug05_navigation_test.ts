@@ -164,13 +164,13 @@ Deno.test("UG05 NAV — Welcome menu has every required button as an official bo
   try {
     setConfigForTesting({ ...MOCK_CONFIG, PUBLIC_DIRECTORY_URL: "", TELEGRAM_PUBLIC_LOBBY_URL: "" });
     const buttons = flat(welcomeKeyboard());
-    assertEquals(buttons.length, 8);
+    assertEquals(buttons.length, 9);
     for (const b of buttons) {
       assert(b.url && !b.callback_data, "public buttons must be plain URL buttons");
       assert(b.url!.startsWith("https://t.me/"), b.url);
     }
     const urls = buttons.map((b) => b.url!);
-    for (const page of ["regular", "retro", "how", "contribute", "join", "rules"]) {
+    for (const page of ["regular", "retro", "amateur", "how", "contribute", "join", "rules"]) {
       assert(urls.includes(`https://t.me/${BOT}?start=${page}`), page);
     }
     // Directory + Explore fall back to the bot when no public URLs are configured...

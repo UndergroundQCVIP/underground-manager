@@ -70,6 +70,20 @@ startComposer.command("start", async (ctx) => {
     const creatorId = match.replace("creator_", "");
     const creator = await getCreator(creatorId);
 
+    if (creator && creatorCollection(creator) === "amateur") {
+      const { hasAccessToSpace } = await import("../../db/entitlements.ts");
+      if (!await hasAccessToSpace(userId, "amateur_collections")) {
+        await ctx.reply("🔒 Collection Amateur verrouillée. Seul un administrateur peut vous accorder un accès distinct.", {
+          reply_markup: new InlineKeyboard().text("⬅️ Menu principal", "member:home"),
+        });
+      } else {
+        await ctx.reply("🔐 Votre autorisation Amateur est active.", {
+          reply_markup: new InlineKeyboard().url("👉 Ouvrir le sujet", `https://t.me/c/${String(creator.chatId).slice(4)}/${creator.topicId}`),
+        });
+      }
+      return;
+    }
+
     if (!creator) {
       await ctx.reply("⚠️ Collection de créateur introuvable ou déplacée.", {
         reply_markup: new InlineKeyboard().text("⬅️ Menu principal", "member:home"),

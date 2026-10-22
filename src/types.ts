@@ -7,12 +7,14 @@
 export type SpaceId =
   | "vip_collections"
   | "retro_collections"
+  | "amateur_collections"
   | "wanted_list"
   | "general_chat";
 
 export const SPACE_IDS: readonly SpaceId[] = [
   "vip_collections",
   "retro_collections",
+  "amateur_collections",
   "wanted_list",
   "general_chat",
 ] as const;
@@ -40,11 +42,17 @@ export interface SpaceDefinition {
   envVar:
     | "VIP_COLLECTIONS_CHAT_ID"
     | "TELEGRAM_RETRO_FORUM_CHAT_ID"
+    | "TELEGRAM_AMATEUR_FORUM_CHAT_ID"
     | "WANTED_LIST_CHAT_ID"
     | "GENERAL_CHAT_ID";
 }
 
 export const SPACE_DEFINITIONS: Record<SpaceId, SpaceDefinition> = {
+  amateur_collections: {
+    id: "amateur_collections", name: "AMATEUR | LA CONFRÉRIE", type: "forum_group",
+    description: "Private collection; access granted separately by administrators only",
+    envVar: "TELEGRAM_AMATEUR_FORUM_CHAT_ID",
+  },
   vip_collections: {
     id: "vip_collections",
     name: "TOKEBEC VIP COLLECTIONS",
@@ -79,10 +87,12 @@ export type ComplimentaryAccessLevel =
   | "vip_only"
   | "vip_and_chat"
   | "regular"
+  | "amateur"
   | "full"
   | "full_retro";
 
 export const COMPLIMENTARY_SPACES: Record<ComplimentaryAccessLevel, SpaceId[]> = {
+  amateur: ["amateur_collections"],
   vip_only: ["vip_collections"],
   vip_and_chat: ["vip_collections", "general_chat"],
   regular: ["vip_collections", "wanted_list", "general_chat"],
@@ -91,6 +101,7 @@ export const COMPLIMENTARY_SPACES: Record<ComplimentaryAccessLevel, SpaceId[]> =
 };
 
 export const COMPLIMENTARY_ACCESS_LABELS: Record<ComplimentaryAccessLevel, string> = {
+  amateur: "Amateur seulement — autorisation administrative distincte",
   vip_only: "Collections en activité seulement",
   vip_and_chat: "Collections en activité + clavardage",
   regular: "En activité + clavardage + suggestions et votes",
@@ -111,6 +122,8 @@ export const PLAN_PAYLOAD_IDS: Record<MembershipPlanId, string> = {
 };
 
 export type CollectionCategory = "regular" | "retro";
+/** Amateur is private and deliberately excluded from paid/reward scopes and public sync state. */
+export type CreatorCollection = CollectionCategory | "amateur";
 
 /**
  * UG-05: spaces covered by a contribution-earned entitlement, per creator forum.
@@ -208,6 +221,7 @@ export interface AccessSyncState {
 }
 
 export type AuditEventType =
+  | "amateur_forum_configured"
   | "wanted_request_created"
   | "wanted_request_updated"
   | "member_registered"
@@ -348,7 +362,7 @@ export interface Creator {
   status: "active" | "archived";
   wantedListId?: string; // Associated Wanted List candidate ID
   /** UG-04: collection category. Absent on legacy records (treated as "regular"). */
-  collection?: CollectionCategory;
+  collection?: CreatorCollection;
   retiredAt?: string; // Optional retirement date (ISO)
   /** UG-04: publication/distribution rights verification. Absent = unverified. */
   rightsStatus?: "unverified" | "verified";

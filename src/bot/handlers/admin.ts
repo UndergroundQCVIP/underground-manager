@@ -739,6 +739,7 @@ adminComposer.callbackQuery("admin:sync_dir_menu", async (ctx) => {
     .text("🔄 Actualiser — en activité", "admin:sync_dir:regular").row()
     .text("🔄 Actualiser — inactifs", "admin:sync_dir:retro").row();
   for (const link of await directoryPostLinks()) kb.url(link.label, link.url).row();
+  kb.text("🔒 Répertoire Amateur (privé)", "amateur:directory").row();
   kb.text("🔢 Vérifier les compteurs", "admin:directory_counts:0").row()
     .text("🛠️ Réparer le répertoire", "admin:repair_dir").row()
     .text("⬅️ Admin Menu", "admin:menu");
@@ -853,7 +854,7 @@ adminComposer.command("register_creator", async (ctx) => {
   const args = ctx.match?.trim().split(/\s+/);
   if (!args || args.length < 2) {
     await ctx.reply(
-      "Utilisation : `/register_creator [retro] <id_sujet_numérique> <Nom du créateur>`\n" +
+      "Utilisation : `/register_creator [regular|retro|amateur] <id_sujet_numérique> <Nom du créateur>`\n" +
       "Exemples : `/register_creator 42 Aria` (forum Regular) · `/register_creator retro 17 Maya` (forum Retro)",
       { parse_mode: "Markdown" }
     );
@@ -861,19 +862,19 @@ adminComposer.command("register_creator", async (ctx) => {
   }
 
   // Optional leading "retro"/"regular" picks the forum (default: Regular).
-  let forum: "regular" | "retro" = "regular";
-  if (/^(retro|regular)$/i.test(args[0])) forum = args.shift()!.toLowerCase() as "regular" | "retro";
+  let forum: "regular" | "retro" | "amateur" = "regular";
+  if (/^(retro|regular|amateur)$/i.test(args[0])) forum = args.shift()!.toLowerCase() as "regular" | "retro" | "amateur";
   if (args.length < 2) {
-    await ctx.reply("Utilisation : `/register_creator [retro] <id_sujet_numérique> <Nom du créateur>`", { parse_mode: "Markdown" });
+    await ctx.reply("Utilisation : `/register_creator [regular|retro|amateur] <id_sujet_numérique> <Nom du créateur>`", { parse_mode: "Markdown" });
     return;
   }
 
   const topicId = Number(args[0]);
   const creatorName = args.slice(1).join(" ");
   const config = (await import("../../config.ts")).getConfig();
-  const targetChatId = forum === "retro" ? config.TELEGRAM_RETRO_FORUM_CHAT_ID : config.VIP_COLLECTIONS_CHAT_ID;
+  const targetChatId = forum === "amateur" ? config.TELEGRAM_AMATEUR_FORUM_CHAT_ID : forum === "retro" ? config.TELEGRAM_RETRO_FORUM_CHAT_ID : config.VIP_COLLECTIONS_CHAT_ID;
   if (!targetChatId) {
-    await ctx.reply("Le forum Retro n'est pas configuré (TELEGRAM_RETRO_FORUM_CHAT_ID).");
+    await ctx.reply(forum === "amateur" ? "Configurez le forum Amateur avec /setup_amateur dans son groupe privé." : "Le forum Retro n'est pas configuré (TELEGRAM_RETRO_FORUM_CHAT_ID).");
     return;
   }
 
@@ -894,7 +895,7 @@ adminComposer.command("register_creator", async (ctx) => {
   await ctx.reply(
     `✅ *Créateur inscrit!*\n\n` +
     `• *Nom :* ${escapeMd(creator.name)}\n` +
-    `• *Collection :* ${forum === "retro" ? "Retro" : "Regular"}\n` +
+    `• *Collection :* ${forum === "amateur" ? "Amateur (privé)" : forum === "retro" ? "Retro" : "Regular"}\n` +
     `• *ID du sujet :* \`${creator.topicId}\`\n` +
     `• *ID du clavardage :* \`${creator.chatId}\`\n` +
     `• *Statut :* Actif`,

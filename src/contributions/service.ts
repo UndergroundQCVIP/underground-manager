@@ -71,7 +71,7 @@ export async function startContribution(
   creatorId: string
 ): Promise<{ ok: boolean; contribution?: Contribution; error?: string }> {
   const creator = await getCreator(creatorId);
-  if (!creator || creator.status !== "active") return { ok: false, error: "Créateur introuvable." };
+  if (!creator || creator.collection === "amateur" || creator.status !== "active") return { ok: false, error: "Créateur introuvable." };
 
   // Starting a new session replaces an unfinished one.
   const existing = await getActiveContribution(userId);
@@ -392,17 +392,17 @@ type Resolved = { creator: Creator } | { error: string };
 async function resolveTargetCreator(api: ContributionApiLike, c: Contribution, adminId: number): Promise<Resolved> {
   if (c.kind !== "new" || !c.proposal) {
     const creator = await getCreator(c.creatorId);
-    return creator ? { creator } : { error: "Le créateur n'existe plus." };
+    return creator && creator.collection !== "amateur" ? { creator } : { error: "Le créateur n'existe plus." };
   }
   const p = c.proposal;
 
   if (p.useExistingCreatorId) {
     const creator = await getCreator(p.useExistingCreatorId);
-    return creator ? { creator } : { error: "Le créateur existant sélectionné n'existe plus." };
+    return creator && creator.collection !== "amateur" ? { creator } : { error: "Le créateur existant sélectionné n'existe plus." };
   }
   if (p.createdCreatorId) {
     const creator = await getCreator(p.createdCreatorId);
-    if (creator) return { creator };
+    if (creator && creator.collection !== "amateur") return { creator };
   }
 
   const config = getConfig();

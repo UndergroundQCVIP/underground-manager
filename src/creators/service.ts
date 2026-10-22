@@ -21,15 +21,16 @@ import {
 } from "../db/wanted.ts";
 import { logAuditEvent } from "../db/audit.ts";
 import { recordMediaIndex } from "../db/media_index.ts";
-import { Creator, MediaIndexEntry } from "../types.ts";
+import { Creator, CreatorCollection, MediaIndexEntry } from "../types.ts";
 
 /** Which collection a managed creator forum belongs to (null = unmanaged chat). */
-export function collectionForChat(chatId: number): "regular" | "retro" | null {
+export function collectionForChat(chatId: number): CreatorCollection | null {
   const config = getConfig();
   if (chatId === config.VIP_COLLECTIONS_CHAT_ID) return "regular";
   if (config.TELEGRAM_RETRO_FORUM_CHAT_ID && chatId === config.TELEGRAM_RETRO_FORUM_CHAT_ID) {
     return "retro";
   }
+  if (config.TELEGRAM_AMATEUR_FORUM_CHAT_ID && chatId === config.TELEGRAM_AMATEUR_FORUM_CHAT_ID) return "amateur";
   return null;
 }
 
@@ -81,6 +82,9 @@ export async function handleForumTopicCreated(
   if (collection === "retro" && existingByName) {
     return existingByName;
   }
+  if (existingByName && (collection === "amateur" || existingByName.collection === "amateur")) {
+    throw new Error("Ce nom est déjà associé à un autre sujet. Utilisez un nom distinct pour la collection privée.");
+  }
   if (existingByName) {
     creatorId = existingByName.id;
   }
@@ -104,7 +108,7 @@ export async function handleForumTopicCreated(
   };
 
   // Check if there is an existing Wanted List candidate for this creator
-  const wantedCandidate = await getWantedCandidateByName(name);
+  const wantedCandidate = collection === "amateur" ? null : await getWantedCandidateByName(name);
   if (wantedCandidate) {
     creator.wantedListId = wantedCandidate.id;
     await updateWantedStatus(
@@ -261,8 +265,15 @@ export async function registerOrRepairTopic(
 
   let creator = await getCreatorByTopic(chatId, topicId);
 
+  if (!creator) {
+    const sameName = await getCreatorByName(trimmed);
+    if (sameName && (sameName.collection === "amateur" || collectionForChat(chatId) === "amateur")) {
+      throw new Error("Ce nom est déjà associé à un autre sujet. Utilisez un nom distinct pour la collection privée.");
+    }
+  }
+
   // One unified directory: a Retro topic may not duplicate a creator that already exists.
-  if (!creator && collectionForChat(chatId) === "retro") {
+  if (!creator && (collectionForChat(chatId) === "retro" || collectionForChat(chatId) === "amateur")) {
     const sameName = await getCreatorByName(trimmed);
     if (sameName) {
       throw new Error(
@@ -294,7 +305,7 @@ export async function registerOrRepairTopic(
   }
 
   // Check matching wanted candidate
-  const wanted = await getWantedCandidateByName(trimmed);
+  const wanted = creator.collection === "amateur" ? null : await getWantedCandidateByName(trimmed);
   if (wanted) {
     await updateWantedStatus(wanted.id, "available", "Manually paired", creator.id);
   }
