@@ -80,13 +80,12 @@ export async function setModeratorRewardDraft(id: string, adminId: number, patch
 }
 
 /** Append only against the exact collecting snapshot; concurrent album updates retry. */
-export async function appendContributionItem(snapshot: Contribution, item: import("../types.ts").ContributionItem, screenshot: boolean): Promise<Contribution | null> {
+export async function appendContributionItem(snapshot: Contribution, item: import("../types.ts").ContributionItem): Promise<Contribution | null> {
   const kv = await getKv();
   const entry = await kv.get<Contribution>(["contributions", snapshot.id]);
   if (!entry.value || entry.value.status !== "collecting" || JSON.stringify(entry.value) !== JSON.stringify(snapshot)) return null;
   const next = structuredClone(entry.value);
-  if (screenshot) { next.profileScreenshotMessageId = item.messageId; next.step = "media"; }
-  next.items.push(screenshot ? { ...item, purpose: "profile_screenshot" } : item);
+  next.items.push(item);
   next.updatedAt = new Date().toISOString();
   return (await kv.atomic().check(entry).set(entry.key, next).commit()).ok ? next : null;
 }

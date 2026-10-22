@@ -172,7 +172,7 @@ export async function submitProposalName(
   const duplicates = amateur ? [] : await findSimilarCreators(name);
   c.proposal = { name, collection: amateur ? "amateur" : "regular", duplicateCandidateIds: duplicates.map((d) => d.id) };
   c.creatorName = name;
-  c.step = amateur ? "profile_screenshot" : "url";
+  c.step = "url";
   await saveContribution(c);
   return { ok: true, duplicates, contribution: c };
 }
@@ -182,7 +182,7 @@ export async function submitProposalUrl(
   raw: string | null
 ): Promise<{ ok: boolean; error?: string }> {
   const c = await getActiveContribution(userId);
-  if (!c || c.kind !== "new" || c.step !== "url" || !c.proposal) return { ok: false, error: "Étape invalide." };
+  if (!c || c.kind !== "new" || (c.step !== "url" && !(c.submissionCollection === "amateur" && c.step === "profile_screenshot")) || !c.proposal) return { ok: false, error: "Étape invalide." };
   if (raw !== null) {
     let parsed: URL | null = null;
     try {
@@ -193,7 +193,7 @@ export async function submitProposalUrl(
     }
     c.proposal.profileUrl = parsed.toString();
   }
-  c.step = "collection";
+  c.step = c.submissionCollection === "amateur" ? "media" : "collection";
   await saveContribution(c);
   return { ok: true };
 }
@@ -203,7 +203,7 @@ export async function submitProposalCollection(
   collection: CollectionCategory
 ): Promise<{ ok: boolean; error?: string }> {
   const c = await getActiveContribution(userId);
-  if (!c || c.kind !== "new" || c.step !== "collection" || !c.proposal) return { ok: false, error: "Étape invalide." };
+  if (!c || c.kind !== "new" || c.submissionCollection === "amateur" || c.step !== "collection" || !c.proposal) return { ok: false, error: "Étape invalide." };
   c.proposal.collection = collection;
   c.step = "media";
   await saveContribution(c);
@@ -235,13 +235,11 @@ export async function addContributionItem(
   for (let attempt = 0; attempt < 20; attempt++) {
     const c = await getActiveContribution(userId);
     if (!c) return { added: false, count: 0, newAlbum: false };
-    const screenshot = c.submissionCollection === "amateur" && c.step === "profile_screenshot";
-    if (screenshot && item.kind !== "photo") return { added: false, count: c.items.length, newAlbum: false, contribution: c };
-    if (c.kind === "new" && c.step !== "media" && !screenshot) return { added: false, count: 0, newAlbum: false };
+    if (c.kind === "new" && c.step !== "media") return { added: false, count: c.items.length, newAlbum: false, contribution: c };
     if (c.items.some(i => i.messageId === item.messageId)) return { added: false, count: c.items.length, newAlbum: false, contribution: c };
     const last = c.items[c.items.length - 1];
     const newAlbum = !(item.mediaGroupId && last?.mediaGroupId === item.mediaGroupId);
-    const updated = await appendContributionItem(c, item, screenshot);
+    const updated = await appendContributionItem(c, item);
     if (updated) return { added: true, count: updated.items.length, newAlbum, contribution: updated };
   }
   throw new Error("Plusieurs médias arrivent simultanément. Réessayez cet élément.");
@@ -443,8 +441,6 @@ export function validAmateurFullName(name: string): boolean {
 export function validateAmateurSubmission(c: Contribution): string | null {
   if (c.submissionCollection !== "amateur" && c.proposal?.collection !== "amateur") return null;
   if (c.submissionCollection !== "amateur" || c.proposal?.collection !== "amateur" || !validAmateurFullName(c.proposal.name)) return "Indiquez le prénom et le nom complets pour Amateur.";
-  if (!c.profileScreenshotMessageId || !c.items.some(i => i.messageId === c.profileScreenshotMessageId && i.kind === "photo" && i.purpose === "profile_screenshot")) return "Ajoutez une capture photo du profil social.";
-  if (!c.items.some(i => i.purpose !== "profile_screenshot")) return "Ajoutez du contenu en plus de la capture du profil social.";
   return null;
 }
 

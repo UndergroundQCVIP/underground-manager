@@ -28,7 +28,7 @@ export async function getOrCreateJoinLink(
 
   // Generate a new secure link requiring bot approval
   const linkObj = await api.createChatInviteLink(chatId, {
-    name: `${getClubName()} — ${getSpaceTitle(spaceId)}`,
+    name: Array.from(`${getClubName()} — ${getSpaceTitle(spaceId)}`).slice(0, 32).join(""),
     creates_join_request: true,
   });
 

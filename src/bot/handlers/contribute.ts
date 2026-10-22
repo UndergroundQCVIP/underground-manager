@@ -130,7 +130,7 @@ contributeComposer.callbackQuery("contrib:new", async (ctx) => {
 contributeComposer.callbackQuery("contrib:amateur", async ctx => {
   await ctx.answerCallbackQuery();
   await startNewCreatorContribution(ctx.from.id, "amateur");
-  await ctx.reply("🔒 CONTRIBUTION AMATEUR\n\nIndiquez le prénom et le nom complets de la personne. Ensuite, envoyez une capture de son profil social, puis les photos et vidéos dont vous avez les droits de diffusion. La capture sera publiée avec le contenu accepté. Un administrateur vérifiera l'identité, la majorité et le consentement avant toute publication.", { reply_markup: new InlineKeyboard().text("❌ Annuler", "contrib:cancel") });
+  await ctx.reply("🔒 CONTRIBUTION AMATEUR\n\nIndiquez le prénom et le nom complets de la personne. Vous pourrez ensuite ajouter un lien vers son profil social ou passer cette étape, puis envoyer vos photos et vidéos. Appuyez sur Terminer une fois tout le contenu envoyé. Un administrateur vérifiera les droits de diffusion avant publication.", { reply_markup: new InlineKeyboard().text("❌ Annuler", "contrib:cancel") });
 });
 
 const urlPrompt = () =>
@@ -183,10 +183,6 @@ contributeComposer.on("message:text", async (ctx, next) => {
       await ctx.reply(`⚠️ ${res.error}`);
       return;
     }
-    if (res.contribution?.submissionCollection === "amateur") {
-      await ctx.reply("📸 Envoyez une capture d’écran du profil social, en photo. Elle sera publiée avec le contenu accepté. Envoyez ensuite les autres photos et vidéos.", { reply_markup: new InlineKeyboard().text("❌ Annuler", "contrib:cancel") });
-      return;
-    }
     if (res.duplicates && res.duplicates.length > 0) {
       const kb = new InlineKeyboard();
       res.duplicates.slice(0, 3).forEach((d, i) => {
@@ -207,17 +203,24 @@ contributeComposer.on("message:text", async (ctx, next) => {
     return;
   }
 
-  if (active.step === "url") {
+  if (active.step === "url" || (active.submissionCollection === "amateur" && active.step === "profile_screenshot")) {
     const res = await submitProposalUrl(userId, text);
     if (!res.ok) {
       await ctx.reply(`⚠️ ${res.error}`);
       return;
     }
-    await askCollection(ctx);
+    await afterProfileStep(ctx, active.submissionCollection === "amateur");
     return;
   }
   return next();
 });
+
+async function afterProfileStep(ctx: Context, amateur: boolean) {
+  if (!amateur) { await askCollection(ctx); return; }
+  const { getActiveContribution } = await import("../../db/contributions.ts");
+  const c = await getActiveContribution(ctx.from!.id);
+  await ctx.reply(mediaPrompt(c?.creatorName ?? ""), { parse_mode: "Markdown", reply_markup: collectingKeyboard() });
+}
 
 async function askCollection(ctx: Context) {
   await ctx.reply(
@@ -262,7 +265,8 @@ contributeComposer.callbackQuery("contrib:urlskip", async (ctx) => {
     await ctx.reply(`⚠️ ${res.error}`);
     return;
   }
-  await askCollection(ctx);
+  const { getActiveContribution } = await import("../../db/contributions.ts");
+  await afterProfileStep(ctx, (await getActiveContribution(ctx.from.id))?.submissionCollection === "amateur");
 });
 
 contributeComposer.callbackQuery(/^contrib:col:(regular|retro)$/, async (ctx) => {
@@ -287,9 +291,11 @@ contributeComposer.on(["message:photo", "message:video"], async (ctx, next) => {
     kind: msg.photo ? "photo" : "video",
     mediaGroupId: msg.media_group_id,
   });
-  if (res.contribution?.step === "profile_screenshot") { await ctx.reply("Envoyez d’abord une capture du profil social en photo, puis le contenu."); return; }
-  if (res.added && res.contribution?.profileScreenshotMessageId === msg.message_id) {
-    await ctx.reply("✅ Capture reçue. Envoyez maintenant le contenu, puis appuyez sur Terminer.", { reply_markup: collectingKeyboard() }); return;
+  if (res.contribution?.kind === "new" && res.contribution.step === "collection") { await askCollection(ctx); return; }
+  if (res.contribution?.kind === "new" && res.contribution.step !== "media") {
+    await ctx.reply(res.contribution.step === "name" ? "Indiquez d'abord le nom complet de la personne." : "Ajoutez un lien de profil social ou appuyez sur Passer avant d'envoyer le contenu.", {
+      reply_markup: res.contribution.step === "name" ? new InlineKeyboard().text("❌ Annuler", "contrib:cancel") : new InlineKeyboard().text("⏭️ Passer", "contrib:urlskip").text("❌ Annuler", "contrib:cancel"),
+    }); return;
   }
   if (!res.contribution) return next(); // no open session (or details incomplete): ignore silently
   if (res.added && res.newAlbum) {
