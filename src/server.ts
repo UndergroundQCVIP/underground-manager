@@ -5,6 +5,20 @@
 
 const MAX_BODY_BYTES = 1_000_000; // Telegram updates are a few KB
 
+/** Deno previews have separate databases but may inherit the LIVE Telegram credentials. */
+export function isLiveBotRuntime(timeline: string | undefined): boolean {
+  // Undefined preserves polling/self-hosted and classic Deploy installations.
+  return timeline === undefined || timeline === "production";
+}
+
+/** A preview can pass deployment health checks without ever constructing a Telegram bot. */
+export function createPreviewFetchHandler(): (req: Request) => Promise<Response> {
+  return createFetchHandler({
+    webhookSecret: "", // All webhook requests fail closed, including a valid live secret.
+    handleWebhook: () => Promise.resolve(new Response("Preview bot disabled", { status: 503 })),
+  });
+}
+
 /** Constant-time comparison of the Telegram secret-token header. */
 export async function isValidWebhookSecret(
   provided: string | null,

@@ -204,3 +204,17 @@ Deno.test("DIRECTORY SYNC — deleted active post is republished even when Retro
     assertStringIncludes(api.sentMessages.at(-1)!.text, "Active creator");
   } finally { await kv.close(); }
 });
+
+Deno.test("DIRECTORY DEPLOY — previews are health-only and cannot consume live Telegram updates", async () => {
+  const { createPreviewFetchHandler, isLiveBotRuntime } = await import("../src/server.ts");
+  assertEquals(isLiveBotRuntime(undefined), true);
+  assertEquals(isLiveBotRuntime("production"), true);
+  for (const timeline of ["preview/revision", "git-branch/main", "git-branch/fix/directory-sync-discovery"]) {
+    assertEquals(isLiveBotRuntime(timeline), false);
+  }
+  const handler = createPreviewFetchHandler();
+  assertEquals((await handler(new Request("https://preview.example/health"))).status, 200);
+  assertEquals((await handler(new Request("https://preview.example/webhook", {
+    method: "POST", headers: { "x-telegram-bot-api-secret-token": "live-secret" }, body: "{}",
+  }))).status, 503);
+});
