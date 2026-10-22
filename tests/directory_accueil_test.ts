@@ -192,3 +192,74 @@ Deno.test("ACCUEIL — concurrent sync and independent navigation checkpoints pr
     assertEquals(state.leaderboard!.messageId, 9);
   } finally { await kv.close(); }
 });
+
+Deno.test("ACCUEIL — screenshot commands accept capitalization, a missing slash and the short channel ID", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    const channelId = -1004407825387;
+    const tg = await createFakeTelegram();
+    const lookedUp: number[] = [];
+    tg.bot.api.config.use((prev, method, payload, signal) => {
+      if (method === "getChat") {
+        lookedUp.push(Number((payload as { chat_id: number | string }).chat_id));
+        return Promise.resolve({ ok: true, result: { id: channelId, type: "channel", title: "LA CONFRÉRIE | ACCUEIL" } } as never);
+      }
+      if (method === "getChatMember") return Promise.resolve({ ok: true, result: { user: tg.bot.botInfo, status: "administrator", can_post_messages: true, can_edit_messages: true } } as never);
+      return prev(method, payload, signal);
+    });
+    const commands = [
+      "/Setup_accueil 4407825387", "Setup_accueil 4407825387",
+      "/SETUP_ACCUEIL -1004407825387", "/setup_accueil 1004407825387",
+      "/Setup_accueil@UndergroundManagerBot 4407825387",
+    ];
+    for (const command of commands) {
+      const update = privateMessage(ADMIN, command);
+      update.message.entities = undefined; // mobile input may not be tagged as a bot_command
+      await tg.send(update);
+    }
+    assertEquals(lookedUp, commands.map(() => channelId));
+    assertEquals(getConfig().TELEGRAM_PUBLIC_WELCOME_CHAT_ID, channelId);
+    assertEquals(tg.callsOf("sendMessage").filter(c => c.payload.chat_id === channelId).length, 1);
+    assertEquals(tg.callsOf("editMessageText").filter(c => c.payload.chat_id === channelId).length, commands.length - 1);
+    assertEquals(tg.callsOf("sendMessage").filter(c => c.payload.chat_id === ADMIN && String(c.payload.text).includes("Accueil configuré")).length, commands.length);
+  } finally { await kv.close(); }
+});
+
+Deno.test("ACCUEIL — tolerant setup still rejects non-admins, malformed IDs and commands for another bot", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    const tg = await createFakeTelegram();
+    await tg.send(privateMessage(987654, "/Setup_accueil 4407825387"));
+    await tg.send(privateMessage(987654, "Setup_accueil 4407825387"));
+    assertEquals(tg.callsOf("sendMessage").filter(c => c.payload.chat_id === 987654).length, 2);
+    tg.reset();
+    await tg.send(privateMessage(ADMIN, "/Setup_accueil@AnotherBot 4407825387"));
+    assertEquals(tg.callsOf("sendMessage").length, 0);
+    await tg.send(privateMessage(ADMIN, "/Setup_accueil 4407825387oops"));
+    const reply = tg.callsOf("sendMessage").at(-1)!;
+    assertStringIncludes(String(reply.payload.text), "/setup_accueil -100");
+    assertEquals(getConfig().TELEGRAM_PUBLIC_WELCOME_CHAT_ID, 0);
+    assertEquals((await getNavigationState()).welcome, undefined);
+    assertEquals(tg.callsOf("sendMessage").filter(c => Number(c.payload.chat_id) < 0).length, 0);
+  } finally { await kv.close(); }
+});
+
+Deno.test("ACCUEIL — old short channel IDs use Telegram's numeric offset", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    const channelId = -1000000012345;
+    const tg = await createFakeTelegram();
+    tg.bot.api.config.use((prev, method, payload, signal) => {
+      if (method === "getChat") {
+        assertEquals((payload as { chat_id: number }).chat_id, channelId);
+        return Promise.resolve({ ok: true, result: { id: channelId, type: "channel", title: "Accueil" } } as never);
+      }
+      if (method === "getChatMember") return Promise.resolve({ ok: true, result: { user: tg.bot.botInfo, status: "administrator", can_post_messages: true } } as never);
+      return prev(method, payload, signal);
+    });
+    await tg.send(privateMessage(ADMIN, "/setup_accueil 12345"));
+    assertEquals(getConfig().TELEGRAM_PUBLIC_WELCOME_CHAT_ID, channelId);
+    assertEquals((await getNavigationState()).welcome!.chatId, channelId);
+    assertEquals(tg.callsOf("sendMessage").filter(c => c.payload.chat_id === channelId).length, 1);
+  } finally { await kv.close(); }
+});
