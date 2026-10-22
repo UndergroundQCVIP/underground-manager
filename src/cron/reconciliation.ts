@@ -9,7 +9,7 @@
 
 import { Bot } from "grammy";
 import { reconcileAllMembers } from "../access/sync.ts";
-import { processComplimentaryReminders } from "../complimentary/service.ts";
+import { processComplimentaryReminders, repairLegacyFullContentRewards } from "../complimentary/service.ts";
 import { processContributionReminders } from "../contributions/rewards.ts";
 import { syncNavigationMessages } from "../navigation/service.ts";
 import { recoverPendingBonuses } from "../referrals/service.ts";
@@ -39,6 +39,8 @@ export async function runHourlyReconciliation(bot: Bot): Promise<{
   daily?: { ran: boolean };
 }> {
   console.log(`[Cron] Starting hourly membership reconciliation at ${new Date().toISOString()}`);
+  try { await repairLegacyFullContentRewards(); }
+  catch (error) { console.error("[Rewards repair]", error); }
 
   // 0. Finish any payment that was recorded but not yet credited (crash/outage).
   let recoveredPayments = 0;

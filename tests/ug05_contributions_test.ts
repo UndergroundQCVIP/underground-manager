@@ -657,7 +657,7 @@ Deno.test("UG05 ADMIN UI — Reward flow through the bot: scope must be chosen e
     await bot.handleUpdate(cb(ADMIN, `cadm:rw:${sub.id}`) as never);
     const screen = JSON.stringify(calls.filter((x) => x.method === "editMessageText").at(-1));
     assertStringIncludes(screen, "Regular seulement");
-    assertStringIncludes(screen, "Les deux");
+    assertStringIncludes(screen, "Accès complet (Regular + Retro)");
     assertStringIncludes(screen, "Personnalisé");
     assert(!screen.includes(`cadm:cf:${sub.id}`));
 

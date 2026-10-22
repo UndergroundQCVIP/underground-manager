@@ -9,6 +9,7 @@ import {
   ComplimentaryAccessLevel,
   ComplimentaryReason,
   Entitlement,
+  AuditEvent,
 } from "../types.ts";
 import {
   createEntitlement,
@@ -16,9 +17,12 @@ import {
   getActiveUserEntitlements,
   getEntitlement,
   markReminderSent,
+  mutateEntitlement,
   revokeEntitlement,
+  isEntitlementActive,
 } from "../db/entitlements.ts";
 import { logAuditEvent } from "../db/audit.ts";
+import { getKv } from "../db/kv.ts";
 
 export interface GrantComplimentaryParams {
   adminId: number;
@@ -72,6 +76,7 @@ export async function grantComplimentaryAccess(
     status: "active",
     metadata: {
       grantedBy: params.adminId,
+      accessLevel: params.level,
       reason: params.reason,
       notes: params.notes,
       reminderSent: false,
@@ -94,6 +99,36 @@ export async function grantComplimentaryAccess(
   );
 
   return { success: true, entitlement };
+}
+
+/** Correct proven legacy FULL content rewards without adding days or reviving revoked access. */
+export async function repairLegacyFullContentRewards(): Promise<number> {
+  const kv = await getKv();
+  const marker = ["migrations", "full_content_rewards_retro_v1"];
+  if ((await kv.get(marker)).value) return 0;
+  let repairedCount = 0;
+  for await (const { value: event } of kv.list<AuditEvent>({ prefix: ["audit_events"] })) {
+    if (event.type !== "entitlement_granted" || event.details.level !== "full" ||
+      event.details.reason !== "content_contribution" || typeof event.details.entitlementId !== "string") continue;
+    let changed = false;
+    const corrected = await mutateEntitlement(event.details.entitlementId, (current) => {
+      changed = false;
+      if (current.source !== "complimentary" || current.metadata?.reason !== "content_contribution" ||
+        current.userId !== event.userId || !isEntitlementActive(current) || current.spaces.includes("retro_collections")) return null;
+      changed = true;
+      return { ...current, spaces: [...current.spaces, "retro_collections"],
+        metadata: { ...current.metadata, accessLevel: "full" } };
+    });
+    if (changed && corrected) {
+      repairedCount++;
+      await logAuditEvent("entitlement_spaces_corrected", {
+        entitlementId: corrected.id, sourceEventId: event.id, addedSpace: "retro_collections",
+        expiresAt: corrected.expiresAt,
+      }, 0, corrected.userId);
+    }
+  }
+  await kv.set(marker, { completedAt: new Date().toISOString(), repairedCount });
+  return repairedCount;
 }
 
 export async function extendComplimentaryAccess(

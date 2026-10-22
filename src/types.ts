@@ -78,14 +78,24 @@ export const SPACE_DEFINITIONS: Record<SpaceId, SpaceDefinition> = {
 export type ComplimentaryAccessLevel =
   | "vip_only"
   | "vip_and_chat"
+  | "regular"
   | "full"
   | "full_retro";
 
 export const COMPLIMENTARY_SPACES: Record<ComplimentaryAccessLevel, SpaceId[]> = {
   vip_only: ["vip_collections"],
   vip_and_chat: ["vip_collections", "general_chat"],
-  full: ["vip_collections", "wanted_list", "general_chat"],
+  regular: ["vip_collections", "wanted_list", "general_chat"],
+  full: ["vip_collections", "retro_collections", "wanted_list", "general_chat"],
   full_retro: ["vip_collections", "retro_collections", "wanted_list", "general_chat"],
+};
+
+export const COMPLIMENTARY_ACCESS_LABELS: Record<ComplimentaryAccessLevel, string> = {
+  vip_only: "Collections en activité seulement",
+  vip_and_chat: "Collections en activité + clavardage",
+  regular: "En activité + clavardage + suggestions et votes",
+  full: "Accès complet — en activité + Retro + communauté",
+  full_retro: "Accès complet — en activité + Retro + communauté",
 };
 
 // ==============================================================================
@@ -130,6 +140,7 @@ export type EntitlementStatus = "active" | "expired" | "revoked";
 
 export interface EntitlementMetadata {
   grantedBy?: number; // Admin user ID (for complimentary)
+  accessLevel?: ComplimentaryAccessLevel;
   reason?: ComplimentaryReason | string;
   chargeId?: string; // Telegram payment charge ID (for stars)
   invoicePayload?: string;
@@ -205,6 +216,7 @@ export type AuditEventType =
   | "payment_anomaly"
   | "alert_sent"
   | "entitlement_granted"
+  | "entitlement_spaces_corrected"
   | "entitlement_extended"
   | "entitlement_revoked"
   | "entitlement_expired"

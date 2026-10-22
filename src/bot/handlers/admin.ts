@@ -36,6 +36,9 @@ import {
 } from "../../complimentary/service.ts";
 import {
   CollectionCategory,
+  COMPLIMENTARY_ACCESS_LABELS,
+  COMPLIMENTARY_REASONS,
+  COMPLIMENTARY_SPACES,
   ComplimentaryAccessLevel,
   ComplimentaryReason,
   SPACE_IDS,
@@ -343,7 +346,7 @@ adminComposer.callbackQuery(/^admin:grant_rsn:(\d+):(\d+):([a-z_]+)$/, async (ct
     `🎁 *ACCORDER UN ACCÈS GRACIEUX — ÉTAPE 3*\n\n` +
     `*Membre ciblé :* \`${userId}\`\n` +
     `*Durée :* ${duration} jours\n` +
-    `*Motif :* ${reason}\n\n` +
+    `*Motif :* ${COMPLIMENTARY_REASONS[reason] ?? escapeMd(reason)}\n\n` +
     `Choisissez les espaces autorisés :`,
     {
       parse_mode: "Markdown",
@@ -362,12 +365,16 @@ adminComposer.callbackQuery(
     const level = ctx.match[4] as ComplimentaryAccessLevel;
 
     await ctx.answerCallbackQuery();
+    if (!COMPLIMENTARY_SPACES[level]) {
+      await ctx.reply("⚠️ Niveau d'accès invalide. Recommencez depuis le menu administrateur.");
+      return;
+    }
     await ctx.editMessageText(
       `🎁 *CONFIRMER L'ACCÈS GRACIEUX*\n\n` +
       `*Membre ciblé :* \`${userId}\`\n` +
       `*Durée :* ${duration} jours\n` +
-      `*Motif :* ${reason}\n` +
-      `*Niveau d'accès :* ${level}\n\n` +
+      `*Motif :* ${COMPLIMENTARY_REASONS[reason] ?? escapeMd(reason)}\n` +
+      `*Niveau d'accès :* ${COMPLIMENTARY_ACCESS_LABELS[level]}\n\n` +
       `Veuillez confirmer pour activer l'accès immédiatement :`,
       {
         parse_mode: "Markdown",
@@ -409,7 +416,7 @@ adminComposer.callbackQuery(
       `*Membre :* \`${userId}\`\n` +
       `*Durée :* ${duration} jours\n` +
       `*Expiration :* ${formatTorontoDate(result.entitlement.expiresAt)}\n` +
-      `*Espaces :* ${result.entitlement.spaces.join(", ")}`,
+      `*Espaces :* ${result.entitlement.spaces.map((s) => escapeMd(getSpaceTitle(s))).join(", ")}`,
       {
         parse_mode: "Markdown",
         reply_markup: new InlineKeyboard().text("⬅️ Menu administrateur", "admin:menu"),
