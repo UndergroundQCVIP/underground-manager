@@ -14,7 +14,7 @@
  * publication, at most once per submission (see rewards.ts).
  */
 
-import { getClubName, getConfig } from "../config.ts";
+import { getClubName, getConfig, isAdministrator } from "../config.ts";
 import { logAuditEvent } from "../db/audit.ts";
 import {
   creatorCollection,
@@ -31,7 +31,9 @@ import {
   listContributions,
   saveContribution,
   transitionContribution,
+  appendContributionItem,
 } from "../db/contributions.ts";
+import { withJobLease } from "../ops/locks.ts";
 import { classifyTelegramError } from "../migration/service.ts";
 import { getActiveMigrationForCreator } from "../db/migrations.ts";
 import { recordMediaIndex } from "../db/media_index.ts";
@@ -39,13 +41,13 @@ import { contributionRewardsEnabled } from "../membership/mode.ts";
 import { handleForumTopicCreated } from "../creators/service.ts";
 import {
   CollectionCategory,
+  CreatorCollection,
   Contribution,
   ContributionDecision,
   ContributionItem,
   Creator,
-  WANTED_REQUEST_CLASSES,
 } from "../types.ts";
-import { escapeMd, escapeMdUrl } from "../util/markdown.ts";
+import { notifyContributionReview, syncContributionReview, flushContributionReviews } from "./review.ts";
 import { fmtDay, grantContributionReward, scopesLabel, validateRewardParams } from "./rewards.ts";
 import { awardContributionBonus } from "../referrals/service.ts";
 import { awardContributionPoints } from "../points/service.ts";
@@ -58,6 +60,7 @@ export interface ContributionApiLike {
     messageIds: number[],
     other?: { message_thread_id?: number }
   ): Promise<{ message_id: number }[]>;
+  editMessageText?(chatId: number | string, messageId: number, text: string, other?: Record<string, unknown>): Promise<unknown>;
   /** Needed only to approve a NEW creator proposal. */
   createForumTopic?(chatId: number | string, name: string): Promise<{ message_thread_id: number }>;
 }
@@ -131,7 +134,8 @@ export async function findSimilarCreators(name: string): Promise<Creator[]> {
 }
 
 export async function startNewCreatorContribution(
-  userId: number
+  userId: number,
+  collection?: "amateur"
 ): Promise<{ ok: boolean; contribution: Contribution }> {
   const existing = await getActiveContribution(userId);
   if (existing) await saveContribution({ ...existing, status: "cancelled", itemCount: existing.items.length, items: [] });
@@ -145,6 +149,7 @@ export async function startNewCreatorContribution(
     status: "collecting",
     kind: "new",
     step: "name",
+    submissionCollection: collection,
     createdAt: now,
     updatedAt: now,
   };
@@ -162,10 +167,12 @@ export async function submitProposalName(
   if (name.length < 2 || name.length > 60) {
     return { ok: false, error: "Le nom doit contenir entre 2 et 60 caractères." };
   }
-  const duplicates = await findSimilarCreators(name);
-  c.proposal = { name, collection: "regular", duplicateCandidateIds: duplicates.map((d) => d.id) };
+  const amateur = c.submissionCollection === "amateur";
+  if (amateur && !validAmateurFullName(name)) return { ok: false, error: "Indiquez le prénom et le nom complets (2 à 60 caractères)." };
+  const duplicates = amateur ? [] : await findSimilarCreators(name);
+  c.proposal = { name, collection: amateur ? "amateur" : "regular", duplicateCandidateIds: duplicates.map((d) => d.id) };
   c.creatorName = name;
-  c.step = "url";
+  c.step = amateur ? "profile_screenshot" : "url";
   await saveContribution(c);
   return { ok: true, duplicates, contribution: c };
 }
@@ -210,7 +217,7 @@ export async function switchToExistingCreator(
 ): Promise<{ ok: boolean; contribution?: Contribution; error?: string }> {
   const c = await getActiveContribution(userId);
   const creator = await getCreator(creatorId);
-  if (!c || !creator) return { ok: false, error: "Créateur introuvable." };
+  if (!c || !creator || creator.collection === "amateur" || c.submissionCollection === "amateur") return { ok: false, error: "Créateur introuvable." };
   c.kind = "existing";
   c.creatorId = creator.id;
   c.creatorName = creator.name;
@@ -224,18 +231,20 @@ export async function addContributionItem(
   userId: number,
   item: ContributionItem
 ): Promise<{ added: boolean; count: number; newAlbum: boolean; contribution?: Contribution }> {
-  const c = await getActiveContribution(userId);
-  if (!c) return { added: false, count: 0, newAlbum: false };
-  // A new-creator proposal accepts media only once its details are complete.
-  if (c.kind === "new" && c.step !== "media") return { added: false, count: 0, newAlbum: false };
-  if (c.items.some((i) => i.messageId === item.messageId)) {
-    return { added: false, count: c.items.length, newAlbum: false, contribution: c };
+  // Album updates may arrive concurrently through separate webhook requests.
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const c = await getActiveContribution(userId);
+    if (!c) return { added: false, count: 0, newAlbum: false };
+    const screenshot = c.submissionCollection === "amateur" && c.step === "profile_screenshot";
+    if (screenshot && item.kind !== "photo") return { added: false, count: c.items.length, newAlbum: false, contribution: c };
+    if (c.kind === "new" && c.step !== "media" && !screenshot) return { added: false, count: 0, newAlbum: false };
+    if (c.items.some(i => i.messageId === item.messageId)) return { added: false, count: c.items.length, newAlbum: false, contribution: c };
+    const last = c.items[c.items.length - 1];
+    const newAlbum = !(item.mediaGroupId && last?.mediaGroupId === item.mediaGroupId);
+    const updated = await appendContributionItem(c, item, screenshot);
+    if (updated) return { added: true, count: updated.items.length, newAlbum, contribution: updated };
   }
-  const last = c.items[c.items.length - 1];
-  const newAlbum = !(item.mediaGroupId && last?.mediaGroupId === item.mediaGroupId);
-  c.items.push(item);
-  await saveContribution(c);
-  return { added: true, count: c.items.length, newAlbum, contribution: c };
+  throw new Error("Plusieurs médias arrivent simultanément. Réessayez cet élément.");
 }
 
 export async function cancelContribution(userId: number): Promise<boolean> {
@@ -265,6 +274,8 @@ export async function finishContribution(
   if (c.kind === "new" && (c.step !== "media" || !c.proposal)) {
     return { ok: false, error: "Complétez d'abord les informations du créateur (nom, lien, collection)." };
   }
+  const amateurError = validateAmateurSubmission(c);
+  if (amateurError) return { ok: false, error: amateurError };
   if (c.items.length === 0) return { ok: false, error: "Envoyez d'abord au moins une photo ou une vidéo." };
 
   const submitted = await transitionContribution(c.id, ["collecting"], (x) => {
@@ -280,32 +291,7 @@ export async function finishContribution(
     userId
   );
 
-  // Alert admins (best effort): preview copy + review buttons.
-  const ids = [...submitted.items.map((i) => i.messageId)].sort((a, b) => a - b);
-  const isNew = submitted.kind === "new";
-  for (const adminId of getConfig().ADMIN_USER_IDS) {
-    try {
-      await api.copyMessages(adminId, userId, ids);
-      await api.sendMessage(
-        adminId,
-        (isNew
-          ? `📥 *Nouvelle contribution — NOUVEAU créateur « ${escapeMd(submitted.creatorName)} »* (${submitted.proposal?.collection === "retro" ? "Retro" : "Regular"})\n` +
-            `${submitted.items.length} élément(s) de l'utilisateur \`${userId}\` — aperçu ci-dessus.\n` +
-            ((submitted.proposal?.duplicateCandidateIds.length ?? 0) > 0 ? `⚠️ Doublon possible détecté — examinez la proposition.\n` : "") +
-            `Examinez l'identité du créateur et les droits avant d'approuver.`
-          : `📥 *Nouvelle contribution pour ${escapeMd(submitted.creatorName)}*\n` +
-            `${submitted.items.length} élément(s) de l'utilisateur \`${userId}\` — aperçu ci-dessus.\n` +
-            `Approuvez (avec ou sans récompense) ou refusez.`) +
-          (submitted.wantedRequest
-            ? `\n🔎 *Liste recherchée — ${WANTED_REQUEST_CLASSES[submitted.wantedRequest.category]}*\n` +
-              `[Profil social](${escapeMdUrl(submitted.wantedRequest.profileUrl)})`
-            : ""),
-        { parse_mode: "Markdown", reply_markup: reviewKeyboard(submitted.id, isNew) }
-      );
-    } catch (err) {
-      console.error(`[Contributions] Could not notify admin ${adminId}:`, err);
-    }
-  }
+  await notifyContributionReview(api, submitted.id).catch(error => console.error("[Review] Notification queued:", error));
   return { ok: true, contribution: submitted };
 }
 
@@ -317,16 +303,24 @@ export async function adminUpdateProposal(
   id: string,
   patch: {
     name?: string;
-    collection?: CollectionCategory;
+    collection?: CreatorCollection;
     useExistingCreatorId?: string | null;
     identityRightsConfirmed?: boolean;
   }
 ): Promise<{ ok: boolean; error?: string; contribution?: Contribution }> {
   const c = await getContribution(id);
   if (!c || c.kind !== "new" || !c.proposal) return { ok: false, error: "Ce n'est pas une proposition de nouveau créateur." };
-  const dupIds = patch.name !== undefined ? (await findSimilarCreators(patch.name)).map((d) => d.id) : undefined;
+  if (patch.name !== undefined && (patch.name.trim().length < 2 || patch.name.trim().length > 60 ||
+    (c.submissionCollection === "amateur" && !validAmateurFullName(patch.name)))) return { ok: false, error: "Nom complet invalide." };
+  if (patch.collection && ((c.submissionCollection === "amateur") !== (patch.collection === "amateur"))) return { ok: false, error: "La collection Amateur ne peut pas être changée." };
+  if (patch.useExistingCreatorId) {
+    const target = await getCreator(patch.useExistingCreatorId);
+    if (!target || (creatorCollection(target) === "amateur") !== (c.proposal.collection === "amateur")) return { ok: false, error: "Collection du créateur incompatible." };
+  }
+  const dupIds = patch.name !== undefined && c.submissionCollection !== "amateur" ? (await findSimilarCreators(patch.name)).map((d) => d.id) : undefined;
   const updated = await transitionContribution(id, ["pending", "failed"], (x) => {
     const p = x.proposal!;
+    if (patch.name !== undefined || patch.collection || patch.useExistingCreatorId !== undefined) p.identityRightsConfirmed = false;
     if (patch.name !== undefined) {
       p.name = patch.name.replace(/\s+/g, " ").trim();
       x.creatorName = p.name;
@@ -338,7 +332,7 @@ export async function adminUpdateProposal(
       if (patch.useExistingCreatorId) p.identityRightsConfirmed = p.identityRightsConfirmed ?? false;
     }
     if (patch.identityRightsConfirmed !== undefined) p.identityRightsConfirmed = patch.identityRightsConfirmed;
-  });
+  }, c);
   if (!updated) return { ok: false, error: "Cette contribution n'est plus modifiable." };
   return { ok: true, contribution: updated };
 }
@@ -372,6 +366,7 @@ export async function rejectContribution(
     // Retention: a rejected submission keeps no message references, only a count.
     x.itemCount = x.items.length;
     x.items = [];
+    x.profileScreenshotMessageId = undefined;
   });
   if (!updated) return { ok: false, error: "Cette contribution n'est plus en attente d'examen." };
   await logAuditEvent("contribution_rejected", { contributionId: id, reason: cleanReason }, adminId, updated.userId);
@@ -379,6 +374,7 @@ export async function rejectContribution(
     updated.userId,
     `Votre contribution n'a pas été approuvée.` + (cleanReason ? `\n\nRaison : ${cleanReason}` : ""),
   ).catch(() => {});
+  await syncContributionReview(api, id).catch(() => {});
   return { ok: true };
 }
 
@@ -390,6 +386,12 @@ type Resolved = { creator: Creator } | { error: string };
 
 /** Find or create the creator (and topic) a submission is published to. Retry-safe. */
 async function resolveTargetCreator(api: ContributionApiLike, c: Contribution, adminId: number): Promise<Resolved> {
+  if (c.proposal?.collection !== "amateur") return await resolveTargetCreatorUnlocked(api, c, adminId);
+  const lease = await withJobLease(`amateur_target:${normalizeCreatorName(c.proposal.name)}`, 90000,
+    () => resolveTargetCreatorUnlocked(api, c, adminId));
+  return lease.result ?? { error: "Ce créateur est en cours de préparation par un autre administrateur. Réessayez." };
+}
+async function resolveTargetCreatorUnlocked(api: ContributionApiLike, c: Contribution, adminId: number): Promise<Resolved> {
   if (c.kind !== "new" || !c.proposal) {
     const creator = await getCreator(c.creatorId);
     return creator && creator.collection !== "amateur" ? { creator } : { error: "Le créateur n'existe plus." };
@@ -398,18 +400,23 @@ async function resolveTargetCreator(api: ContributionApiLike, c: Contribution, a
 
   if (p.useExistingCreatorId) {
     const creator = await getCreator(p.useExistingCreatorId);
-    return creator && creator.collection !== "amateur" ? { creator } : { error: "Le créateur existant sélectionné n'existe plus." };
+    return creator && (creatorCollection(creator) === "amateur") === (p.collection === "amateur") && creator.status === "active" ? { creator } : { error: "Le créateur existant sélectionné n'existe plus ou appartient à une autre collection." };
   }
   if (p.createdCreatorId) {
     const creator = await getCreator(p.createdCreatorId);
-    if (creator && creator.collection !== "amateur") return { creator };
+    if (creator && creatorCollection(creator) === p.collection) return { creator };
   }
 
   const config = getConfig();
-  const chatId = p.collection === "retro" ? config.TELEGRAM_RETRO_FORUM_CHAT_ID : config.VIP_COLLECTIONS_CHAT_ID;
-  if (!chatId) return { error: `Le forum ${p.collection === "retro" ? "Retro" : "Regular"} n'est pas configuré.` };
+  const chatId = p.collection === "amateur" ? config.TELEGRAM_AMATEUR_FORUM_CHAT_ID : p.collection === "retro" ? config.TELEGRAM_RETRO_FORUM_CHAT_ID : config.VIP_COLLECTIONS_CHAT_ID;
+  if (!chatId) return { error: `Le forum ${p.collection === "amateur" ? "Amateur" : p.collection === "retro" ? "Retro" : "En activité"} n'est pas configuré.` };
   if (!api.createForumTopic) return { error: "Création de sujet indisponible." };
-  if (await getCreatorByName(p.name)) {
+  const existingByName = await getCreatorByName(p.name);
+  if (existingByName && p.collection === "amateur" && creatorCollection(existingByName) === "amateur" && existingByName.status === "active") {
+    await transitionContribution(c.id, ["publishing"], x => { x.proposal!.useExistingCreatorId = existingByName.id; x.creatorId = existingByName.id; });
+    return { creator: existingByName };
+  }
+  if (existingByName) {
     return { error: `Un créateur nommé « ${p.name} » existe déjà : sélectionnez-le comme doublon au lieu d'en créer un nouveau.` };
   }
 
@@ -430,7 +437,20 @@ async function resolveTargetCreator(api: ContributionApiLike, c: Contribution, a
   return { creator };
 }
 
+export function validAmateurFullName(name: string): boolean {
+  return name.trim().length <= 60 && /^[\p{L}][\p{L}\p{M}’'-]*(?:\s+[\p{L}][\p{L}\p{M}’'-]*)+$/u.test(name.trim());
+}
+export function validateAmateurSubmission(c: Contribution): string | null {
+  if (c.submissionCollection !== "amateur" && c.proposal?.collection !== "amateur") return null;
+  if (c.submissionCollection !== "amateur" || c.proposal?.collection !== "amateur" || !validAmateurFullName(c.proposal.name)) return "Indiquez le prénom et le nom complets pour Amateur.";
+  if (!c.profileScreenshotMessageId || !c.items.some(i => i.messageId === c.profileScreenshotMessageId && i.kind === "photo" && i.purpose === "profile_screenshot")) return "Ajoutez une capture photo du profil social.";
+  if (!c.items.some(i => i.purpose !== "profile_screenshot")) return "Ajoutez du contenu en plus de la capture du profil social.";
+  return null;
+}
+
 export function approveValidation(c: Contribution, decision: ContributionDecision): string | null {
+  const amateurError = validateAmateurSubmission(c);
+  if (amateurError) return amateurError;
   if (c.kind === "new") {
     if (!c.proposal?.useExistingCreatorId && !c.proposal?.identityRightsConfirmed) {
       return "Confirmez d'abord l'identité du créateur et les droits de publication.";
@@ -454,6 +474,7 @@ export async function approveContribution(
   const current = await getContribution(id);
   if (!current) return { ok: false, error: "Contribution introuvable." };
 
+  if ((current.submissionCollection === "amateur" || (decision.type === "reward" && decision.scopes.includes("amateur"))) && !isAdministrator(adminId)) return { ok: false, error: "Administrateur requis pour Amateur." };
   const invalid = approveValidation(current, decision);
   if (invalid) return { ok: false, error: invalid };
   if (decision.type === "reward" && !(await contributionRewardsEnabled())) {
@@ -477,7 +498,7 @@ export async function approveContribution(
     x.reviewedAt = new Date().toISOString();
     x.decision = decision;
     x.rewardStatus = decision.type === "reward" ? "pending" : "none";
-  });
+  }, current);
   if (!claimed) return { ok: false, error: "Cette contribution n'est plus en attente d'examen." };
 
   const fail = async (message: string) => {
@@ -498,6 +519,7 @@ export async function approveContribution(
   const creator = resolved.creator;
 
   const outcome = await runPublishing(api, id, adminId);
+  await syncContributionReview(api, id).catch(() => {});
   return outcome;
 }
 
@@ -669,6 +691,7 @@ export async function continueAllPublishing(api: ContributionApiLike): Promise<n
     const r = await continuePublishing(api, c.id, c.reviewedBy ?? 0);
     if (r.ok && !r.inProgress) n++;
   }
+  await flushContributionReviews(api);
   return n;
 }
 
@@ -717,6 +740,7 @@ async function finalizeApproved(api: ContributionApiLike, id: string, adminId: n
   } catch (err) {
     console.error("[Points] contribution points failed (rebuilt by the daily recalculation):", err);
   }
+  await syncContributionReview(api, id).catch(() => {});
   return result;
 }
 
@@ -744,7 +768,8 @@ async function finalizeApprovedInner(api: ContributionApiLike, id: string, admin
     // Referral: the contributor's referrer earns 50% (rounded up) for the same forums. Idempotent per
     // submission; a failure here must never undo or block the contributor's own reward.
     try {
-      await awardContributionBonus(api, { id, userId: c.userId }, { scopes: reward.scopes, days: reward.days });
+      const referralScopes = reward.scopes.filter((s): s is CollectionCategory => s !== "amateur");
+      if (referralScopes.length) await awardContributionBonus(api, { id, userId: c.userId }, { scopes: referralScopes, days: reward.days });
     } catch (err) {
       console.error("[Referrals] contribution bonus failed (will be retried by the hourly recovery):", err);
     }

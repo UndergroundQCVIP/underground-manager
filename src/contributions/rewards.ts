@@ -8,7 +8,7 @@
  * contribution id), and re-running a reward is a no-op.
  */
 
-import { getClubName } from "../config.ts";
+import { getClubName, getConfig, isAdministrator } from "../config.ts";
 import { logAuditEvent } from "../db/audit.ts";
 import {
   applyContributionDays,
@@ -17,17 +17,17 @@ import {
   markReminderSent,
 } from "../db/entitlements.ts";
 import { getKv } from "../db/kv.ts";
-import { CollectionCategory, CONTRIBUTION_SPACES, ContributionReward } from "../types.ts";
+import { RewardScope, CONTRIBUTION_SPACES, ContributionReward } from "../types.ts";
 import { formatTorontoDate } from "../util/time.ts";
 
 export const MAX_REWARD_DAYS = 3650;
 
 export function validateRewardParams(
-  scopes: CollectionCategory[],
+  scopes: RewardScope[],
   days: number
 ): string | null {
   if (!Array.isArray(scopes) || scopes.length === 0) return "Choisissez le ou les forums accessibles.";
-  if (scopes.some((s) => s !== "regular" && s !== "retro")) return "Forum invalide.";
+  if (scopes.some((s) => s !== "regular" && s !== "retro" && s !== "amateur")) return "Forum invalide.";
   if (!Number.isInteger(days) || days < 1 || days > MAX_REWARD_DAYS) {
     return `La durée doit être un nombre entier de jours entre 1 et ${MAX_REWARD_DAYS}.`;
   }
@@ -56,13 +56,14 @@ export async function listContributionRewards(limit = 20): Promise<ContributionR
 export async function grantContributionReward(params: {
   contributionId: string;
   userId: number;
-  scopes: CollectionCategory[];
+  scopes: RewardScope[];
   days: number;
   adminId: number;
 }): Promise<{ reward: ContributionReward; alreadyGranted: boolean }> {
   const invalid = validateRewardParams(params.scopes, params.days);
   if (invalid) throw new Error(invalid);
 
+  if (params.scopes.includes("amateur") && (!isAdministrator(params.adminId) || !getConfig().TELEGRAM_AMATEUR_FORUM_CHAT_ID)) throw new Error("Amateur nécessite une autorisation administrative et un forum configuré.");
   const kv = await getKv();
   const key = ["contribution_rewards", params.contributionId];
   const nowIso = new Date().toISOString();
@@ -101,6 +102,7 @@ export async function grantContributionReward(params: {
       days: record.days,
       contributionId: params.contributionId,
       spaces: CONTRIBUTION_SPACES[scope],
+      grantedBy: record.grantedBy,
     });
     expiresAt[scope] = res.entitlement.expiresAt;
   }
@@ -126,8 +128,9 @@ export async function grantContributionReward(params: {
   return { reward: finalRecord, alreadyGranted: false };
 }
 
-export function scopesLabel(scopes: CollectionCategory[]): string {
+export function scopesLabel(scopes: RewardScope[]): string {
   const set = new Set(scopes);
+  if (set.has("amateur")) return "Amateur + en activité + Retro + communautés";
   if (set.has("regular") && set.has("retro")) return "Regular + Retro";
   return set.has("retro") ? "Retro" : "Regular";
 }
@@ -169,7 +172,7 @@ export async function processContributionReminders(
   for (const [userId, ents] of byUser) {
     try {
       const lines = ents
-        .map((e) => `• ${e.contributionScope === "retro" ? "Retro" : "Regular"} : ${fmtDay(e.expiresAt)}`)
+        .map((e) => `• ${e.contributionScope === "amateur" ? "Amateur" : e.contributionScope === "retro" ? "Retro" : "Regular"} : ${fmtDay(e.expiresAt)}`)
         .join("\n");
       await api.sendMessage(
         userId,

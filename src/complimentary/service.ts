@@ -63,7 +63,7 @@ export async function grantComplimentaryAccess(
   // Check existing entitlements to ensure we do not shorten existing valid access
   const active = await getActiveUserEntitlements(params.userId);
   let baseMs = nowMs;
-  const existingComplimentary = active.find((e) => e.source === "complimentary" && e.spaces.some((s) => spaces.includes(s)));
+  const existingComplimentary = active.find((e) => e.source === "complimentary" && (params.level === "amateur" ? e.metadata?.accessLevel === "amateur" : e.metadata?.accessLevel !== "amateur" && e.spaces.some((s) => spaces.includes(s))));
   if (existingComplimentary) {
     const existingExpiryMs = new Date(existingComplimentary.expiresAt).getTime();
     if (existingExpiryMs > nowMs) {

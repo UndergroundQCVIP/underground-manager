@@ -166,16 +166,6 @@ export function grantSpacesKeyboard(
 ): InlineKeyboard {
   return new InlineKeyboard()
     .text(
-      "Collections VIP seulement (par défaut)",
-      `admin:grant_spc:${userId}:${duration}:${reason}:vip_only`
-    )
-    .row()
-    .text(
-      "Collections VIP + Clavardage général",
-      `admin:grant_spc:${userId}:${duration}:${reason}:vip_and_chat`
-    )
-    .row()
-    .text(
       "En activité + communauté (sans Retro)",
       `admin:grant_spc:${userId}:${duration}:${reason}:regular`
     )
@@ -185,7 +175,7 @@ export function grantSpacesKeyboard(
       `admin:grant_spc:${userId}:${duration}:${reason}:full`
     )
     .row()
-    .text("🔐 Amateur seulement — autorisation distincte", `admin:grant_spc:${userId}:${duration}:${reason}:amateur`)
+    .text("🔐 Amateur + en activité + Retro + communautés", `admin:grant_spc:${userId}:${duration}:${reason}:amateur`)
     .row()
     .text("❌ Annuler", "admin:menu");
 }

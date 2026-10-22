@@ -89,7 +89,9 @@ export async function renderNavPage(
       let text = "🔒 *COLLECTION AMATEUR*\n\nL'accès est accordé uniquement par les administrateurs, sur autorisation distincte.\nLes abonnements et les récompenses Regular/Retro ne débloquent pas cette collection.";
       if (getChatId("amateur_collections") && await hasAccessToSpace(summary.userId, "amateur_collections")) {
         try { kb.url("👉 Joindre la collection Amateur", await getOrCreateJoinLink(api, "amateur_collections")).row();
-          text += "\n\n✅ Votre autorisation Amateur est active.";
+          if (getChatId("amateur_chat")) kb.url("💬 Clavardage Amateur", await getOrCreateJoinLink(api, "amateur_chat")).row();
+          kb.text("📖 En activité", "nav:regular").text("🎞️ Retro", "nav:retro").row();
+          text += "\n\n✅ Votre autorisation Amateur est active. Elle inclut les collections en activité et Retro, Wanted et les clavardages.";
         } catch { text += "\n\nLe lien est temporairement indisponible. Communiquez avec un administrateur."; }
       } else text += "\n\n🔐 Collection verrouillée. Communiquez avec un administrateur pour demander l'accès.";
       return { text, kb: back(kb) };

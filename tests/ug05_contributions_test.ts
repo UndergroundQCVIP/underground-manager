@@ -21,7 +21,7 @@ import {
   adminUpdateProposal,
   findSimilarCreators,
 } from "../src/contributions/service.ts";
-import { getContribution } from "../src/db/contributions.ts";
+import { getContribution, getModeratorRewardDraft } from "../src/db/contributions.ts";
 import { grantContributionReward, getContributionReward, processContributionReminders } from "../src/contributions/rewards.ts";
 import {
   countEligibleParticipants,
@@ -675,7 +675,7 @@ Deno.test("UG05 ADMIN UI — Reward flow through the bot: scope must be chosen e
     await bot.handleUpdate(cb(ADMIN, `cadm:du:${sub.id}:60`) as never);
     const withConfirm = JSON.stringify(calls.filter((x) => x.method === "editMessageText").at(-1));
     assertStringIncludes(withConfirm, `cadm:cf:${sub.id}`);
-    await bot.handleUpdate(cb(ADMIN, `cadm:cf:${sub.id}`) as never);
+    await bot.handleUpdate(cb(ADMIN, `cadm:cf:${sub.id}:${(await getModeratorRewardDraft(sub.id, ADMIN))!.nonce}`) as never);
     const done = (await getContribution(sub.id))!;
     assertEquals(done.status, "approved");
     assertEquals(done.decision, { type: "reward", scopes: ["regular", "retro"], days: 60 });
@@ -683,7 +683,7 @@ Deno.test("UG05 ADMIN UI — Reward flow through the bot: scope must be chosen e
 
     // Double-pressing confirm does not duplicate anything
     const before = (await contribEnts(MEMBER)).map((e) => e.expiresAt).sort();
-    await bot.handleUpdate(cb(ADMIN, `cadm:cf:${sub.id}`) as never);
+    await bot.handleUpdate(cb(ADMIN, `cadm:cf:${sub.id}:${(await getModeratorRewardDraft(sub.id, ADMIN))!.nonce}`) as never);
     assertEquals((await contribEnts(MEMBER)).map((e) => e.expiresAt).sort(), before);
   } finally {
     await kv.close();
@@ -704,12 +704,12 @@ Deno.test("UG05 ADMIN UI — Custom duration via admin text prompt; default dura
 
     await bot.handleUpdate(cb(ADMIN, `cadm:duc:${sub.id}`) as never);
     await bot.handleUpdate(text(ADMIN, "0") as never); // invalid → asked again
-    assertEquals((await getContribution(sub.id))!.draft?.days ?? 60, 60);
+    assertEquals((await getModeratorRewardDraft(sub.id, ADMIN))?.days ?? 60, 60);
     await bot.handleUpdate(text(ADMIN, "45") as never);
-    assertEquals((await getContribution(sub.id))!.draft?.days, 45);
+    assertEquals((await getModeratorRewardDraft(sub.id, ADMIN))?.days, 45);
     // A random member's text is NOT taken as the admin's answer
     await bot.handleUpdate(text(MEMBER, "99") as never);
-    assertEquals((await getContribution(sub.id))!.draft?.days, 45);
+    assertEquals((await getModeratorRewardDraft(sub.id, ADMIN))?.days, 45);
   } finally {
     await kv.close();
   }

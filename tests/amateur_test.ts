@@ -42,12 +42,12 @@ Deno.test("AMATEUR — public button stays locked for paid, earned and full-acce
     tg.reset();
     await tg.send(callback(ADMIN, `admin:grant_spc:${MEMBER}:30:admin_exception:amateur`));
     const confirmation = tg.callsOf("editMessageText").at(-1)!.payload;
-    assertStringIncludes(String(confirmation.text), "Amateur seulement");
+    assertStringIncludes(String(confirmation.text), "Amateur + en activité + Retro");
     await tg.send(callback(ADMIN, `admin:grant_cfm:${MEMBER}:30:admin_exception:amateur`));
     assertEquals(await hasAccessToSpace(MEMBER, "amateur_collections"), true);
     const grant = (await getUserEntitlements(MEMBER)).find((e) => e.metadata?.accessLevel === "amateur")!;
     assertEquals(Math.round((new Date(grant.expiresAt).getTime() - Date.now()) / 86400000), 30);
-    assertEquals(grant.spaces, ["amateur_collections"]);
+    assertEquals(grant.spaces, COMPLIMENTARY_SPACES.amateur);
     await tg.send(callback(MEMBER, "member:amateur"));
     assertEquals(tg.callsOf("createChatInviteLink").at(-1)!.payload.chat_id, AMATEUR);
     await tg.send(chatJoinRequest(AMATEUR, MEMBER));
@@ -154,7 +154,7 @@ Deno.test("AMATEUR — a membership update removes someone who entered around th
     tg.reset();
     await tg.send(membership);
     assertEquals(tg.callsOf("banChatMember").length, 0);
-    assertEquals((await getMembershipSummary(MEMBER)).plan, "none");
+    assertEquals((await getMembershipSummary(MEMBER)).plan, "retro_plus");
   } finally { await kv.close(); }
 });
 

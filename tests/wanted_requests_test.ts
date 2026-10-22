@@ -4,7 +4,7 @@ import { cb, makeBot, photo, text, Call } from "./ug05_harness.ts";
 import { MockMigrationApi, seedCreator } from "./ug04_helpers.ts";
 import { cleanRequestUrl, getWantedRequest, listWantedRequests, saveWantedRequest } from "../src/db/wanted_requests.ts";
 import { peekAdminInput } from "../src/db/admin_input.ts";
-import { getActiveContribution, getContribution } from "../src/db/contributions.ts";
+import { getModeratorRewardDraft, getActiveContribution, getContribution } from "../src/db/contributions.ts";
 import { createEntitlement, countEligibleParticipants, getMembershipSummary } from "../src/db/entitlements.ts";
 import { createWantedCandidate, listWantedCandidates } from "../src/db/wanted.ts";
 import { hasUserVoted } from "../src/db/voting.ts";
@@ -152,7 +152,7 @@ Deno.test("WANTED REQUESTS — non-member submits from a link; admin publishes/r
     await bot.handleUpdate(cb(ADMIN, `cadm:rw:${collecting.id}`) as never);
     await bot.handleUpdate(cb(ADMIN, `cadm:sc:${collecting.id}:rg`) as never);
     await bot.handleUpdate(cb(ADMIN, `cadm:du:${collecting.id}:15`) as never);
-    await bot.handleUpdate(cb(ADMIN, `cadm:cf:${collecting.id}`) as never);
+    await bot.handleUpdate(cb(ADMIN, `cadm:cf:${collecting.id}:${(await getModeratorRewardDraft(collecting.id, ADMIN))!.nonce}`) as never);
     assertEquals((await getContribution(collecting.id))!.status, "approved");
     const membership = await getMembershipSummary(MEMBER);
     assertEquals(membership.hasPaid, false);
@@ -160,7 +160,7 @@ Deno.test("WANTED REQUESTS — non-member submits from a link; admin publishes/r
     assertEquals(membership.accessibleSpaces.includes("vip_collections"), true);
     const publishes = calls.filter((c) => c.method === "copyMessages" && c.payload.chat_id === MOCK_CONFIG.VIP_COLLECTIONS_CHAT_ID);
     assertEquals(publishes.length, 1);
-    await bot.handleUpdate(cb(ADMIN, `cadm:cf:${collecting.id}`) as never);
+    await bot.handleUpdate(cb(ADMIN, `cadm:cf:${collecting.id}:${(await getModeratorRewardDraft(collecting.id, ADMIN))!.nonce}`) as never);
     assertEquals((await getMembershipSummary(MEMBER)).effectiveExpiry, membership.effectiveExpiry);
     await bot.handleUpdate(text(MEMBER, "/suggest Future Creator") as never);
     assertEquals((await listWantedCandidates()).length, 1);

@@ -3,13 +3,15 @@ import { getConfig, isAdministrator } from "../config.ts";
 import { getKv } from "./kv.ts";
 import { logAuditEvent } from "./audit.ts";
 
+import { refreshChatBindings } from "./chat_bindings.ts";
+
 const KEY = ["amateur_forum_config"];
 type Binding = { chatId: number; configuredBy: number; configuredAt: string };
 
 export function amateurChatCollision(chatId: number): boolean {
   const c = getConfig();
   return [c.VIP_COLLECTIONS_CHAT_ID, c.TELEGRAM_RETRO_FORUM_CHAT_ID, c.PUBLIC_DIRECTORY_CHAT_ID,
-    c.WANTED_LIST_CHAT_ID, c.GENERAL_CHAT_ID, c.TELEGRAM_PUBLIC_LOBBY_CHAT_ID, c.TELEGRAM_PUBLIC_WELCOME_CHAT_ID].includes(chatId);
+    c.TELEGRAM_AMATEUR_CHAT_ID, c.TELEGRAM_ADMIN_REVIEW_CHAT_ID, c.WANTED_LIST_CHAT_ID, c.GENERAL_CHAT_ID, c.TELEGRAM_PUBLIC_LOBBY_CHAT_ID, c.TELEGRAM_PUBLIC_WELCOME_CHAT_ID].includes(chatId);
 }
 
 export async function refreshAmateurConfiguration(): Promise<void> {
@@ -20,6 +22,7 @@ export async function refreshAmateurConfiguration(): Promise<void> {
     }
     getConfig().TELEGRAM_AMATEUR_FORUM_CHAT_ID = binding.chatId;
   }
+  await refreshChatBindings();
 }
 
 export async function bindAmateurForum(chatId: number, adminId: number): Promise<void> {

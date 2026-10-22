@@ -4,7 +4,7 @@
 
 import { SPACE_IDS, SpaceId } from "../types.ts";
 import { getChatId, getSpaceTitle } from "./spaces.ts";
-import { entitlementGrantsSpace, getActiveUserEntitlements, hasAccessToSpace } from "../db/entitlements.ts";
+import { effectiveEntitlementSpaces, getActiveUserEntitlements, hasAccessToSpace } from "../db/entitlements.ts";
 import {
   getSyncState,
   listAllSyncedUserIds,
@@ -209,7 +209,7 @@ export async function reconcileAllMembers(
     let granted: Set<SpaceId>;
     try {
       const active = await getActiveUserEntitlements(userId);
-      granted = new Set(active.flatMap((e) => e.spaces.filter((space) => entitlementGrantsSpace(e, space))));
+      granted = new Set(active.flatMap(effectiveEntitlementSpaces));
     } catch (err) {
       errors.push(`Could not read entitlements for user ${userId}: ${err instanceof Error ? err.message : String(err)}`);
       continue;
