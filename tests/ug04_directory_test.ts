@@ -26,7 +26,7 @@ Deno.test("UG04 DIRECTORY — Regular and Retro creators have separate compact a
     const [regular, retro] = sections;
     assertStringIncludes(regular, "Voici la liste des créateurs toujours en activité");
     assertStringIncludes(retro, "Voici la liste des créateurs qui ne sont plus en activité");
-    assertStringIncludes(regular, "https://t.me/TestBot?start=join");
+    assertStringIncludes(regular, "Rejoindre la plateforme");
     assert(!/underground/i.test(regular));
     assert(regular.indexOf("Aria") < regular.indexOf("Sophie"));
     assert(!regular.includes("Maya"));

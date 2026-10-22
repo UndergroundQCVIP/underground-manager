@@ -87,7 +87,7 @@ Deno.test("DIRECTORY SPLIT — large same-letter lists split between complete cr
     assert(sections.length > 2);
     for (const text of sections) {
       assert(text.length <= 3500);
-      assertStringIncludes(text, "https://t.me/TestBot?start=join");
+      assertStringIncludes(text, "Rejoindre la plateforme");
       assert(!text.includes("qui ne sont plus en activité"));
     }
     for (const creator of creators) {

@@ -8,7 +8,7 @@ import { fatalConfigErrors, loadConfig, validateConfig } from "./config.ts";
 import { createBot } from "./bot/bot.ts";
 import { registerCronJobs } from "./cron/reconciliation.ts";
 import { getKv } from "./db/kv.ts";
-import { createFetchHandler } from "./server.ts";
+import { createFetchHandler, createPreviewFetchHandler, isLiveBotRuntime } from "./server.ts";
 import { syncDirectoryIfNeeded } from "./directory/sync.ts";
 
 async function main() {
@@ -76,19 +76,26 @@ async function main() {
 // evaluated (before any `await`); jobs registered later on Deno Deploy never run.
 let bot: ReturnType<typeof createBot>;
 if (import.meta.main) {
-  const bootConfig = loadConfig();
-  if (fatalConfigErrors(bootConfig).length > 0) {
-    // main() prints the details and exits; avoid constructing a bot without a token.
-    main().catch((err) => {
-      console.error("[Fatal Error]", err);
-      Deno.exit(1);
-    });
+  if (!isLiveBotRuntime(Deno.env.get("DENO_TIMELINE"))) {
+    // Build warmup starts previews with a fresh KV database. Never let them publish
+    // empty directories, accept live updates or register reconciliation workers.
+    console.log("[Preview] Telegram bot and scheduled jobs disabled.");
+    Deno.serve({ port: Number(Deno.env.get("PORT") ?? "8000") }, createPreviewFetchHandler());
   } else {
-    bot = createBot();
-    registerCronJobs(bot);
-    main().catch((err) => {
-      console.error("[Fatal Error]", err);
-      Deno.exit(1);
-    });
+    const bootConfig = loadConfig();
+    if (fatalConfigErrors(bootConfig).length > 0) {
+      // main() prints the details and exits; avoid constructing a bot without a token.
+      main().catch((err) => {
+        console.error("[Fatal Error]", err);
+        Deno.exit(1);
+      });
+    } else {
+      bot = createBot();
+      registerCronJobs(bot);
+      main().catch((err) => {
+        console.error("[Fatal Error]", err);
+        Deno.exit(1);
+      });
+    }
   }
 }
