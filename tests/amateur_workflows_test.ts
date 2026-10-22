@@ -41,6 +41,7 @@ import {
   rejectContribution,
   startNewCreatorContribution,
   submitProposalName,
+  submitProposalUrl,
   switchToExistingCreator,
 } from "../src/contributions/service.ts";
 import { flushContributionReviews } from "../src/contributions/review.ts";
@@ -66,6 +67,7 @@ async function submission(
 ) {
   await startNewCreatorContribution(member, "amateur");
   assert((await submitProposalName(member, name)).ok);
+  assert((await submitProposalUrl(member, null)).ok);
   await addContributionItem(member, { messageId: 10, kind: "photo" });
   await addContributionItem(member, { messageId: 11, kind: "video" });
   const result = await finishContribution(api, member);
@@ -133,7 +135,7 @@ Deno.test("AMATEUR BUNDLE — legacy approvals gain six spaces at their original
   }
 });
 
-Deno.test("AMATEUR SUBMISSION — name, screenshot, actual content and admin rights are required; proof publishes into a new private topic", async () => {
+Deno.test("AMATEUR SUBMISSION — full name, optional profile, content and admin rights; one video is enough to submit", async () => {
   const kv = await setupTestEnvironment();
   try {
     configure();
@@ -141,28 +143,28 @@ Deno.test("AMATEUR SUBMISSION — name, screenshot, actual content and admin rig
     await startNewCreatorContribution(MEMBER, "amateur");
     assertEquals((await submitProposalName(MEMBER, "Alias")).ok, false);
     assert((await submitProposalName(MEMBER, "Marie Tremblay")).ok);
-    assertEquals(
+    assertEquals((await getActiveContribution(MEMBER))!.step, "url");
+    assertEquals((await submitProposalUrl(MEMBER, "not a link")).ok, false);
+    assert((await submitProposalUrl(MEMBER, null)).ok);
+    assertEquals((await getActiveContribution(MEMBER))!.step, "media");
+    assertEquals((await finishContribution(api, MEMBER)).ok, false);
+    assert(
       (await addContributionItem(MEMBER, { messageId: 9, kind: "video" }))
         .added,
-      false,
     );
-    assertEquals((await finishContribution(api, MEMBER)).ok, false);
-    await addContributionItem(MEMBER, { messageId: 10, kind: "photo" });
-    assertEquals((await finishContribution(api, MEMBER)).ok, false);
-    await addContributionItem(MEMBER, { messageId: 11, kind: "video" });
     const result = await finishContribution(api, MEMBER);
     assert(result.ok);
     const id = result.contribution!.id;
     assertEquals(api.createdTopics.length, 0);
     assertEquals(api.copyCalls.map((c) => c.to), [REVIEW]);
-    assertEquals(api.copyCalls[0].ids, [10, 11]);
+    assertEquals(api.copyCalls[0].ids, [9]);
     assertEquals((await approveContribution(api, id, ADMIN)).ok, false);
     await adminUpdateProposal(id, { identityRightsConfirmed: true });
     assertEquals((await approveContribution(api, id, MEMBER)).ok, false);
     assert((await approveContribution(api, id, SECOND)).ok);
     assertEquals(api.createdTopics.length, 1);
     assertEquals(api.createdTopics[0].chatId, AMATEUR);
-    assertEquals(api.copyCalls.find((c) => c.to === AMATEUR)!.ids, [10, 11]);
+    assertEquals(api.copyCalls.find((c) => c.to === AMATEUR)!.ids, [9]);
     assertEquals((await listCreators()).length, 0);
     assertEquals((await listCreators({ collection: "amateur" })).length, 1);
     assertEquals(await hasAccessToSpace(MEMBER, "amateur_collections"), false);
@@ -408,7 +410,7 @@ Deno.test("TEAM REVIEW — failed notifications/cards retry and rejection record
   }
 });
 
-Deno.test("AMATEUR UI — a non-member completes the new contribution button flow and sends proof with content for review", async () => {
+Deno.test("AMATEUR UI — a non-member skips the profile link, sees Finish immediately and submits only when finished", async () => {
   const kv = await setupTestEnvironment();
   try {
     configure();
@@ -419,10 +421,21 @@ Deno.test("AMATEUR UI — a non-member completes the new contribution button flo
     await tg.send(text(MEMBER, "Marie Tremblay"));
     assertEquals(
       (await getActiveContribution(MEMBER))!.step,
-      "profile_screenshot",
+      "url",
+    );
+    assertStringIncludes(
+      JSON.stringify(tg.callsOf("sendMessage").at(-1)),
+      "contrib:urlskip",
+    );
+    await tg.send(callback(MEMBER, "contrib:urlskip"));
+    assertEquals((await getActiveContribution(MEMBER))!.step, "media");
+    assertStringIncludes(
+      JSON.stringify(tg.callsOf("sendMessage").at(-1)),
+      "contrib:finish",
     );
     await tg.send(photo(MEMBER, 10));
     await tg.send(photo(MEMBER, 11));
+    assertEquals(tg.callsOf("copyMessages").length, 0);
     await tg.send(callback(MEMBER, "contrib:finish"));
     assertEquals(tg.callsOf("copyMessages").at(-1)!.payload.chat_id, REVIEW);
     assertEquals(tg.callsOf("copyMessages").at(-1)!.payload.message_ids, [
@@ -435,12 +448,13 @@ Deno.test("AMATEUR UI — a non-member completes the new contribution button flo
   }
 });
 
-Deno.test("AMATEUR ALBUM — concurrent photos preserve every item and mark exactly one profile screenshot", async () => {
+Deno.test("AMATEUR ALBUM — concurrent content preserves every item without requiring or assigning a screenshot", async () => {
   const kv = await setupTestEnvironment();
   try {
     configure();
     await startNewCreatorContribution(MEMBER, "amateur");
     await submitProposalName(MEMBER, "Marie Tremblay");
+    await submitProposalUrl(MEMBER, null);
     const results = await Promise.all(
       Array.from({ length: 10 }, (_, i) =>
         addContributionItem(MEMBER, {
@@ -455,9 +469,45 @@ Deno.test("AMATEUR ALBUM — concurrent photos preserve every item and mark exac
     assertEquals(
       contribution.items.filter((i) => i.purpose === "profile_screenshot")
         .length,
-      1,
+      0,
     );
     assertEquals(new Set(contribution.items.map((i) => i.messageId)).size, 10);
+  } finally {
+    await kv.close();
+  }
+});
+
+Deno.test("AMATEUR UI — a supplied profile link goes straight to content; old screenshot sessions can skip to content", async () => {
+  const kv = await setupTestEnvironment();
+  try {
+    configure();
+    const tg = await createFakeTelegram();
+    await tg.send(callback(MEMBER, "contrib:amateur"));
+    await tg.send(text(MEMBER, "Marie Tremblay"));
+    await tg.send(text(MEMBER, "https://instagram.com/marie.tremblay"));
+    let active = (await getActiveContribution(MEMBER))!;
+    assertEquals(active.step, "media");
+    assertEquals(
+      active.proposal!.profileUrl,
+      "https://instagram.com/marie.tremblay",
+    );
+    assertStringIncludes(
+      JSON.stringify(tg.callsOf("sendMessage").at(-1)),
+      "contrib:finish",
+    );
+    assert(!JSON.stringify(tg.calls).includes("contrib:col:"));
+    active = { ...active, step: "profile_screenshot" };
+    await saveContribution(active);
+    await tg.send(photo(MEMBER, 99));
+    assertStringIncludes(
+      JSON.stringify(tg.callsOf("sendMessage").at(-1)),
+      "contrib:urlskip",
+    );
+    await tg.send(callback(MEMBER, "contrib:urlskip"));
+    assertEquals((await getActiveContribution(MEMBER))!.step, "media");
+    await tg.send(photo(MEMBER, 100));
+    await tg.send(callback(MEMBER, "contrib:finish"));
+    assertEquals((await getContribution(active.id))!.status, "pending");
   } finally {
     await kv.close();
   }

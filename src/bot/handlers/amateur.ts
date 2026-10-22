@@ -1,7 +1,7 @@
 /** Amateur access is explicitly granted by admins; its directory is never public. */
 import { API_CONSTANTS, Composer, Context, InlineKeyboard } from "grammy";
-import { bindPrivateChat, chatBindingCollision, type ChatRole } from "../../db/chat_bindings.ts";
-import { getConfig } from "../../config.ts";
+import { bindPrivateChat, chatBindingCollision, migratePrivateChatBinding, type ChatRole } from "../../db/chat_bindings.ts";
+import { getConfig, isAdministrator } from "../../config.ts";
 import { adminRouteGuard } from "../middleware/auth.ts";
 import { amateurChatCollision, bindAmateurForum } from "../../db/amateur.ts";
 import { listCreators } from "../../db/creators.ts";
@@ -13,11 +13,19 @@ import { renderNavPage } from "../public_pages.ts";
 import { getMembershipSummary } from "../../db/entitlements.ts";
 import { hasAccessToSpace } from "../../db/entitlements.ts";
 import { recordSyncState } from "../../db/sync.ts";
+import { getOrCreateJoinLink } from "../../access/links.ts";
 import { removeMemberFromSpace } from "../../access/sync.ts";
 import { getMembershipMode } from "../../membership/mode.ts";
 import type { MessageEntity } from "@grammyjs/types";
 
 export const amateurComposer = new Composer();
+// Anonymous group admins cannot prove which configured bot administrator they are.
+amateurComposer.use(async (ctx, next) => {
+  if (ctx.hasCommand(["setup_amateur", "setup_amateur_chat", "setup_admin_review"]) && ctx.message?.sender_chat && !isAdministrator(ctx.from?.id ?? 0)) {
+    await ctx.reply("Envoyez cette commande avec votre profil personnel d’administrateur, sans le mode anonyme, ou en privé au bot avec l’identifiant du groupe."); return;
+  }
+  await next();
+});
 amateurComposer.use(adminRouteGuard({ callbackPrefixes: ["amateur:"], commands: ["setup_amateur", "setup_amateur_chat", "setup_admin_review"] }));
 
 amateurComposer.callbackQuery("member:amateur", async (ctx) => {
@@ -142,30 +150,84 @@ amateurComposer.callbackQuery("amateur:directory", async (ctx) => {
   });
 });
 
-async function setupPrivateChat(ctx: Context, role: ChatRole) {
+function setupMigrationId(error: unknown): number | undefined {
+  const migrated = (error as { parameters?: { migrate_to_chat_id?: number } })?.parameters?.migrate_to_chat_id;
+  return Number.isSafeInteger(migrated) && migrated! < 0 ? migrated : undefined;
+}
+
+async function setupPrivateChat(ctx: Context, role: ChatRole, migratedTarget?: number) {
   if (!ctx.from || !ctx.chat) return;
-  const chat = await ctx.api.getChat(ctx.chat.id);
-  if (chat.type !== "supergroup" || chat.username || chat.linked_chat_id || chatBindingCollision(chat.id, role)) {
-    await ctx.reply("Utilisez un nouveau supergroupe privé distinct des collections, canaux et autres groupes."); return;
+  const reply = (text: string) => migratedTarget && ctx.chat?.type !== "private"
+    ? ctx.api.sendMessage(migratedTarget, text) : ctx.reply(text);
+  const command = role === "amateur_chat" ? "/setup_amateur_chat" : "/setup_admin_review";
+  const argument = typeof ctx.match === "string" ? ctx.match.trim() : "";
+  if (!migratedTarget && ctx.chat.type === "private" && !/^-\d+$/.test(argument)) {
+    await reply(`Envoyez ${command} dans le groupe privé à connecter, ou ${command} -IDENTIFIANT_DU_GROUPE ici. Ajoutez d’abord le bot comme administrateur du groupe.`); return;
   }
-  const current = role === "amateur_chat" ? getConfig().TELEGRAM_AMATEUR_CHAT_ID : getConfig().TELEGRAM_ADMIN_REVIEW_CHAT_ID;
-  if (current && current !== chat.id) { await ctx.reply("Un autre groupe est déjà configuré pour ce rôle."); return; }
-  const bot = await ctx.api.getChatMember(chat.id, ctx.me.id);
-  if (bot.status !== "administrator" || !bot.can_invite_users || !bot.can_restrict_members) {
-    await ctx.reply("Le bot doit être administrateur avec les droits d'inviter et de restreindre les membres."); return;
-  }
+  const target = migratedTarget ?? (ctx.chat.type === "private" ? Number(argument) : ctx.chat.id);
+  let stage = "lecture du groupe";
+  let configured = false;
   try {
+    if (!Number.isSafeInteger(target) || target >= 0) throw new Error("Identifiant de groupe invalide.");
+    const chat = await ctx.api.getChat(target);
+    if ((chat.type !== "group" && chat.type !== "supergroup") || ("username" in chat && chat.username) || ("linked_chat_id" in chat && chat.linked_chat_id)) {
+      await reply("Utilisez un groupe de discussion privé, sans lien avec un canal public."); return;
+    }
+    if (chatBindingCollision(chat.id, role)) {
+      await reply("Ce groupe est déjà utilisé pour une collection, un canal ou un autre clavardage. Choisissez un groupe de discussion privé distinct du forum Amateur."); return;
+    }
+    const current = role === "amateur_chat" ? getConfig().TELEGRAM_AMATEUR_CHAT_ID : getConfig().TELEGRAM_ADMIN_REVIEW_CHAT_ID;
+    if (current && current !== chat.id) { await reply("Un autre groupe est déjà configuré pour ce rôle. Sa liaison ne sera pas remplacée automatiquement."); return; }
+    stage = "vérification des droits du bot";
+    const bot = await ctx.api.getChatMember(chat.id, ctx.me.id);
+    if (bot.status !== "administrator" || !bot.can_invite_users || !bot.can_restrict_members) {
+      await reply("Le bot doit être administrateur du groupe avec les droits « Inviter des utilisateurs » et « Bannir/restreindre des membres ». Activez ces droits puis relancez la commande."); return;
+    }
+    // Without the full existing permissions, changing defaults could silence the chat.
+    if (!chat.permissions) throw new Error("Les permissions actuelles du groupe sont indisponibles. Vérifiez les droits du bot puis réessayez.");
+    stage = "activation des demandes d’adhésion";
     const webhook = await ctx.api.getWebhookInfo();
     if (webhook.url) await ctx.api.setWebhook(webhook.url, {
       secret_token: getConfig().WEBHOOK_SECRET,
-      allowed_updates: webhook.allowed_updates?.length ? [...new Set([...webhook.allowed_updates, "chat_member" as const])] : [...API_CONSTANTS.ALL_UPDATE_TYPES],
+      allowed_updates: webhook.allowed_updates?.length
+        ? [...new Set([...webhook.allowed_updates, "chat_member" as const, "chat_join_request" as const])]
+        : [...API_CONSTANTS.ALL_UPDATE_TYPES],
     });
+    stage = "protection des invitations";
     await ctx.api.setChatPermissions(chat.id, { ...chat.permissions, can_invite_users: false });
+    stage = "enregistrement du groupe";
     await bindPrivateChat(role, chat.id, ctx.from.id);
-    await ctx.reply(role === "amateur_chat"
-      ? "✅ Clavardage Amateur configuré. Les autorisations Amateur existantes et futures donnent accès à ce groupe. Les demandes d'entrée sont vérifiées par le bot."
-      : "✅ Groupe de modération configuré. Les nouvelles contributions et leurs décisions seront visibles ici. Seuls les administrateurs déclarés dans ADMIN_USER_IDS peuvent approuver, refuser et accorder une récompense. Réservez ce groupe à votre équipe.");
-  } catch (error) { await ctx.reply(`⚠️ ${error instanceof Error ? error.message : String(error)}`); }
+    configured = true;
+    if (role === "amateur_chat") {
+      stage = "création du lien d’accès";
+      await getOrCreateJoinLink(ctx.api, "amateur_chat");
+    }
+    await reply(role === "amateur_chat"
+      ? `✅ Clavardage Amateur configuré : ${chat.title}. Les autorisations Amateur existantes et futures donnent accès à ce groupe depuis le bouton Amateur ou Mes canaux. Les demandes d’entrée sont vérifiées par le bot.`
+      : `✅ Groupe de modération configuré : ${chat.title}. Les nouvelles contributions et leurs décisions seront visibles ici. Seuls les administrateurs déclarés dans ADMIN_USER_IDS peuvent approuver, refuser et accorder une récompense. Réservez ce groupe à votre équipe.`);
+  } catch (error) {
+    const migration = setupMigrationId(error);
+    if (migration && !migratedTarget) {
+      try {
+        const migratedChat = await ctx.api.getChat(migration);
+        if (migratedChat.type !== "supergroup" || migratedChat.username || migratedChat.linked_chat_id) throw new Error("Le groupe migré doit rester privé et distinct des canaux publics.");
+        await migratePrivateChatBinding(target, migration);
+      }
+      catch (migrationError) { await reply(`⚠️ ${migrationError instanceof Error ? migrationError.message : String(migrationError)}`); return; }
+      await setupPrivateChat(ctx, role, migration); return;
+    }
+    await reply(`⚠️ ${configured ? "Groupe enregistré, mais étape incomplète" : "Configuration impossible"} (${stage}) : ${error instanceof Error ? error.message : String(error)}. Réessayez la commande une fois le problème corrigé.`);
+  }
 }
 amateurComposer.command("setup_amateur_chat", ctx => setupPrivateChat(ctx, "amateur_chat"));
 amateurComposer.command("setup_admin_review", ctx => setupPrivateChat(ctx, "admin_review"));
+
+// Preserve a configured chat when Telegram upgrades a basic group to a supergroup.
+amateurComposer.on(["message:migrate_to_chat_id", "message:migrate_from_chat_id"], async (ctx, next) => {
+  const oldId = ctx.message.migrate_from_chat_id ?? ctx.chat.id;
+  const newId = ctx.message.migrate_to_chat_id ?? ctx.chat.id;
+  if (![getConfig().TELEGRAM_AMATEUR_CHAT_ID, getConfig().TELEGRAM_ADMIN_REVIEW_CHAT_ID].includes(oldId)) return next();
+  const chat = await ctx.api.getChat(newId);
+  if (chat.type !== "supergroup" || chat.username || chat.linked_chat_id) return;
+  await migratePrivateChatBinding(oldId, newId);
+});

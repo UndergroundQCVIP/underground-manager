@@ -24,7 +24,7 @@ joinReqComposer.on("chat_join_request", async (ctx) => {
     });
 
     if (!result.approved && result.spaceId) {
-      if (result.spaceId === "amateur_collections") {
+      if ((result.spaceId === "amateur_collections" || result.spaceId === "amateur_chat")) {
         await ctx.api.sendMessage(result.userId,
           "🔒 L'accès Amateur nécessite une autorisation distincte d'un administrateur. Aucun abonnement ou accès complet Regular/Retro ne le débloque.",
           { reply_markup: new InlineKeyboard().text("⬅️ Menu principal", "member:home") }).catch(() => {});
