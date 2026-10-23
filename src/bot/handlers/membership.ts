@@ -7,7 +7,7 @@ import { getClubName, getConfig } from "../../config.ts";
 import { getActivePaidEntitlements, getMembershipSummary } from "../../db/entitlements.ts";
 import { TelegramStarsProvider } from "../../payments/stars.ts";
 import { getOrCreateJoinLink } from "../../access/links.ts";
-import { getChatId } from "../../access/spaces.ts";
+import { getChatId, getSpaceTitle } from "../../access/spaces.ts";
 import { messages } from "../messages.ts";
 import { plansKeyboard, spacesKeyboard } from "../keyboards.ts";
 import { MembershipPlanId, SpaceId } from "../../types.ts";
@@ -273,13 +273,13 @@ membershipComposer.callbackQuery("member:status", async (ctx) => {
   });
 });
 
-async function buildLinks(ctx: Context, spaces: SpaceId[]) {
+async function buildLinks(ctx: Context, spaces: SpaceId[], forceRefresh = false) {
   const out: { spaceId: SpaceId; url: string }[] = [];
   for (const spaceId of spaces) {
     // A space whose chat is not configured cannot have a link.
     if (!getChatId(spaceId)) continue;
     try {
-      out.push({ spaceId, url: await getOrCreateJoinLink(ctx.api, spaceId) });
+      out.push({ spaceId, url: await getOrCreateJoinLink(ctx.api, spaceId, { forceRefresh }) });
     } catch (err) {
       console.error(`Failed to generate join link for space ${spaceId}:`, err);
     }
@@ -288,7 +288,7 @@ async function buildLinks(ctx: Context, spaces: SpaceId[]) {
 }
 
 // Access My Channels (Generates/retrieves secure join-request links)
-membershipComposer.callbackQuery("member:channels", async (ctx) => {
+membershipComposer.callbackQuery(/^member:channels(?::refresh)?$/, async (ctx) => {
   const userId = ctx.from?.id;
   if (!userId) return;
 
@@ -305,17 +305,19 @@ membershipComposer.callbackQuery("member:channels", async (ctx) => {
 
   await ctx.answerCallbackQuery({ text: "Génération des liens d'accès sécurisés aux canaux..." });
   // Links are only generated for spaces the member's entitlements include.
-  const spaceLinks = await buildLinks(ctx, summary.accessibleSpaces);
+  const spaceLinks = await buildLinks(ctx, summary.accessibleSpaces, ctx.callbackQuery.data === "member:channels:refresh");
+  const missingSpaces = summary.accessibleSpaces.filter(s => !spaceLinks.some(link => link.spaceId === s));
 
   if (spaceLinks.length === 0) {
     await ctx.reply(
       "⚠️ Les liens des canaux sont temporairement indisponibles. Veuillez en aviser un administrateur.",
-      { reply_markup: new InlineKeyboard().text("⬅️ Menu principal", "member:home") }
+      { reply_markup: new InlineKeyboard().text("🔄 Réessayer les liens", "member:channels:refresh").row().text("⬅️ Menu principal", "member:home") }
     );
     return;
   }
 
-  await ctx.editMessageText(messages.accessChannels(summary.accessibleSpaces), {
+  const unavailable = missingSpaces.length ? `\n\n⚠️ Liens temporairement indisponibles : ${missingSpaces.map(getSpaceTitle).join(", ")}. Appuyez sur « Renouveler les liens » pour réessayer.` : "";
+  await ctx.editMessageText(messages.accessChannels(summary.accessibleSpaces) + unavailable, {
     parse_mode: "Markdown",
     reply_markup: spacesKeyboard(spaceLinks),
   });
