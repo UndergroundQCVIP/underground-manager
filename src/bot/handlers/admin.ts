@@ -45,6 +45,7 @@ import {
 } from "../../types.ts";
 import { getChatId, getSpaceTitle } from "../../access/spaces.ts";
 import { escapeMd } from "../../util/markdown.ts";
+import { accessJoinKeyboard, JOIN_INSTRUCTIONS } from "../../access/onboarding.ts";
 
 export const adminComposer = new Composer();
 
@@ -431,13 +432,10 @@ adminComposer.callbackQuery(
         `L'accès est actif pour *${duration} jours* (jusqu'au ${formatTorontoDate(
           result.entitlement.expiresAt
         )}).\n\n` +
-        `Touchez ci-dessous pour rejoindre vos espaces :`,
+        JOIN_INSTRUCTIONS,
         {
           parse_mode: "Markdown",
-          reply_markup: new InlineKeyboard().text(
-            "🔓 Accéder à mes canaux",
-            "member:channels"
-          ),
+          reply_markup: await accessJoinKeyboard(ctx.api, userId),
         }
       );
     } catch {

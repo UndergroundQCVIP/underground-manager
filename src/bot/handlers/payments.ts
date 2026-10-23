@@ -2,11 +2,12 @@
  * LA CONFRÉRIE — Telegram Stars Payment Event Handlers
  */
 
-import { Composer, InlineKeyboard } from "grammy";
+import { Composer } from "grammy";
 import { TelegramStarsProvider } from "../../payments/stars.ts";
 import { messages } from "../messages.ts";
 import { applyPlanChangeAfterPayment } from "../../plans/changes.ts";
 import { starsCheckoutEnabled } from "../../membership/mode.ts";
+import { accessJoinKeyboard } from "../../access/onboarding.ts";
 
 export const paymentsComposer = new Composer();
 const starsProvider = new TelegramStarsProvider();
@@ -77,7 +78,7 @@ paymentsComposer.on("message:successful_payment", async (ctx) => {
       await ctx.reply(
         "✅ Le paiement a déjà été confirmé. Votre abonnement est actif !",
         {
-          reply_markup: new InlineKeyboard().text("🔓 Accéder à mes canaux", "member:channels"),
+          reply_markup: await accessJoinKeyboard(ctx.api, userId),
         }
       );
       return;
@@ -119,11 +120,10 @@ paymentsComposer.on("message:successful_payment", async (ctx) => {
         .catch(() => {});
     }
 
-    // Success! Congratulate member and show channels button
+    // Membership is committed; put the authorized join buttons directly in the receipt.
     await ctx.reply(messages.paymentSuccess(result.entitlement.expiresAt, planId) + upgradeNote, {
       parse_mode: "Markdown",
-      reply_markup: new InlineKeyboard()
-        .text("🔓 Accéder à mes canaux", "member:channels")
+      reply_markup: (await accessJoinKeyboard(ctx.api, userId))
         .row()
         .text("📋 Voir mon abonnement", "member:status"),
     });

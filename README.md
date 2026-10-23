@@ -332,6 +332,8 @@ Administrators (whose Telegram user ID is listed in `ADMIN_USER_IDS`) have acces
      - Full Access (VIP + Chat + Wanted List)
 4. Admin confirms the grant. The bot activates the entitlement immediately and notifies the member with direct channel access buttons.
 
+Telegram bots cannot add users to a group or channel without a join request. Purchase confirmations, admin grants and contribution rewards include direct join buttons for the member's currently authorized spaces. The member taps Join for each space, then the bot checks their access and approves automatically. An invitation failure does not undo the grant: the confirmation keeps a button to verify access and renew links. Amateur links require a separate explicit admin grant.
+
 ### Member Lookup
 Send `/lookup <userId>` or `/lookup @username`:
 - Displays registered name, registration timestamp, active membership type, expiration date, and full entitlement history.
