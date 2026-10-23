@@ -124,13 +124,13 @@ startComposer.command("start", async (ctx) => {
     } else {
       const retroLocked = collection === "retro" && summary.isMember;
       const kb = new InlineKeyboard();
+      // Offer the creator-specific contribution before the paid access option.
+      if (mode !== "stars_only") kb.text(`➕ Contribuer pour ${creator.name}`.slice(0, 60), `contrib:pick:${creator.id}`).row();
       if (retroLocked && getPlan("retro_plus").enabled && mode !== "contribution_only") {
         kb.text("⬆️ Passer à Retro Plus", "member:upgrade").row();
       } else {
         kb.text("💎 Comment obtenir l'accès", "member:plans").row();
       }
-      // A direct route to contribute content for this very creator.
-      if (mode !== "stars_only") kb.text(`➕ Contribuer pour ${creator.name}`.slice(0, 60), `contrib:pick:${creator.id}`).row();
       kb.text("⬅️ Menu principal", "member:home");
 
       await ctx.reply(
