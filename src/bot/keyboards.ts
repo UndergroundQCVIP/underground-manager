@@ -22,13 +22,7 @@ export function mainMenuKeyboard(
 ): InlineKeyboard {
   const kb = new InlineKeyboard();
 
-  kb.text("💎 Forfaits d'adhésion", "member:plans")
-    .text("📋 Mon abonnement", "member:status")
-    .row();
-
-  if (plan === "regular" && getPlan("retro_plus").enabled && mode !== "contribution_only") {
-    kb.text("⬆️ Passer à Retro Plus", "member:upgrade").row();
-  }
+  kb.text("➕ Contribuer", "contrib:start").row();
 
   kb.text("📚 Répertoire des créateurs", "dir:all")
     .text("🎯 Suggestions et votes", "wanted:menu")
@@ -37,7 +31,7 @@ export function mainMenuKeyboard(
   kb.text("🔎 Liste recherchée", "wreq:menu").row();
   kb.text("🔒 Collection Amateur", "member:amateur").row();
 
-  kb.text("➕ Contribuer", "contrib:start").text("🤝 Parrainage", "ref:menu").row();
+  kb.text("🤝 Parrainage", "ref:menu").row();
   kb.text("🏆 Classement", "lb:month").row();
 
   kb.text("💬 Clavardage général", "member:general_chat")
@@ -47,6 +41,14 @@ export function mainMenuKeyboard(
   // Keep the route reachable on menus opened before a contribution was rewarded.
   // The handler always rechecks current entitlements before issuing any link.
   kb.text(isMember ? "🔓 Accéder à mes canaux" : "🔐 Vérifier mes accès", "member:channels").row();
+
+  kb.text("💎 Forfaits d'adhésion", "member:plans")
+    .text("📋 Mon abonnement", "member:status")
+    .row();
+
+  if (plan === "regular" && getPlan("retro_plus").enabled && mode !== "contribution_only") {
+    kb.text("⬆️ Passer à Retro Plus", "member:upgrade").row();
+  }
 
   kb.text("💬 Aide et soutien", "member:support");
 
@@ -102,6 +104,8 @@ export function spacesKeyboard(
 
 export function supportKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
+    .text("➕ Contribuer", "contrib:start")
+    .row()
     .text("💎 Forfaits d'adhésion", "member:plans")
     .row()
     .text("⬅️ Menu principal", "member:home");

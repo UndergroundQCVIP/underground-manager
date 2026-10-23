@@ -52,13 +52,14 @@ export function directoryUrl(): string {
 export function welcomeKeyboard(): UrlKeyboard {
   return {
     inline_keyboard: [
-      [{ text: "🧭 Explorer le club", url: exploreUrl() }, { text: "📚 Répertoire des créateurs", url: directoryUrl() }],
+      [{ text: "➕ Contribuer du contenu", url: botLink("contribute") }],
       [{ text: "📚 Créateurs en activité", url: botLink("directory_regular") }],
       [{ text: "🎞️ Créateurs qui ne sont plus en activité", url: botLink("directory_retro") }],
       [{ text: "📖 Accès en activité", url: botLink("regular") }, { text: "🎞️ Accès Retro", url: botLink("retro") }],
       [{ text: "🔒 Collection Amateur — accès sur autorisation", url: botLink("amateur") }],
-      [{ text: "❓ Comment ça fonctionne", url: botLink("how") }, { text: "➕ Contribuer du contenu", url: botLink("contribute") }],
-      [{ text: "💎 Joindre LA CONFRÉRIE", url: botLink("join") }, { text: "📜 Règles et soutien", url: botLink("rules") }],
+      [{ text: "🧭 Explorer le club", url: exploreUrl() }, { text: "📚 Répertoire des créateurs", url: directoryUrl() }],
+      [{ text: "❓ Comment ça fonctionne", url: botLink("how") }, { text: "📜 Règles et soutien", url: botLink("rules") }],
+      [{ text: "💎 Joindre LA CONFRÉRIE", url: botLink("join") }],
     ],
   };
 }
@@ -87,7 +88,8 @@ export function directoryNavKeyboard(collection?: CollectionCategory, page = 0, 
         ...(page > 0 ? [{ text: "◀️ Précédent", callback_data: `dir:page:${collection}:${page - 1}` }] : []),
         ...(page + 1 < pages ? [{ text: "Suivant ▶️", callback_data: `dir:page:${collection}:${page + 1}` }] : []),
       ]] : []),
-      [{ text: "💎 Rejoindre", url: botLink("join") }, { text: "➕ Contribuer", url: botLink("contribute") }],
+      [{ text: "➕ Contribuer", url: botLink("contribute") }],
+      [{ text: "💎 Rejoindre", url: botLink("join") }],
       ...(collection ? [[{ text: `🔄 Actualiser — ${collection === "regular" ? "en activité" : "inactifs"}`, callback_data: `dir:refresh:${collection}` }]] : []),
     ],
   };

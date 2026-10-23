@@ -252,12 +252,12 @@ membershipComposer.callbackQuery("member:status", async (ctx) => {
   const mode = await getMembershipMode();
   const kb = new InlineKeyboard();
 
+  if (mode !== "stars_only") kb.text("➕ Contribuer", "contrib:start").row();
   if (summary.isMember) {
     kb.text("🔓 Accéder à mes canaux", "member:channels").row();
     if (summary.plan === "regular" && getPlan("retro_plus").enabled && mode !== "contribution_only") {
       kb.text("⬆️ Passer à Retro Plus", "member:upgrade").row();
     }
-    if (mode !== "stars_only") kb.text("➕ Contribuer", "contrib:start").row();
     if (summary.activeEntitlements.some((e) => e.source === "telegram_stars" && e.plan === "retro_plus")) {
       kb.text("⬇️ Revenir à Regular", "member:downgrade").row();
     }
