@@ -53,8 +53,11 @@ import { notifyContributionReview, syncContributionReview, flushContributionRevi
 import { fmtDay, grantContributionReward, scopesLabel, validateRewardParams } from "./rewards.ts";
 import { awardContributionBonus } from "../referrals/service.ts";
 import { awardContributionPoints } from "../points/service.ts";
+import { InviteApiLike } from "../access/links.ts";
+import { accessJoinKeyboard, JOIN_INSTRUCTIONS } from "../access/onboarding.ts";
 
 export interface ContributionApiLike {
+  createChatInviteLink?: InviteApiLike["createChatInviteLink"];
   sendMessage(chatId: number | string, text: string, other?: Record<string, unknown>): Promise<unknown>;
   copyMessages(
     chatId: number | string,
@@ -790,8 +793,8 @@ async function finalizeApprovedInner(api: ContributionApiLike, id: string, admin
         : dates.map((x) => `Accès ${x.s === "retro" ? "Retro" : "Regular"} jusqu'au : ${fmtDay(x.d!)}`).join("\n");
       await api.sendMessage(
         c.userId,
-        `Votre contribution a été approuvée et publiée.\n\nRécompense : ${reward.days} jours\nAccès : ${scopesLabel(reward.scopes)}\n${expiryLine}\n\nAppuyez ci-dessous pour rejoindre vos espaces autorisés.\n\nMerci de contribuer à ${getClubName()}.`,
-        { reply_markup: { inline_keyboard: [[{ text: "🔓 Accéder à mes canaux", callback_data: "member:channels" }]] } }
+        `Votre contribution a été approuvée et publiée.\n\nRécompense : ${reward.days} jours\nAccès : ${scopesLabel(reward.scopes)}\n${expiryLine}\n\n${JOIN_INSTRUCTIONS}\n\nMerci de contribuer à ${getClubName()}.`,
+        { reply_markup: await accessJoinKeyboard(api, c.userId) }
       ).catch(() => {});
     }
     return undefined;

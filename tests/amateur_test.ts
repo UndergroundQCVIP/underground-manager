@@ -49,7 +49,7 @@ Deno.test("AMATEUR — public button stays locked for paid, earned and full-acce
     assertEquals(Math.round((new Date(grant.expiresAt).getTime() - Date.now()) / 86400000), 30);
     assertEquals(grant.spaces, COMPLIMENTARY_SPACES.amateur);
     await tg.send(callback(MEMBER, "member:amateur"));
-    assertEquals(tg.callsOf("createChatInviteLink").at(-1)!.payload.chat_id, AMATEUR);
+    assertStringIncludes(JSON.stringify(tg.callsOf("editMessageText").at(-1)!.payload.reply_markup), `https://t.me/+invite_${AMATEUR}`);
     await tg.send(chatJoinRequest(AMATEUR, MEMBER));
     assertEquals(tg.callsOf("approveChatJoinRequest").at(-1)!.payload.chat_id, AMATEUR);
     await updateEntitlementStatus(grant.id, "revoked");

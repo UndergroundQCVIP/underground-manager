@@ -181,7 +181,7 @@ export const messages = {
       retroLine +
       `• Clavardage général de ${club}\n` +
       `• Liste de souhaits\n\n` +
-      `Appuyez sur *Accéder à mes canaux* ci-dessous pour entrer dans vos espaces !`
+      `Touchez « Joindre » pour chaque espace ci-dessous. Votre demande sera approuvée automatiquement si votre accès est toujours actif.`
     );
   },
 
