@@ -44,9 +44,9 @@ export function mainMenuKeyboard(
     .text("🗳️ Vote mensuel", "vote:open")
     .row();
 
-  if (isMember) {
-    kb.text("🔓 Accéder à mes canaux", "member:channels").row();
-  }
+  // Keep the route reachable on menus opened before a contribution was rewarded.
+  // The handler always rechecks current entitlements before issuing any link.
+  kb.text(isMember ? "🔓 Accéder à mes canaux" : "🔐 Vérifier mes accès", "member:channels").row();
 
   kb.text("💬 Aide et soutien", "member:support");
 
@@ -95,6 +95,7 @@ export function spacesKeyboard(
   for (const s of spaces) {
     kb.url(`👉 Joindre ${getSpaceTitle(s.spaceId)}`, s.url).row();
   }
+  kb.text("🔄 Renouveler les liens", "member:channels:refresh").row();
   kb.text("⬅️ Menu principal", "member:home");
   return kb;
 }

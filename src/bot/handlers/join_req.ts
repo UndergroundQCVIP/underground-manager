@@ -24,6 +24,13 @@ joinReqComposer.on("chat_join_request", async (ctx) => {
     });
 
     if (!result.approved && result.spaceId) {
+      if (result.error) {
+        await ctx.api.sendMessage(result.userId,
+          (result.eligible ? "✅ Votre accès est bien actif.\n\n" : "⚠️ Votre demande n'a pas pu être traitée.\n\n") +
+          "Telegram n'a pas permis de finaliser votre demande d'adhésion. Aucun paiement supplémentaire n'est demandé. Réessayez avec les liens ci-dessous ou contactez un administrateur si la demande reste en attente.",
+          { reply_markup: new InlineKeyboard().text("🔄 Réessayer l'accès", "member:channels:refresh") }).catch(() => {});
+        return;
+      }
       if ((result.spaceId === "amateur_collections" || result.spaceId === "amateur_chat")) {
         await ctx.api.sendMessage(result.userId,
           "🔒 L'accès Amateur nécessite une autorisation distincte d'un administrateur. Aucun abonnement ou accès complet Regular/Retro ne le débloque.",
@@ -36,8 +43,8 @@ joinReqComposer.on("chat_join_request", async (ctx) => {
         await ctx.api.sendMessage(
           result.userId,
           `⛔ *Accès refusé à ${title}*\n\n` +
-          `Votre demande d'adhésion n'a pas pu être approuvée, car vous n'avez pas d'abonnement actif pour cet espace.\n\n` +
-          `Abonnez-vous avec les Étoiles Telegram ci-dessous pour obtenir un accès immédiat :`,
+          `Aucun accès valide n'est actuellement enregistré pour votre compte dans cet espace.\n\n` +
+          `Les accès accordés par les administrateurs ou gagnés avec du contenu approuvé sont acceptés. Si un accès vient de vous être accordé, vérifiez votre compte Telegram et contactez un administrateur.`,
           {
             parse_mode: "Markdown",
             reply_markup: new InlineKeyboard().text(

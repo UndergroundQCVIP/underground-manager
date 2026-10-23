@@ -790,7 +790,8 @@ async function finalizeApprovedInner(api: ContributionApiLike, id: string, admin
         : dates.map((x) => `Accès ${x.s === "retro" ? "Retro" : "Regular"} jusqu'au : ${fmtDay(x.d!)}`).join("\n");
       await api.sendMessage(
         c.userId,
-        `Votre contribution a été approuvée et publiée.\n\nRécompense : ${reward.days} jours\nAccès : ${scopesLabel(reward.scopes)}\n${expiryLine}\n\nMerci de contribuer à ${getClubName()}.`
+        `Votre contribution a été approuvée et publiée.\n\nRécompense : ${reward.days} jours\nAccès : ${scopesLabel(reward.scopes)}\n${expiryLine}\n\nAppuyez ci-dessous pour rejoindre vos espaces autorisés.\n\nMerci de contribuer à ${getClubName()}.`,
+        { reply_markup: { inline_keyboard: [[{ text: "🔓 Accéder à mes canaux", callback_data: "member:channels" }]] } }
       ).catch(() => {});
     }
     return undefined;

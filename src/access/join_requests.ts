@@ -24,6 +24,8 @@ export interface ProcessJoinRequestResult {
   spaceId: SpaceId | null;
   userId: number;
   error?: string;
+  /** True when Telegram failed after the member's access had been verified. */
+  eligible?: boolean;
 }
 
 export async function processChatJoinRequest(
@@ -74,7 +76,7 @@ export async function processChatJoinRequest(
         lastSyncAt: new Date().toISOString(),
         error: msg,
       });
-      return { approved: false, spaceId, userId, error: msg };
+      return { approved: false, spaceId, userId, error: msg, eligible: true };
     }
   } else {
     try {

@@ -16,13 +16,14 @@ export interface InviteApiLike {
 
 export async function getOrCreateJoinLink(
   api: InviteApiLike,
-  spaceId: SpaceId
+  spaceId: SpaceId,
+  options: { forceRefresh?: boolean } = {}
 ): Promise<string> {
   // Check cached link first
   const cached = await getInviteLink(spaceId);
   const chatId = getChatId(spaceId);
 
-  if (cached && cached.chatId === chatId && cached.inviteLink) {
+  if (!options.forceRefresh && cached && cached.chatId === chatId && cached.inviteLink) {
     return cached.inviteLink;
   }
 

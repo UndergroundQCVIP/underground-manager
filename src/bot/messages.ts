@@ -146,7 +146,7 @@ export const messages = {
       return (
         `🔒 *ACCÈS AUX CANAUX PRIVÉS*\n\n` +
         `Vous n'avez accès à aucun espace privé.\n` +
-        `Veuillez acheter un abonnement pour débloquer les espaces ${getClubName()}.`
+        `Consultez les options d'adhésion ou contactez un administrateur si un accès vient de vous être accordé.`
       );
     }
 
